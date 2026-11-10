@@ -32,19 +32,23 @@ function isAutomated(mail: ParsedMail): boolean {
 const autoReplyLog = new Map<string, number>()
 
 /** Parse one raw RFC 822 message and file it under the right conversation. Returns null when the message is skipped. */
-export async function ingestRaw(mailboxId: number, source: Buffer | string): Promise<IngestResult | null> {
+export async function ingestRaw(mailboxId: number, source: Buffer | string, opts: { historical?: boolean } = {}): Promise<IngestResult | null> {
   const mailbox = get<MailboxRow>('SELECT * FROM mailboxes WHERE id = ?', mailboxId)
   if (!mailbox) return null
   // Keep cid: links so inline images are stored as files, not as data URIs inside the message.
   const mail = await simpleParser(source, { skipImageLinks: true })
-  const sender = mail.from?.value[0]
+  // Contact forms send from their own address and put the person in Reply-To, so prefer that.
+  const fromHeader = mail.from?.value[0]
+  const replyTo = mail.replyTo?.value[0]
+  const useReplyTo = !!replyTo?.address && isEmail(replyTo.address) && normEmail(replyTo.address) !== mailbox.email.toLowerCase()
+  const sender = useReplyTo ? { address: replyTo!.address, name: replyTo!.name || fromHeader?.name || '' } : fromHeader
   if (!sender?.address || !isEmail(sender.address)) return null
   const from = normEmail(sender.address)
   if (from === mailbox.email.toLowerCase()) return null // our own outgoing mail
   if (mail.headers.has('x-ansa-notification')) return null
 
   const messageId = mail.messageId || null
-  if (messageId && get('SELECT 1 FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.message_id = ? AND c.mailbox_id = ?', messageId, mailboxId)) {
+  if (messageId && get('SELECT 1 FROM threads WHERE message_id = ?', messageId)) {
     return null // already imported
   }
 
@@ -52,11 +56,8 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string): Pro
   const candidates = [mail.inReplyTo, ...[...references].reverse()].filter((id): id is string => !!id)
   let conversationId: number | null = null
   for (const id of candidates) {
-    const hit = get<{ conversation_id: number }>(
-      'SELECT t.conversation_id FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.message_id = ? AND c.mailbox_id = ? LIMIT 1',
-      id,
-      mailboxId,
-    )
+    // Any mailbox: a conversation that was moved must still collect its follow-ups.
+    const hit = get<{ conversation_id: number }>('SELECT conversation_id FROM threads WHERE message_id = ? LIMIT 1', id)
     if (hit) {
       conversationId = hit.conversation_id
       break
@@ -82,8 +83,10 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string): Pro
   const customer = findOrCreateCustomer(from, sender.name)
   const to = addresses(mail.to)
   const cc = addresses(mail.cc).filter((a) => a !== mailbox.email.toLowerCase())
+  // The Date header is the sender's claim. Trust it only while importing old mail; live mail is stamped on arrival.
   const sentAt = mail.date?.getTime()
-  const createdAt = sentAt && sentAt < Date.now() - 10 * 60_000 && sentAt > Date.UTC(2000, 0, 1) ? sentAt : undefined
+  const historical = !!opts.historical && !!sentAt && sentAt < Date.now() - 10 * 60_000 && sentAt > Date.UTC(2000, 0, 1)
+  const createdAt = historical ? sentAt : undefined
   const subject = (mail.subject || '').trim()
   const email = {
     bodyFullHtml,
@@ -93,11 +96,12 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string): Pro
     messageId,
     inReplyTo: mail.inReplyTo || null,
     refs: references.join(' ') || null,
+    historical,
   }
 
   let threadId: number
+  const spam = /^yes/i.test(String(mail.headers.get('x-spam-flag') ?? ''))
   if (created) {
-    const spam = /^yes/i.test(String(mail.headers.get('x-spam-flag') ?? ''))
     const result = createConversation(
       { mailboxId, customerEmail: from, customerName: sender.name, subject, bodyHtml, kind: 'customer', cc, createdAt, status: spam ? 'spam' : 'active', source: 'email', email },
       { userId: null, via: 'email' },
@@ -120,10 +124,11 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string): Pro
       inline,
     })
     if (inline && part.cid) {
-      const ref = `cid:${part.cid}`
-      if (bodyHtml.includes(ref) || bodyFullHtml?.includes(ref)) {
-        bodyHtml = bodyHtml.split(ref).join(stored.url)
-        bodyFullHtml = bodyFullHtml ? bodyFullHtml.split(ref).join(stored.url) : null
+      // Match the whole reference so "cid:img1" does not also rewrite "cid:img10".
+      const ref = new RegExp(`cid:${part.cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=["'\\s>])`, 'g')
+      if (ref.test(bodyHtml) || (bodyFullHtml && ref.test(bodyFullHtml))) {
+        bodyHtml = bodyHtml.replace(ref, stored.url)
+        bodyFullHtml = bodyFullHtml ? bodyFullHtml.replace(ref, stored.url) : null
       } else {
         run('UPDATE attachments SET inline = 0 WHERE id = ?', stored.id)
         hasFiles = true
@@ -136,7 +141,8 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string): Pro
   }
 
   const automated = isAutomated(mail)
-  if (created && !automated && mailbox.auto_reply_enabled && mailbox.auto_reply_body.trim()) {
+  if (created && !automated && !historical && !opts.historical && !spam && mailbox.auto_reply_enabled && mailbox.auto_reply_body.trim()) {
+    for (const [address, at] of autoReplyLog) if (Date.now() - at > 10 * 60_000) autoReplyLog.delete(address)
     const last = autoReplyLog.get(from) ?? 0
     if (Date.now() - last > 10 * 60_000) {
       autoReplyLog.set(from, Date.now())

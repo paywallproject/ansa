@@ -299,6 +299,8 @@ export interface CustomerMessageInput {
   inReplyTo?: string | null
   refs?: string | null
   createdAt?: number
+  /** Imported old mail: keep its date and do not notify anyone. */
+  historical?: boolean
   via?: Actor['via']
 }
 
@@ -326,6 +328,9 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
       input.via ?? 'email',
       at,
     )
+    // A teammate who left must not keep conversations that come back to life.
+    const assigneeGone = conv.assignee_id && !get('SELECT 1 FROM users WHERE id = ? AND disabled = 0', conv.assignee_id)
+    if (assigneeGone) run('UPDATE conversations SET assignee_id = NULL WHERE id = ?', conversationId)
     run(
       `UPDATE conversations SET status = CASE WHEN status = 'spam' THEN 'spam' ELSE 'active' END, snoozed_until = NULL, closed_at = NULL, closed_by = NULL,
          preview = ?, thread_count = thread_count + 1, last_customer_at = ?, waiting_since = COALESCE(waiting_since, ?), updated_at = ? WHERE id = ?`,
@@ -340,7 +345,7 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
   })
   const conv = get<any>('SELECT mailbox_id, thread_count, assignee_id FROM conversations WHERE id = ?', conversationId)
   touch(conversationId, conv.mailbox_id, conv.thread_count <= 1 ? 'created' : 'customer_reply', { userId: null, via: 'email' })
-  if (conv.thread_count > 1 && conv.assignee_id && !input.createdAt) notifyCustomerReply(conversationId)
+  if (conv.thread_count > 1 && conv.assignee_id && !input.historical) notifyCustomerReply(conversationId)
   return threadId
 }
 
@@ -484,12 +489,14 @@ export interface CreateInput {
   source?: string
   createdAt?: number
   skipDelivery?: boolean
-  email?: Pick<CustomerMessageInput, 'bodyFullHtml' | 'bodyText' | 'from' | 'to' | 'messageId' | 'inReplyTo' | 'refs'>
+  email?: Pick<CustomerMessageInput, 'bodyFullHtml' | 'bodyText' | 'from' | 'to' | 'messageId' | 'inReplyTo' | 'refs' | 'historical'>
 }
 
 export function createConversation(input: CreateInput, actor: Actor): { id: number; threadId: number } {
   const mailbox = get<{ id: number }>('SELECT id FROM mailboxes WHERE id = ?', input.mailboxId)
   if (!mailbox) throw new AppError('Mailbox not found.', 404)
+  if (input.status !== undefined && !STATUSES.includes(input.status)) throw new AppError(`Status must be one of: ${STATUSES.join(', ')}.`)
+  if (input.assigneeId != null && !get('SELECT 1 FROM users WHERE id = ? AND disabled = 0', input.assigneeId)) throw new AppError('That teammate does not exist.', 404)
   const at = input.createdAt ?? now()
   return tx(() => {
     const customer = findOrCreateCustomer(input.customerEmail, input.customerName)
@@ -653,7 +660,7 @@ export function mergeConversations(sourceId: number, targetId: number, actor: Ac
     run(
       `UPDATE conversations SET thread_count = (SELECT COUNT(*) FROM threads WHERE conversation_id = ?1 AND type != 'event'),
          has_attachments = MAX(has_attachments, ?2), updated_at = MAX(updated_at, ?3),
-         last_customer_at = MAX(COALESCE(last_customer_at, 0), ?4), waiting_since = COALESCE(waiting_since, ?5),
+         last_customer_at = NULLIF(MAX(COALESCE(last_customer_at, 0), ?4), 0), waiting_since = COALESCE(waiting_since, ?5),
          status = CASE WHEN ?6 = 'active' THEN 'active' ELSE status END
        WHERE id = ?1`,
       targetId,

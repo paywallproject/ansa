@@ -8,7 +8,8 @@ export class AppError extends Error {
   }
 }
 
-export const isEmail = (value: unknown): value is string => typeof value === 'string' && /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(value.trim())
+/** Length is checked first: the pattern is slow on very long strings and no real address exceeds 254. */
+export const isEmail = (value: unknown): value is string => typeof value === 'string' && value.length <= 254 && /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(value.trim())
 export const normEmail = (value: string) => value.trim().toLowerCase()
 
 export interface Customer {
@@ -90,8 +91,10 @@ export function listCustomers(opts: { q?: string; limit?: number; offset?: numbe
   const rows = all(
     `SELECT c.*, (SELECT COUNT(*) FROM conversations v WHERE v.customer_id = c.id) AS conversation_count,
             (SELECT MAX(last_customer_at) FROM conversations v WHERE v.customer_id = c.id) AS last_seen_at
-     FROM customers c ${where} ORDER BY COALESCE(last_seen_at, c.created_at) DESC LIMIT ${limit} OFFSET ${offset}`,
-    ...params,
+     FROM customers c ${where} ORDER BY COALESCE(last_seen_at, c.created_at) DESC LIMIT ?2 OFFSET ?3`,
+    ...(q ? params : [null]),
+    limit,
+    offset,
   )
   const total = get<{ n: number }>(`SELECT COUNT(*) AS n FROM customers c ${where}`, ...params)?.n ?? 0
   return { items: rows.map(serializeCustomer), total }

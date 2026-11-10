@@ -168,3 +168,43 @@ test('inline images are served from our own URLs and other files become attachme
   assert.match(thread.bodyHtml, /<img src="\/api\/attachments\/\d+\/shot\.png"/)
   assert.equal(thread.attachments[0].inline, true)
 })
+
+test('hostile HTML cannot stall quote stripping', () => {
+  const started = Date.now()
+  assert.equal(html.stripQuotedHtml('<div '.repeat(200_000)), null)
+  assert.equal(html.stripQuotedHtml(`<p>Hi</p>${'<div class="x" '.repeat(100_000)}<div class="gmail_quote">old</div>`)?.includes('old'), false)
+  assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`)
+})
+
+test('Reply-To names the customer when a form sends from its own address', async () => {
+  const result = await ingestRaw(mailboxId, eml({ From: 'Website <support@acme.test>', 'Reply-To': 'Lee Wong <lee@customer.test>', Subject: 'Contact form', 'Message-ID': '<form1@acme.test>' }, 'Please call me.'))
+  assert.ok(result?.created)
+  const conv = conversations.getConversation(result.conversationId)
+  assert.equal(conv.customer.email, 'lee@customer.test')
+  assert.equal(conv.customer.name, 'Lee Wong')
+})
+
+test('a follow-up still threads after the conversation moved to another mailbox', async () => {
+  const other = run(`INSERT INTO mailboxes (name, email, created_at) VALUES ('Billing', 'billing@acme.test', 1)`).id
+  const first = await ingestRaw(mailboxId, eml({ From: 'Ana <ana@customer.test>', Subject: 'Invoice', 'Message-ID': '<a1@customer.test>' }, 'Where is my invoice?'))
+  conversations.updateConversation(first!.conversationId, { mailboxId: other }, { userId: agentId, via: 'web' })
+  const second = await ingestRaw(mailboxId, eml({ From: 'Ana <ana@customer.test>', Subject: 'Re: Invoice', 'Message-ID': '<a2@customer.test>', 'In-Reply-To': '<a1@customer.test>' }, 'Any news?'))
+  assert.equal(second?.conversationId, first!.conversationId)
+  assert.equal(conversations.getSummary(first!.conversationId).mailboxId, other)
+})
+
+test('a spoofed Date header does not backdate live mail, and bad input is rejected', async () => {
+  const result = await ingestRaw(mailboxId, eml({ From: 'Old <old@customer.test>', Subject: 'Dated', 'Message-ID': '<d1@customer.test>', Date: 'Mon, 1 Jan 2001 10:00:00 +0000' }, 'hello'))
+  assert.ok(Date.now() - conversations.getSummary(result!.conversationId).createdAt < 5000)
+  assert.throws(() => conversations.createConversation({ mailboxId, customerEmail: 'x@customer.test', subject: 's', bodyHtml: '<p>b</p>', kind: 'note', status: 'archived' as never }, { userId: agentId, via: 'api' }), /Status must be/)
+  assert.throws(() => conversations.createConversation({ mailboxId, customerEmail: 'x@customer.test', subject: 's', bodyHtml: '<p>b</p>', kind: 'note', assigneeId: 9999 }, { userId: agentId, via: 'api' }), /teammate/)
+})
+
+test('a customer reply releases a conversation from a deactivated teammate', async () => {
+  const gone = run(`INSERT INTO users (name, email, password_hash, role, disabled, created_at) VALUES ('Gone', 'gone@acme.test', 'x', 'agent', 0, 1)`).id
+  const created = conversations.createConversation({ mailboxId, customerEmail: 'zed@customer.test', subject: 'Old ticket', bodyHtml: '<p>Help</p>', kind: 'customer', assigneeId: gone }, { userId: null, via: 'email' })
+  run('UPDATE users SET disabled = 1 WHERE id = ?', gone)
+  const customerId = conversations.getSummary(created.id).customer.id
+  conversations.addCustomerMessage(created.id, { customerId, bodyHtml: '<p>Still broken</p>' })
+  assert.equal(conversations.getSummary(created.id).assignee, null)
+})

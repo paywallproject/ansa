@@ -65,10 +65,19 @@ const body = async (c: { req: { json: () => Promise<unknown> } }): Promise<Recor
     return {}
   }
 }
+/** Limit the length before and after cleaning: cutting cleaned HTML could split a tag. */
+const cleanSignature = (html: string) => {
+  const clean = cleanHtml(html.slice(0, 20_000))
+  if (clean.length > 10_000) throw new AppError('That signature is too long. Remove pasted images or shorten it.')
+  return clean
+}
 const checkPassword = (password: unknown) => {
   if (typeof password !== 'string' || password.length < 8) throw new AppError('Use a password with at least 8 characters.')
   return password
 }
+
+// JSON bodies are small. Attachments have their own, larger limit.
+api.use('*', async (c, next) => (c.req.path.endsWith('/attachments') ? next() : bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (ctx) => ctx.json({ error: 'That request is too large.' }, 413) })(c, next)))
 
 api.onError((err, c) => {
   if (err instanceof AppError) return c.json({ error: err.message }, err.status as 400)
@@ -142,16 +151,23 @@ api.patch('/me', async (c) => {
     if (get('SELECT 1 FROM users WHERE email = ? AND id != ?', email, user.id)) throw new AppError('Another teammate already uses that email.', 409)
     run('UPDATE users SET email = ? WHERE id = ?', normEmail(email), user.id)
   }
-  if (typeof data.signature === 'string') run('UPDATE users SET signature = ? WHERE id = ?', cleanHtml(data.signature).slice(0, 5000), user.id)
+  if (typeof data.signature === 'string') run('UPDATE users SET signature = ? WHERE id = ?', cleanSignature(data.signature), user.id)
   if (typeof data.notifyAssigned === 'boolean') run('UPDATE users SET notify_assigned = ? WHERE id = ?', data.notifyAssigned, user.id)
   if (typeof data.notifyReplies === 'boolean') run('UPDATE users SET notify_replies = ? WHERE id = ?', data.notifyReplies, user.id)
   if (data.newPassword !== undefined) {
     const row = get<any>('SELECT password_hash FROM users WHERE id = ?', user.id)
     if (typeof data.currentPassword !== 'string' || !verifyPassword(data.currentPassword, row.password_hash)) throw new AppError('Your current password is not correct.')
     run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(checkPassword(data.newPassword)), user.id)
+    signOutEverywhere(user.id, c)
   }
   return c.json({ user: serializeUser(get('SELECT * FROM users WHERE id = ?', user.id)) })
 })
+
+/** After a password change, every other browser is signed out. The current one gets a fresh session. */
+function signOutEverywhere(userId: number, c: Parameters<typeof startSession>[0]) {
+  run('DELETE FROM sessions WHERE user_id = ?', userId)
+  if (c.get('via') === 'web') startSession(c, userId)
+}
 
 api.get('/users', (c) => c.json({ users: all('SELECT * FROM users ORDER BY disabled, name').map(serializeUser) }))
 
@@ -190,13 +206,19 @@ api.patch('/users/:id', requireAdmin, async (c) => {
     run('UPDATE users SET email = ? WHERE id = ?', normEmail(data.email), id)
   }
   if (data.role === 'admin' || data.role === 'agent') run('UPDATE users SET role = ? WHERE id = ?', data.role, id)
-  if (data.password) run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(checkPassword(data.password)), id)
+  if (data.password) {
+    run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(checkPassword(data.password)), id)
+    // An admin reset is used when an account may be compromised: cut every session and token.
+    run('DELETE FROM sessions WHERE user_id = ?', id)
+    run('DELETE FROM api_tokens WHERE user_id = ?', id)
+    if (id === c.get('user').id) startSession(c, id)
+  }
   if (typeof data.disabled === 'boolean') {
     run('UPDATE users SET disabled = ? WHERE id = ?', data.disabled, id)
     if (data.disabled) {
       run('DELETE FROM sessions WHERE user_id = ?', id)
       run('DELETE FROM api_tokens WHERE user_id = ?', id)
-      run(`UPDATE conversations SET assignee_id = NULL WHERE assignee_id = ? AND status IN ('active', 'pending')`, id)
+      run('UPDATE conversations SET assignee_id = NULL WHERE assignee_id = ?', id)
     }
   }
   return c.json({ user: serializeUser(get('SELECT * FROM users WHERE id = ?', id)) })
@@ -254,7 +276,7 @@ function applyMailboxFields(id: number, data: Record<string, any>) {
   }
   if (data.fromName !== undefined) set('from_name', str(data.fromName, 100))
   if (typeof data.color === 'string' && /^#[0-9a-f]{6}$/i.test(data.color)) set('color', data.color)
-  if (typeof data.signature === 'string') set('signature', cleanHtml(data.signature).slice(0, 5000))
+  if (typeof data.signature === 'string') set('signature', cleanSignature(data.signature))
   if (data.smtpHost !== undefined) set('smtp_host', str(data.smtpHost, 200))
   if (data.smtpPort !== undefined && int(data.smtpPort) > 0) set('smtp_port', int(data.smtpPort))
   if (SECURITY.includes(data.smtpSecurity)) set('smtp_security', data.smtpSecurity)

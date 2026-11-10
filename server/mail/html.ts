@@ -30,31 +30,42 @@ export function cleanHtml(html: string): string {
   }).trim()
 }
 
-const QUOTE_MARKERS: RegExp[] = [
-  /<div[^>]+class\s*=\s*"[^"]*\bgmail_quote\b/i,
-  /<blockquote[^>]+class\s*=\s*"[^"]*\bgmail_quote\b/i,
-  /<blockquote[^>]+type\s*=\s*"?cite/i,
-  /<div[^>]+id\s*=\s*"?(divRplyFwdMsg|appendonsend|mail-editor-reference-message-container)/i,
-  /<div[^>]+class\s*=\s*"[^"]*\b(yahoo_quoted|moz-cite-prefix|protonmail_quote|zmail_extra)\b/i,
-  /<hr[^>]+id\s*=\s*"?stopSpelling/i,
-  /<div[^>]*style\s*=\s*"[^"]*border-top:\s*solid\s+#[a-f0-9]{6}\s+1\.0pt/i,
-  /<(div|p|span)[^>]*>\s*-{2,}\s*Original Message\s*-{2,}/i,
-]
+const TRAILING_ATTRIBUTION = /(<(div|p|span|br)[^<>]{0,300}>\s*)*(On\s[^<]{5,200}\swrote:|Le\s[^<]{5,200}\sa écrit\s?:|Am\s[^<]{5,200}\sschrieb[^<]{0,80}:)\s*(<\/?(div|p|span|br)[^<>]{0,300}>\s*)*$/i
+// One pass over opening tags. The attribute part cannot contain "<" and is length-capped, so
+// hostile input cannot make this backtrack (mail HTML is untrusted and parsed on the main thread).
+const OPEN_TAG = /<(div|blockquote|hr|p|span)\b([^<>]{0,2000})>/gi
+const MAX_STRIP_BYTES = 2_000_000
 
-const TRAILING_ATTRIBUTION = /(<(div|p|span|br)[^>]*>\s*)*(On\s[^<]{5,200}\swrote:|Le\s[^<]{5,200}\sa écrit\s?:|Am\s[^<]{5,200}\sschrieb[^<]{0,80}:)\s*(<\/?(div|p|span|br)[^>]*>\s*)*$/i
+function isQuoteStart(tag: string, attrs: string, after: string): boolean {
+  const cls = /\bclass\s*=\s*"([^"]*)"/i.exec(attrs)?.[1] ?? ''
+  const id = /\bid\s*=\s*"?([\w-]+)/i.exec(attrs)?.[1] ?? ''
+  if ((tag === 'div' || tag === 'blockquote') && /\bgmail_quote\b/.test(cls)) return true
+  if (tag === 'blockquote' && /\btype\s*=\s*"?cite/i.test(attrs)) return true
+  if (tag === 'div' && /^(divRplyFwdMsg|appendonsend|mail-editor-reference-message-container)$/.test(id)) return true
+  if (tag === 'div' && /\b(yahoo_quoted|moz-cite-prefix|protonmail_quote|zmail_extra)\b/.test(cls)) return true
+  if (tag === 'hr' && id === 'stopSpelling') return true
+  if (tag === 'div' && /border-top:\s*solid\s+#[a-f0-9]{6}\s+1\.0pt/i.test(attrs)) return true
+  return tag !== 'blockquote' && tag !== 'hr' && /^\s*-{2,}\s*Original Message\s*-{2,}/i.test(after)
+}
 
 /**
  * Remove the quoted history a mail client appends to a reply.
  * Returns the trimmed HTML, or null when nothing was removed or nothing useful would remain.
  */
 export function stripQuotedHtml(rawHtml: string): string | null {
+  if (rawHtml.length > MAX_STRIP_BYTES) return null
   let cut = -1
-  for (const marker of QUOTE_MARKERS) {
-    const match = marker.exec(rawHtml)
-    if (match && (cut === -1 || match.index < cut)) cut = match.index
+  OPEN_TAG.lastIndex = 0
+  for (let match = OPEN_TAG.exec(rawHtml); match; match = OPEN_TAG.exec(rawHtml)) {
+    if (isQuoteStart(match[1].toLowerCase(), match[2], rawHtml.slice(OPEN_TAG.lastIndex, OPEN_TAG.lastIndex + 60))) {
+      cut = match.index
+      break
+    }
   }
   if (cut <= 0) return null
-  const head = rawHtml.slice(0, cut).replace(TRAILING_ATTRIBUTION, '')
+  // The "On … wrote:" line sits right before the quote. Only look at the tail so this stays cheap.
+  const tailStart = Math.max(0, cut - 1500)
+  const head = rawHtml.slice(0, tailStart) + rawHtml.slice(tailStart, cut).replace(TRAILING_ATTRIBUTION, '')
   const cleaned = cleanHtml(head)
   return htmlToText(cleaned).trim().length > 0 ? cleaned : null
 }

@@ -9,8 +9,13 @@ import { userFromBearer } from './auth.ts'
 import { handleMcp } from './mcp.ts'
 import { startAllMailboxes, stopAllMailboxes } from './mail/imap.ts'
 import { wakeSnoozed } from './services/conversations.ts'
+import { bodyLimit } from 'hono/body-limit'
+import { run } from './db.ts'
 
 migrate()
+// Replies that were mid-send when the process stopped were never delivered. Flag them so an agent can re-send.
+const interrupted = run(`UPDATE threads SET state = 'failed', error = 'Ansa restarted before this reply was sent. Send it again.' WHERE state = 'sending'`).changes
+if (interrupted) console.log(`[mail] ${interrupted} unsent repl${interrupted === 1 ? 'y was' : 'ies were'} flagged for re-sending`)
 
 const app = new Hono()
 
@@ -30,7 +35,7 @@ app.use('*', async (c, next) => {
 app.get('/healthz', (c) => c.json({ ok: true }))
 
 // Model Context Protocol endpoint. Authenticate with an API token from Settings → API & MCP.
-app.all('/mcp', async (c) => {
+app.all('/mcp', bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
   const user = userFromBearer(c.req.header('authorization'))
   if (!user) {
     return c.json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized. Send "Authorization: Bearer <Ansa API token>".' }, id: null }, 401, {
@@ -103,3 +108,4 @@ const shutdown = () => {
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 process.on('unhandledRejection', (err) => console.error('[unhandled]', err))
+process.on('uncaughtException', (err) => console.error('[uncaught]', err))

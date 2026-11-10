@@ -52,6 +52,7 @@ class MailboxWorker {
   private timer: NodeJS.Timeout | null = null
   private retry: NodeJS.Timeout | null = null
   private failures = 0
+  private badUids = new Map<number, number>()
   constructor(readonly mailboxId: number) {}
 
   private mailbox() {
@@ -86,6 +87,7 @@ class MailboxWorker {
       await client.mailboxOpen(mailbox.imap_folder || 'INBOX')
       this.failures = 0
       await this.sync()
+      if (this.stopped || this.client !== client) return // dropped during the first sync; a reconnect is already scheduled
       this.timer = setInterval(() => void this.sync(), config.imapPollSeconds * 1000)
     } catch (err) {
       this.reconnect(explainMailError(err))
@@ -139,13 +141,20 @@ class MailboxWorker {
         if (!box) return
         const validity = String(box.uidValidity)
         let lastUid = mailbox.imap_last_uid
+        let historicalUpTo = 0
         if (lastUid === null || mailbox.imap_uidvalidity !== validity) {
-          // First connection (or the server renumbered the folder): decide where to start.
-          lastUid = Math.max(0, Number(box.uidNext) - 1)
-          if (mailbox.import_existing && mailbox.imap_uidvalidity === null) {
-            const since = new Date(Date.now() - IMPORT_DAYS * 86_400_000)
+          // First connection, or the server renumbered the folder: decide where to start.
+          const top = Math.max(0, Number(box.uidNext) - 1)
+          lastUid = top
+          const renumbered = mailbox.imap_uidvalidity !== null
+          // After a renumber, look back to the last good sync so nothing is skipped. Message-IDs prevent duplicates.
+          const since = renumbered ? new Date((mailbox.last_sync_at ?? Date.now()) - 86_400_000) : mailbox.import_existing ? new Date(Date.now() - IMPORT_DAYS * 86_400_000) : null
+          if (since) {
             const found = await client.search({ since }, { uid: true })
-            if (found && found.length) lastUid = Math.min(...found) - 1
+            if (found && found.length) {
+              lastUid = Math.min(...found) - 1
+              historicalUpTo = top
+            }
           }
           run('UPDATE mailboxes SET imap_uidvalidity = ?, imap_last_uid = ? WHERE id = ?', validity, lastUid, this.mailboxId)
         }
@@ -157,9 +166,17 @@ class MailboxWorker {
             const message = await client.fetchOne(String(uid), { source: true }, { uid: true })
             if (message && message.source) {
               try {
-                await ingestRaw(this.mailboxId, message.source)
+                await ingestRaw(this.mailboxId, message.source, { historical: uid <= historicalUpTo })
               } catch (err) {
-                console.error(`[imap ${mailbox.email}] could not import message uid ${uid}:`, (err as Error).message)
+                // Stop here and try this message again on the next pass (a full disk recovers; a bad message is skipped after 3 tries).
+                const tries = (this.badUids.get(uid) ?? 0) + 1
+                console.error(`[imap ${mailbox.email}] could not import message uid ${uid} (try ${tries}):`, (err as Error).message)
+                if (tries < 3) {
+                  this.badUids.set(uid, tries)
+                  this.setStatus('error', `Could not import a message: ${(err as Error).message}`)
+                  return
+                }
+                this.badUids.delete(uid)
               }
             }
             run('UPDATE mailboxes SET imap_last_uid = ? WHERE id = ?', uid, this.mailboxId)

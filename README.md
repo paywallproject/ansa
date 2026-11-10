@@ -30,7 +30,7 @@ nano .env                      # set DOMAIN and APP_URL
 docker compose --profile https up -d --build
 ```
 
-Open `https://your-domain`. The first visit asks you to create the admin account, then to connect your mailbox.
+Open `https://your-domain`. The first visit asks you to create the admin account, then to connect your mailbox. Do this right after the first start: until an admin exists, anyone who finds the address can create it.
 
 Caddy gets and renews the HTTPS certificate for you. Ports 80 and 443 must be open.
 
