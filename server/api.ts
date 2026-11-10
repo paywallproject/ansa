@@ -266,6 +266,10 @@ function applyMailboxFields(id: number, data: Record<string, any>) {
   if (SECURITY.includes(data.imapSecurity)) set('imap_security', data.imapSecurity)
   if (data.imapUser !== undefined) set('imap_user', str(data.imapUser, 200))
   if (typeof data.imapPassword === 'string' && data.imapPassword) set('imap_pass_enc', encrypt(data.imapPassword.replace(/\s+/g, '')))
+  if (data.copySmtpPassword === true) {
+    // "Use the same login as SMTP": mirror the SMTP credentials, including an already-saved password.
+    run('UPDATE mailboxes SET imap_user = smtp_user, imap_pass_enc = smtp_pass_enc WHERE id = ?', id)
+  }
   if (data.imapFolder !== undefined) set('imap_folder', str(data.imapFolder, 200) || 'INBOX')
   if (typeof data.importExisting === 'boolean') set('import_existing', data.importExisting)
   if (typeof data.autoReplyEnabled === 'boolean') set('auto_reply_enabled', data.autoReplyEnabled)
@@ -340,7 +344,7 @@ api.post('/mailboxes/test', requireAdmin, async (c) => {
         port: int(data.imapPort) || 993,
         security: SECURITY.includes(data.imapSecurity) ? data.imapSecurity : 'ssl',
         user: str(data.imapUser, 200),
-        pass: clean(data.imapPassword) || decrypt(saved?.imap_pass_enc),
+        pass: clean(data.imapPassword) || decrypt(data.copySmtpPassword === true ? saved?.smtp_pass_enc : saved?.imap_pass_enc),
         folder: str(data.imapFolder, 200) || 'INBOX',
       })
       return c.json({ ok: true, message: `Connected. The folder holds ${result.messages} message${result.messages === 1 ? '' : 's'}.` })

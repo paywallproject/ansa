@@ -1,0 +1,279 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root {
+  --canvas: #f5f5f7;
+  --surface: #ffffff;
+  --sunken: #f1f1f4;
+  --hover: #ececf0;
+  --line: #e7e7ec;
+  --line-strong: #d6d6de;
+  --fg: #18181d;
+  --fg-2: #55555f;
+  --fg-3: #71717c;
+  --accent: #5448e2;
+  --accent-hover: #4639cf;
+  --accent-soft: #eeedfd;
+  --accent-fg: #4336c9;
+  --note: #fff8e1;
+  --note-line: #f3e3a8;
+  --note-fg: #7a5a00;
+  --ok: #17803d;
+  --ok-soft: #e4f6ea;
+  --warn: #a15c00;
+  --warn-soft: #fdf1dc;
+  --danger: #c9302c;
+  --danger-soft: #fdecec;
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --shadow-pop: 0 0 0 1px rgb(20 20 30 / 0.06), 0 8px 28px -6px rgb(20 20 30 / 0.18), 0 2px 6px -2px rgb(20 20 30 / 0.08);
+  --shadow-card: 0 1px 2px rgb(20 20 30 / 0.05);
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --canvas: #0f0f12;
+  --surface: #17171b;
+  --sunken: #1e1e24;
+  --hover: #26262d;
+  --line: #27272e;
+  --line-strong: #36363f;
+  --fg: #ededf1;
+  --fg-2: #b1b1bc;
+  --fg-3: #8d8d99;
+  --accent: #7b70f5;
+  --accent-hover: #8d83f8;
+  --accent-soft: #24223f;
+  --accent-fg: #b3acff;
+  --note: #2a2413;
+  --note-line: #4a3f1c;
+  --note-fg: #e9c765;
+  --ok: #4cc27a;
+  --ok-soft: #13291c;
+  --warn: #e3a44a;
+  --warn-soft: #2e2212;
+  --danger: #f0716c;
+  --danger-soft: #331818;
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.08), 0 12px 32px -6px rgb(0 0 0 / 0.6);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-note: var(--note);
+  --color-note-line: var(--note-line);
+  --color-note-fg: var(--note-fg);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-card: var(--shadow-card);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-feature-settings: 'cv11', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button,
+  [role='button'],
+  summary {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+}
+
+/* Rendered email and note bodies, and the editor's content. */
+.prose-mail {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.prose-mail > :first-child {
+  margin-top: 0;
+}
+.prose-mail > :last-child {
+  margin-bottom: 0;
+}
+.prose-mail p,
+.prose-mail div {
+  margin: 0;
+}
+.prose-mail p + p,
+.prose-mail p + ul,
+.prose-mail p + ol,
+.prose-mail ul + p,
+.prose-mail ol + p,
+.prose-mail blockquote + p,
+.prose-mail p + blockquote,
+.prose-mail pre + p,
+.prose-mail p + pre {
+  margin-top: 0.75em;
+}
+.prose-mail a {
+  color: var(--accent-fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-mail ul,
+.prose-mail ol {
+  padding-left: 1.4em;
+  margin: 0.5em 0;
+}
+.prose-mail ul {
+  list-style: disc;
+}
+.prose-mail ol {
+  list-style: decimal;
+}
+.prose-mail li + li {
+  margin-top: 0.2em;
+}
+.prose-mail blockquote {
+  margin: 0.75em 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--fg-2);
+}
+.prose-mail h1,
+.prose-mail h2,
+.prose-mail h3,
+.prose-mail h4 {
+  font-weight: 600;
+  margin: 1em 0 0.4em;
+  font-size: 1.05em;
+}
+.prose-mail code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--sunken);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.prose-mail pre {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--sunken);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.prose-mail pre code {
+  background: none;
+  padding: 0;
+}
+.prose-mail img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.prose-mail table {
+  border-collapse: collapse;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+.prose-mail td,
+.prose-mail th {
+  padding: 4px 8px;
+  vertical-align: top;
+}
+.prose-mail hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1em 0;
+}
+
+.ProseMirror {
+  outline: none;
+  min-height: inherit;
+}
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--fg-3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.animate-pop {
+  animation: pop-in 0.12s ease-out;
+}
+.animate-fade {
+  animation: fade-in 0.15s ease-out;
+}
+.animate-toast {
+  animation: toast-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop,
+  .animate-fade,
+  .animate-toast {
+    animation: none;
+  }
+}
