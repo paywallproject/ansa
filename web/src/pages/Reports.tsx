@@ -186,10 +186,12 @@ function Stat({ label, value, previous, hint, format, lowerIsBetter }: { label: 
 // Charts
 // ---------------------------------------------------------------------------------------------
 
+/** Top of the y-axis: four equal whole-number steps that cover the data. */
 const niceMax = (max: number) => {
-  if (max <= 4) return 4
-  const pow = 10 ** Math.floor(Math.log10(max))
-  return [1, 2, 4, 5, 10].map((m) => m * pow).find((v) => v >= max) ?? max
+  const raw = Math.max(1, max) / 4
+  const pow = 10 ** Math.floor(Math.log10(raw))
+  const step = [1, 2, 5, 10].map((m) => m * pow).find((v) => v >= raw) ?? raw
+  return Math.max(1, Math.ceil(step)) * 4
 }
 
 function useWidth<T extends HTMLElement>() {

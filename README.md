@@ -4,6 +4,8 @@ A self-hosted shared inbox and help desk for small teams. Connect a support addr
 
 One container. One SQLite file. No external services.
 
+![The Ansa inbox: folders, conversation list, a thread with an internal note, and the customer profile](docs/inbox.png)
+
 ## What you get
 
 - **Shared mailboxes.** Each mailbox is an email address your team answers together. Folders: Unassigned, Mine, Assigned, Snoozed, Closed, Spam.
