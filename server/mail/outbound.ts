@@ -170,9 +170,11 @@ export async function deliverThread(threadId: number): Promise<void> {
     let html = thread.body_html as string
     if (signature) html += `<br><div style="color: #57606a;">${signature}</div>`
     if (previous) {
+      // Inline images point at this server and need a login, so they cannot travel in the quote.
+      const quoted = String(previous.body_html).replace(/<img[^>]+src="\/api\/[^>]*>/g, '')
       const when = new Date(previous.created_at).toUTCString().replace(/:\d\d GMT$/, ' UTC')
       const who = escapeHtml(previous.customer_name ? `${previous.customer_name} <${previous.customer_email}>` : previous.from_addr || '')
-      html += `<br><div class="gmail_quote"><div style="color: #57606a;">On ${when}, ${who} wrote:</div><blockquote class="gmail_quote" style="margin: 8px 0 0; padding-left: 12px; border-left: 2px solid #d0d7de; color: #57606a;">${previous.body_html}</blockquote></div>`
+      html += `<br><div class="gmail_quote"><div style="color: #57606a;">On ${when}, ${who} wrote:</div><blockquote class="gmail_quote" style="margin: 8px 0 0; padding-left: 12px; border-left: 2px solid #d0d7de; color: #57606a;">${quoted}</blockquote></div>`
     }
 
     const attachments = all<any>('SELECT * FROM attachments WHERE thread_id = ?', threadId).map((a) => ({

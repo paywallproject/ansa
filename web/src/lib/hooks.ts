@@ -38,6 +38,7 @@ export function useLiveEvents() {
       }, 150)
     }
     const connect = () => {
+      if (closed || source || document.visibilityState === 'hidden') return
       source = new EventSource('/api/events')
       source.onmessage = (message) => {
         let event: any
@@ -59,13 +60,33 @@ export function useLiveEvents() {
         }
       }
       source.onerror = () => {
-        source?.close()
+        disconnect()
         if (!closed) retry = setTimeout(connect, 4000)
       }
     }
+    const disconnect = () => {
+      source?.close()
+      source = null
+      clearTimeout(retry)
+    }
+    // A hidden tab gives its connection back. Browsers allow only six per site over plain HTTP,
+    // so many open tabs would otherwise starve each other. Reconnecting refreshes everything.
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') disconnect()
+      else {
+        connect()
+        void client.invalidateQueries({ queryKey: ['conversation'] })
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', disconnect)
+    window.addEventListener('pageshow', connect)
     connect()
     return () => {
       closed = true
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', disconnect)
+      window.removeEventListener('pageshow', connect)
       source?.close()
       clearTimeout(retry)
       clearTimeout(pending)

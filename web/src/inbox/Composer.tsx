@@ -87,7 +87,10 @@ export const Composer = forwardRef<
   useImperativeHandle(ref, () => ({
     focus: (next) => {
       setMode(next)
-      requestAnimationFrame(() => editor?.commands.focus('end'))
+      // Focus now, not on the next frame: keys typed right after the shortcut must land in the editor.
+      // (TipTap's own focus command waits for an animation frame, so focus the DOM node first.)
+      editor?.view.dom.focus()
+      editor?.commands.focus('end')
     },
   }))
 
@@ -224,7 +227,8 @@ export const Composer = forwardRef<
           ) : (
             <div className="flex">
               <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="rounded-r-none" icon={<Send className="size-3.5" aria-hidden />}>
-                {SEND_LABEL[sendStatus]}
+                <span className="sm:hidden">Send</span>
+                <span className="hidden sm:inline">{SEND_LABEL[sendStatus]}</span>
               </Button>
               <Popover
                 align="end"

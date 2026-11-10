@@ -97,7 +97,7 @@ export function EditorToolbar({ editor, children }: { editor: Editor | null; chi
       ))}
       <LinkButton editor={editor} />
       {tools.slice(2).map((t) => (
-        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run}>
+        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className="hidden sm:inline-flex">
           {t.icon}
         </IconButton>
       ))}

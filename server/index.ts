@@ -62,7 +62,13 @@ const MIME: Record<string, string> = {
 }
 
 app.get('*', (c) => {
-  const requested = path.normalize(decodeURIComponent(c.req.path)).replace(/^(\.\.[/\\])+/, '')
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(c.req.path)
+  } catch {
+    return c.text('Bad request', 400)
+  }
+  const requested = path.normalize(decoded).replace(/^(\.\.[/\\])+/, '')
   let file = path.join(webRoot, requested)
   if (!file.startsWith(webRoot)) return c.text('Not found', 404)
   const isAsset = fs.existsSync(file) && fs.statSync(file).isFile()
