@@ -35,7 +35,8 @@ const autoReplyLog = new Map<string, number>()
 export async function ingestRaw(mailboxId: number, source: Buffer | string): Promise<IngestResult | null> {
   const mailbox = get<MailboxRow>('SELECT * FROM mailboxes WHERE id = ?', mailboxId)
   if (!mailbox) return null
-  const mail = await simpleParser(source)
+  // Keep cid: links so inline images are stored as files, not as data URIs inside the message.
+  const mail = await simpleParser(source, { skipImageLinks: true })
   const sender = mail.from?.value[0]
   if (!sender?.address || !isEmail(sender.address)) return null
   const from = normEmail(sender.address)

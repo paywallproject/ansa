@@ -149,7 +149,8 @@ class MailboxWorker {
           }
           run('UPDATE mailboxes SET imap_uidvalidity = ?, imap_last_uid = ? WHERE id = ?', validity, lastUid, this.mailboxId)
         }
-        if (Number(box.uidNext) - 1 > lastUid) {
+        {
+          // Always ask the server: the cached uidNext is not refreshed when new mail arrives.
           const uids = ((await client.search({ uid: `${lastUid + 1}:*` }, { uid: true })) || []).filter((uid) => uid > lastUid!).sort((a, b) => a - b)
           for (const uid of uids) {
             if (this.stopped) break

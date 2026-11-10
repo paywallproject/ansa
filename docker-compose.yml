@@ -1,0 +1,42 @@
+# Ansa: self-hosted shared inbox.
+#
+#   Try it:          docker compose up -d                  -> http://localhost:3000
+#   Run with HTTPS:  set DOMAIN and APP_URL in .env, then
+#                    docker compose --profile https up -d   -> https://your-domain
+services:
+  ansa:
+    build: .
+    image: ansa:latest
+    restart: unless-stopped
+    environment:
+      # The public address of this install. Used for links in emails and for secure cookies.
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      IMAP_POLL_SECONDS: ${IMAP_POLL_SECONDS:-60}
+      MAX_ATTACHMENT_MB: ${MAX_ATTACHMENT_MB:-25}
+    volumes:
+      - ansa-data:/data
+    ports:
+      # Only this machine can reach the port by default. Caddy (below) serves the public side.
+      - "${BIND:-127.0.0.1}:${PORT:-3000}:3000"
+
+  # Automatic HTTPS with Let's Encrypt. Needs ports 80 and 443 and a DNS record for DOMAIN.
+  caddy:
+    profiles: ["https"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [ansa]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  ansa-data:
+  caddy-data:
+  caddy-config:
