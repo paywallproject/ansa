@@ -16,6 +16,7 @@ export interface Workspace {
 const DEFAULT_NAME = 'Ansa'
 let current: Workspace = { brandName: '', logoUrl: null, mentions: false, fourStatuses: false }
 let defaultIcon: string | null = null
+let defaultTouchIcon: string | null = null
 
 /** Call with fresh settings before rendering. Safe to call again with the same values. */
 export function applyWorkspace(next: Workspace) {
@@ -35,6 +36,14 @@ export function applyWorkspace(next: Workspace) {
       else icon.setAttribute('type', 'image/svg+xml')
     }
   }
+  // So does the home screen icon and name. A phone reads these when someone adds the app.
+  const touch = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')
+  if (touch) {
+    defaultTouchIcon ??= touch.getAttribute('href')
+    const href = next.logoUrl ?? defaultTouchIcon
+    if (href && touch.getAttribute('href') !== href) touch.setAttribute('href', href)
+  }
+  document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', next.brandName || DEFAULT_NAME)
 }
 
 export const workspace = () => current

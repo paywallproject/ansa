@@ -108,6 +108,23 @@ api.get('/brand/logo', (c) => {
   })
 })
 
+// The web app manifest: what a phone needs to add the app to its home screen. Public, like the logo.
+// It is built here, not a static file, so it carries the workspace's own name and logo.
+api.get('/brand/manifest', (c) => {
+  const w = publicWorkspace()
+  const logo = getWorkspace().logo
+  const name = brandName()
+  const icons = [
+    // An uploaded logo comes first. Phones scale it to the size they need.
+    ...(w.logoUrl && logo ? [{ src: w.logoUrl, sizes: '512x512', type: logo.mime, purpose: 'any' }] : []),
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    ...(w.logoUrl ? [] : [{ src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]),
+  ]
+  const manifest = { name, short_name: name, description: 'Shared inbox', id: '/', start_url: '/', scope: '/', display: 'standalone', background_color: '#ffffff', theme_color: '#221f5c', icons }
+  return new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' } })
+})
+
 api.post('/setup', async (c) => {
   if (hasUsers()) throw new AppError('Setup is already complete.', 409)
   const data = await body(c)

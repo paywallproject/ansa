@@ -186,7 +186,7 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
         <CustomerPanel conversation={conversation} />
       </aside>
       {panel && (
-        <div className="animate-fade fixed inset-0 z-30 flex justify-end bg-black/40 xl:hidden" onClick={() => setPanel(false)}>
+        <div className="safe-pad animate-fade fixed inset-0 z-30 flex justify-end bg-black/40 xl:hidden" onClick={() => setPanel(false)}>
           <aside className="h-full w-80 max-w-[88vw] overflow-y-auto bg-canvas shadow-pop" onClick={(e) => e.stopPropagation()} aria-label="Customer">
             <CustomerPanel conversation={conversation} />
           </aside>

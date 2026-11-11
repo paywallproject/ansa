@@ -74,7 +74,7 @@ function Lightbox({ items, index, onIndex, onClose }: { items: LightboxImage[]; 
   const arrow = 'absolute top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white transition-colors hover:bg-black/70 focus-visible:outline-white'
 
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Image: ${image.filename}`} className="animate-fade fixed inset-0 z-[70] flex flex-col bg-black/90" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label={`Image: ${image.filename}`} className="safe-pad animate-fade fixed inset-0 z-[70] flex flex-col bg-black/90" onClick={onClose}>
       <div className="flex h-14 shrink-0 items-center gap-1 pr-2 pl-4 text-white" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{image.filename}</p>

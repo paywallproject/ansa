@@ -314,7 +314,7 @@ export function Shell() {
             </aside>
           )}
           {current && drawer && (
-            <div className="animate-fade fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
+            <div className="safe-pad animate-fade fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
               <aside className="h-full w-[212px] border-r border-line shadow-pop" onClick={(e) => e.stopPropagation()}>
                 <FolderSidebar mailbox={current} onNavigate={() => setDrawer(false)} />
               </aside>
