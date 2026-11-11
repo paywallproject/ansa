@@ -757,9 +757,10 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
           'relative rounded-xl py-4',
-          // Customer messages: outlined card, avatar on the left. Ours: filled card, avatar on the right.
-          isCustomer ? 'border border-line bg-surface pr-4 pl-9' : 'pr-9 pl-4',
-          isNote ? 'border border-note-line bg-note' : !isCustomer && 'bg-sunken',
+          // Customer messages and replies share one white outlined card. The avatar side tells them apart:
+          // left for the customer, right for us. Notes are yellow.
+          isCustomer ? 'pr-4 pl-9' : 'pr-9 pl-4',
+          isNote ? 'border border-note-line bg-note' : 'border border-line bg-surface',
           thread.state === 'failed' && 'ring-1 ring-danger/50',
         )}
       >
@@ -805,7 +806,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 type="button"
                 onClick={() => setShowQuoted((open) => !open)}
                 aria-expanded={showQuoted}
-                className={cx('mt-2 inline-flex h-5 items-center rounded-md px-1.5 text-xs font-medium text-fg-3 hover:text-fg', isCustomer ? 'bg-sunken hover:bg-hover' : 'bg-black/5 hover:bg-black/10 dark:bg-white/10')}
+                className={cx('mt-2 inline-flex h-5 items-center rounded-md px-1.5 text-xs font-medium text-fg-3 hover:text-fg', isNote ? 'bg-black/5 hover:bg-black/10 dark:bg-white/10' : 'bg-sunken hover:bg-hover')}
               >
                 {quoted.isFetching ? 'Loading…' : showQuoted ? 'Hide quoted text' : 'Show quoted text'}
               </button>
