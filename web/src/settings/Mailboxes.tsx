@@ -97,14 +97,14 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
   const client = useQueryClient()
   const { toast } = useFeedback()
   const [form, setForm] = useState<FormState>(() => initial(mailbox))
-  const [preset, setPreset] = useState<string | null>(() => PRESETS.find((p) => p.smtpHost === mailbox?.smtpHost)?.id ?? null)
   const [error, setError] = useState<string | null>(null)
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }))
   const text = (key: keyof FormState) => (e: { target: { value: string } }) => set(key, e.target.value as never)
 
+  // Follows the host field, so typing your own server clears the highlighted provider.
+  const preset = PRESETS.find((p) => p.smtpHost === form.smtpHost.trim().toLowerCase())?.id ?? null
   const applyPreset = (id: string) => {
     const p = PRESETS.find((x) => x.id === id)!
-    setPreset(id)
     setForm((f) => ({ ...f, smtpHost: p.smtpHost, smtpPort: p.smtpPort, smtpSecurity: p.smtpSecurity, imapHost: p.imapHost, imapPort: p.imapPort, imapSecurity: 'ssl', smtpUser: f.smtpUser || f.email, sameLogin: true }))
   }
   const payload = () => ({

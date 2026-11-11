@@ -96,13 +96,19 @@ function openTlsSocket(smtp: SmtpSettings) {
 }
 
 /** Turn low-level SMTP errors into something a person can act on. */
+/** The server's own words help tell a wrong password from a blocked address. */
+const serverSaid = (response?: string) => {
+  const line = (response || '').split(/\r?\n/)[0].trim().slice(0, 160)
+  return line ? ` It said: "${line}".` : ''
+}
+
 export function explainMailError(err: unknown): string {
-  const e = err as { code?: string; responseCode?: number; response?: string; message?: string }
+  const e = err as { code?: string; responseCode?: number; response?: string; message?: string; authenticationFailed?: boolean }
   const text = `${e.response || ''} ${e.message || ''}`
-  if (e.code === 'EAUTH' || e.responseCode === 535 || /AUTHENTICATIONFAILED|Invalid credentials/i.test(text)) {
+  if (e.code === 'EAUTH' || e.responseCode === 535 || e.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|LOGIN failed|Invalid login|authentication failed/i.test(text)) {
     return /gmail|google/i.test(text)
       ? 'Google rejected the sign-in. Use an app password (Google Account → Security → 2-Step Verification → App passwords), not your normal password.'
-      : 'The server rejected the username or password.'
+      : `The server rejected the username or password.${serverSaid(e.response)}`
   }
   if (e.code === 'ENOTFOUND' || e.code === 'EDNS') return 'Could not find that server. Check the host name.'
   if (e.code === 'ECONNREFUSED') return 'The server refused the connection. Check the port.'

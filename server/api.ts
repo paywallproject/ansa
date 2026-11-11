@@ -279,13 +279,13 @@ function applyMailboxFields(id: number, data: Record<string, any>) {
   if (data.smtpPort !== undefined && int(data.smtpPort) > 0) set('smtp_port', int(data.smtpPort))
   if (SECURITY.includes(data.smtpSecurity)) set('smtp_security', data.smtpSecurity)
   if (data.smtpUser !== undefined) set('smtp_user', str(data.smtpUser, 200))
-  if (typeof data.smtpPassword === 'string' && data.smtpPassword) set('smtp_pass_enc', encrypt(data.smtpPassword.replace(/\s+/g, '')))
+  if (typeof data.smtpPassword === 'string' && data.smtpPassword) set('smtp_pass_enc', encrypt(cleanPassword(data.smtpPassword)))
   if (typeof data.imapEnabled === 'boolean') set('imap_enabled', data.imapEnabled)
   if (data.imapHost !== undefined) set('imap_host', str(data.imapHost, 200))
   if (data.imapPort !== undefined && int(data.imapPort) > 0) set('imap_port', int(data.imapPort))
   if (SECURITY.includes(data.imapSecurity)) set('imap_security', data.imapSecurity)
   if (data.imapUser !== undefined) set('imap_user', str(data.imapUser, 200))
-  if (typeof data.imapPassword === 'string' && data.imapPassword) set('imap_pass_enc', encrypt(data.imapPassword.replace(/\s+/g, '')))
+  if (typeof data.imapPassword === 'string' && data.imapPassword) set('imap_pass_enc', encrypt(cleanPassword(data.imapPassword)))
   if (data.copySmtpPassword === true) {
     // "Use the same login as SMTP": mirror the SMTP credentials, including an already-saved password.
     run('UPDATE mailboxes SET imap_user = smtp_user, imap_pass_enc = smtp_pass_enc WHERE id = ?', id)
@@ -353,10 +353,19 @@ api.delete('/mailboxes/:id', requireAdmin, async (c) => {
 })
 
 /** Test mail settings before saving. A blank password falls back to the saved one. */
+/**
+ * Google shows app passwords as four groups ("abcd efgh ijkl mnop") but expects them without the spaces.
+ * Every other password is used exactly as typed: spaces can be part of it.
+ */
+function cleanPassword(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return /^\s*([a-z]{4}\s+){3}[a-z]{4}\s*$/i.test(value) ? value.replace(/\s+/g, '') : value
+}
+
 api.post('/mailboxes/test', requireAdmin, async (c) => {
   const data = await body(c)
   const saved = data.id ? get<MailboxRow>('SELECT * FROM mailboxes WHERE id = ?', int(data.id)) : undefined
-  const clean = (value: unknown) => (typeof value === 'string' ? value.replace(/\s+/g, '') : '')
+  const clean = cleanPassword
   try {
     if (data.kind === 'imap') {
       const result = await testImap({
