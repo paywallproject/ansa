@@ -103,7 +103,9 @@ const serverSaid = (response?: string) => {
 }
 
 export function explainMailError(err: unknown): string {
-  const e = err as { code?: string; responseCode?: number; response?: string; message?: string; authenticationFailed?: boolean }
+  const raw = err as { code?: string; responseCode?: number; response?: unknown; responseText?: string; message?: string; authenticationFailed?: boolean }
+  // SMTP errors carry the reply as a string. IMAP errors carry a parsed object and put the text in responseText.
+  const e = { ...raw, message: raw.message, response: typeof raw.response === 'string' ? raw.response : typeof raw.responseText === 'string' ? raw.responseText : '' }
   const text = `${e.response || ''} ${e.message || ''}`
   if (e.code === 'EAUTH' || e.responseCode === 535 || e.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|LOGIN failed|Invalid login|authentication failed/i.test(text)) {
     return /gmail|google/i.test(text)

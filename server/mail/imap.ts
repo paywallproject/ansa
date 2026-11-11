@@ -35,7 +35,17 @@ export async function testImap(s: ImapSettings): Promise<{ messages: number }> {
   client.on('error', () => {})
   try {
     await client.connect()
-    const status = await client.status(s.folder || 'INBOX', { messages: true })
+    const folder = s.folder || 'INBOX'
+    let status
+    try {
+      status = await client.status(folder, { messages: true })
+    } catch (err) {
+      if (!client.usable) throw err
+      // Most often the folder name is wrong. Show the real names so the person can pick one.
+      const names = (await client.list().catch(() => [])).map((box) => box.path).filter((path) => !/^\[Gmail\]$/i.test(path))
+      if (names.length === 0 || names.includes(folder)) throw err
+      throw new Error(`The folder "${folder}" was not found. Folders in this account: ${names.slice(0, 25).join(', ')}${names.length > 25 ? ', …' : ''}.`)
+    }
     return { messages: (status && status.messages) || 0 }
   } finally {
     await client.logout().catch(() => client.close())
