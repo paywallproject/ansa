@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Download,
   Ellipsis,
+  Expand,
   FileText,
   FolderInput,
   Merge,
@@ -30,6 +31,7 @@ import type { Attachment, Conversation, ConversationSummary, Status, Thread, Vie
 import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { Composer, type ComposerHandle } from './Composer'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
+import { LightboxProvider, isImageType, useLightbox, type LightboxImage } from './Lightbox'
 import { CustomerPanel } from './CustomerPanel'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
@@ -130,6 +132,12 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
     !!conversation,
   )
 
+  // Every picture in the conversation, in order, so the lightbox can step through them.
+  const images = useMemo<LightboxImage[]>(
+    () => (conversation?.threads ?? []).flatMap((t) => t.attachments.filter((a) => isImageType(a.mime)).map((a) => ({ url: a.url, filename: a.filename, size: a.size }))),
+    [conversation?.threads],
+  )
+
   if (query.isPending) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -155,7 +163,9 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           onMerge={() => setMerging(true)}
           onTogglePanel={() => setPanel((open) => !open)}
         />
-        <ThreadList conversation={conversation} composing={composing} onCompose={openComposer} />
+        <LightboxProvider images={images}>
+          <ThreadList conversation={conversation} composing={composing} onCompose={openComposer} />
+        </LightboxProvider>
         <Composer
           key={conversation.id}
           ref={composer}
@@ -776,6 +786,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
     onSuccess: () => void client.invalidateQueries({ queryKey: ['conversation'] }),
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
+  const lightbox = useLightbox()
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
@@ -863,7 +874,15 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 </Button>
               </div>
             )}
-            <div className="prose-mail" dangerouslySetInnerHTML={{ __html: html }} />
+            <div
+              className="prose-mail [&_img]:cursor-zoom-in"
+              dangerouslySetInnerHTML={{ __html: html }}
+              // A picture inside the message opens large too, unless it is a link.
+              onClick={(e) => {
+                const target = e.target as HTMLElement
+                if (target instanceof HTMLImageElement && !target.closest('a')) lightbox(new URL(target.src).pathname.startsWith('/api/attachments/') ? new URL(target.src).pathname : target.src, { url: target.src, filename: target.alt || 'Image' })
+              }}
+            />
             {thread.hasQuoted && (
               <button
                 type="button"
@@ -895,28 +914,33 @@ const stripTags = (html: string) => {
 }
 
 function AttachmentChip({ file }: { file: Attachment }) {
-  const isImage = /^image\/(png|jpe?g|gif|webp)$/.test(file.mime)
+  const lightbox = useLightbox()
+  const isImage = isImageType(file.mime)
+  const chip = 'group flex h-11 max-w-64 items-center gap-2.5 rounded-lg border border-line bg-surface pr-3 pl-1.5 text-left transition-colors hover:border-line-strong hover:bg-sunken'
+  const label = (
+    <span className="min-w-0">
+      <span className="block truncate text-[13px] font-medium">{file.filename}</span>
+      <span className="block text-xs text-fg-3">{fileSize(file.size)}</span>
+    </span>
+  )
   return (
     <li>
-      <a
-        href={file.url}
-        target="_blank"
-        rel="noreferrer"
-        className="group flex h-11 max-w-64 items-center gap-2.5 rounded-lg border border-line bg-surface pr-3 pl-1.5 transition-colors hover:border-line-strong hover:bg-sunken"
-      >
-        {isImage ? (
+      {isImage ? (
+        // Images open large over the page. Other files open in a new tab.
+        <button type="button" onClick={() => lightbox(file.url)} aria-label={`View ${file.filename}`} className={chip}>
           <img src={file.url} alt="" className="size-8 rounded-md object-cover" loading="lazy" />
-        ) : (
+          {label}
+          <Expand className="size-3.5 shrink-0 text-fg-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
+        </button>
+      ) : (
+        <a href={file.url} target="_blank" rel="noreferrer" className={chip}>
           <span className="flex size-8 items-center justify-center rounded-md bg-sunken text-fg-3">
             <FileText className="size-4" aria-hidden />
           </span>
-        )}
-        <span className="min-w-0">
-          <span className="block truncate text-[13px] font-medium">{file.filename}</span>
-          <span className="block text-xs text-fg-3">{fileSize(file.size)}</span>
-        </span>
-        <Download className="size-3.5 shrink-0 text-fg-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
-      </a>
+          {label}
+          <Download className="size-3.5 shrink-0 text-fg-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+        </a>
+      )}
     </li>
   )
 }
