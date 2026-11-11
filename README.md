@@ -2,9 +2,11 @@
 
 A self-hosted shared inbox and help desk for small teams. Connect a support address, answer customers together, and let AI assistants help through the built-in MCP server.
 
-One container. One SQLite file. No external services.
+Run it on a VPS as one container with one SQLite file, or on Cloudflare Workers with one click. No external services.
 
-![The Ansa inbox: folders, conversation list, a thread with an internal note, and the customer profile](docs/inbox.png)
+![The Ansa inbox: top navigation, mailbox folders and the conversation list](docs/inbox.png)
+
+![An open conversation with an internal note and the customer profile](docs/conversation.png)
 
 ## What you get
 
@@ -66,6 +68,32 @@ docker run --rm -v ansa_ansa-data:/data -v "$PWD":/backup alpine \
 ```
 
 Keep `secret.key` with the database. It encrypts the saved mail passwords, and they cannot be read without it.
+
+## Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rizaardiyanto1412/ansa)
+
+The button copies this repository to your GitHub account, builds it, and deploys it to your Cloudflare account. Accept the suggested build and deploy commands. When it finishes, open the `workers.dev` address, create the admin account, and connect your mailbox.
+
+The button only works while this repository is public. For a private repository, deploy from your machine:
+
+```bash
+npm ci
+npx wrangler login
+npm run deploy
+```
+
+How it runs on Cloudflare:
+
+- **One Worker and one Durable Object.** The Durable Object's built-in SQLite database holds all data, attachments included. You do not create a database, a bucket or a secret.
+- **Email works the same way.** Ansa sends over SMTP and reads over IMAP with the settings from **Settings → Mailboxes**. It checks for new mail every 60 seconds (`IMAP_POLL_SECONDS` in `wrangler.jsonc`), because a Worker cannot hold a connection open.
+- **Use port 587 or 465 for SMTP.** Cloudflare blocks port 25.
+- **Your domain.** Add a custom domain to the Worker in the Cloudflare dashboard. Links in notification emails use the address you sign in on. To pin it, set `APP_URL` under `vars` in `wrangler.jsonc`.
+- **Plan.** The free plan is enough to try Ansa. For a team that keeps it open all day, use Workers Paid: an open browser tab keeps the Durable Object awake, and the free plan's daily allowance covers about one tab.
+- **Backups.** Cloudflare keeps 30 days of point-in-time recovery for the Durable Object. There is no file to download.
+- **Updates.** Push to the repository that the button created. Cloudflare rebuilds and deploys it.
+
+Try it locally with `npm run dev:cf` (http://localhost:8787).
 
 ## Connect Google Workspace or Gmail
 
@@ -189,13 +217,16 @@ npm test         # unit and integration tests
 npm run typecheck
 ```
 
-`npm run test:mail` runs a full send-and-receive check against a local GreenMail server. The command to start GreenMail is at the top of `server/test/e2e-mail.ts`.
+`npm run test:mail` runs a full send-and-receive check against a local GreenMail server. The command to start GreenMail is at the top of `server/test/e2e-mail.ts`, with the variables that point the same check at `npm run dev:cf`.
 
 ```
-server/            Node.js + Hono API, SQLite (node:sqlite), mail, MCP
+server/            Hono API, SQLite, mail, MCP. Runs on Node.js and on Workers
+  app.ts           The HTTP app both platforms share
+  platform-node.ts Node.js: SQLite file, attachments on disk
   mail/            SMTP sending, IMAP sync, parsing and cleaning email
   services/        Conversations, customers, workflows, reports
   mcp.ts           MCP tools
+worker/            Cloudflare: the Worker and its Durable Object
 web/               React + Vite + Tailwind single-page app
 ```
 

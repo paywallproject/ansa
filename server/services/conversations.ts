@@ -1,4 +1,4 @@
-import { all, db, get, run, tx, now, parseJson } from '../db.ts'
+import { all, allNamed, get, run, tx, now, parseJson } from '../db.ts'
 import { publish } from '../events.ts'
 import { cleanHtml, htmlToText, previewOf } from '../mail/html.ts'
 import { newMessageId, queueDelivery, type MailboxRow } from '../mail/outbound.ts'
@@ -145,15 +145,10 @@ export function listConversations(opts: ListOptions) {
     opts.sort === 'oldest' ? 'c.updated_at ASC' : opts.sort === 'waiting' ? 'c.waiting_since IS NULL, c.waiting_since ASC, c.updated_at DESC' : 'c.updated_at DESC'
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
   const offset = Math.max(opts.offset ?? 0, 0)
-  const named = Object.fromEntries(Object.entries(params).map(([k, v]) => [`:${k}`, v]))
-  const rows = allNamed(`${BASE_SELECT} ${whereSql} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, named)
-  const total = (allNamed(`SELECT COUNT(*) AS n FROM conversations c ${whereSql}`, named)[0]?.n as number) ?? 0
+  const rows = allNamed(`${BASE_SELECT} ${whereSql} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params)
+  const total = (allNamed(`SELECT COUNT(*) AS n FROM conversations c ${whereSql}`, params)[0]?.n as number) ?? 0
   const tags = tagsFor(rows.map((r) => r.id))
   return { items: rows.map((r) => serialize(r, tags.get(r.id))), total, limit, offset }
-}
-
-function allNamed(sql: string, params: Record<string, string | number | null>): any[] {
-  return db.prepare(sql).all(params) as any[]
 }
 
 export function folderCounts(userId: number) {

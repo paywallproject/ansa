@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer'
-import path from 'node:path'
 import crypto from 'node:crypto'
+import tls from 'node:tls'
+import { blobs } from '../blobs.ts'
 import { all, get, run, parseJson } from '../db.ts'
 import { config } from '../config.ts'
 import { decrypt } from '../crypto.ts'
@@ -67,7 +68,31 @@ function transportFor(smtp: SmtpSettings) {
     connectionTimeout: 20_000,
     greetingTimeout: 20_000,
     socketTimeout: 60_000,
-  })
+    ...(config.imapPollOnly && smtp.security === 'ssl' ? { getSocket: openTlsSocket(smtp) } : {}),
+  } as Parameters<typeof nodemailer.createTransport>[0])
+}
+
+/**
+ * On Cloudflare, nodemailer's own TLS connection fails because it connects to a resolved IP address.
+ * Open the TLS socket by host name and hand it over. STARTTLS and plain connections do not need this.
+ */
+function openTlsSocket(smtp: SmtpSettings) {
+  return (_options: unknown, callback: (err: Error | null, socket?: { connection: tls.TLSSocket; secured: boolean }) => void) => {
+    let settled = false
+    const socket = tls.connect({ host: smtp.host, port: smtp.port, servername: smtp.host })
+    const finish = (err: Error | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (err) {
+        socket.destroy()
+        callback(Object.assign(err, { code: (err as { code?: string }).code || 'ECONNECTION' }))
+      } else callback(null, { connection: socket, secured: true })
+    }
+    const timer = setTimeout(() => finish(new Error('Connection timeout')), 20_000)
+    socket.once('secureConnect', () => finish(null))
+    socket.once('error', finish)
+  }
 }
 
 /** Turn low-level SMTP errors into something a person can act on. */
@@ -114,7 +139,7 @@ export interface OutgoingMail {
   messageId?: string
   inReplyTo?: string | null
   references?: string[]
-  attachments?: { filename: string; path: string; contentType: string; cid?: string }[]
+  attachments?: { filename: string; content: Buffer; contentType: string; cid?: string }[]
   headers?: Record<string, string>
   fromName?: string
 }
@@ -177,11 +202,10 @@ export async function deliverThread(threadId: number): Promise<void> {
       html += `<br><div class="gmail_quote"><div style="color: #57606a;">On ${when}, ${who} wrote:</div><blockquote class="gmail_quote" style="margin: 8px 0 0; padding-left: 12px; border-left: 2px solid #d0d7de; color: #57606a;">${quoted}</blockquote></div>`
     }
 
-    const attachments = all<any>('SELECT * FROM attachments WHERE thread_id = ?', threadId).map((a) => ({
-      filename: a.filename as string,
-      path: path.join(config.attachmentsDir, a.storage_key),
-      contentType: a.mime as string,
-    }))
+    const attachments = all<any>('SELECT * FROM attachments WHERE thread_id = ?', threadId).flatMap((a) => {
+      const content = blobs.get(a.storage_key)
+      return content ? [{ filename: a.filename as string, content: Buffer.from(content), contentType: a.mime as string }] : []
+    })
 
     await sendMail(mailbox, {
       to: parseJson<string[]>(thread.to_addrs, []),

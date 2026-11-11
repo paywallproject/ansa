@@ -18,7 +18,9 @@
     "seed": "tsx server/seed.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p web/tsconfig.json",
     "test": "tsx --test server/test/*.test.ts",
-    "test:mail": "tsx server/test/e2e-mail.ts"
+    "test:mail": "tsx server/test/e2e-mail.ts",
+    "dev:cf": "npm run build:web && wrangler dev",
+    "deploy": "npm run build:web && wrangler deploy"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
@@ -56,6 +58,7 @@
     "tailwindcss": "^4.3.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.7"
+    "vite": "^8.3.7",
+    "wrangler": "^4.160.0"
   }
 }

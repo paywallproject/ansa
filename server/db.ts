@@ -1,47 +1,56 @@
-import { DatabaseSync, type StatementSync } from 'node:sqlite'
-import { config } from './config.ts'
+/**
+ * Database access. The engine is SQLite everywhere; the driver differs per platform:
+ * node:sqlite on a server (platform-node.ts), Durable Object storage on Cloudflare (worker/).
+ */
+export type SqlValue = string | number | bigint | null | Uint8Array
+export interface Driver {
+  all(sql: string, params: SqlValue[]): any[]
+  run(sql: string, params: SqlValue[]): { id: number; changes: number }
+  /** Run one or more statements without parameters. */
+  exec(sql: string): void
+  transaction<T>(fn: () => T): T
+}
 
-export const db = new DatabaseSync(config.dbPath)
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;')
+let driver: Driver | null = null
+export function initDb(next: Driver) {
+  driver = next
+}
+const use = (): Driver => {
+  if (!driver) throw new Error('The database is not ready. Load a platform module first.')
+  return driver
+}
 
 type Param = string | number | bigint | null | undefined | boolean | Uint8Array
-const cache = new Map<string, StatementSync>()
 
-function stmt(sql: string): StatementSync {
-  let s = cache.get(sql)
-  if (!s) {
-    s = db.prepare(sql)
-    cache.set(sql, s)
-  }
-  return s
-}
-
-const norm = (params: Param[]) =>
-  params.map((p) => (p === undefined ? null : typeof p === 'boolean' ? (p ? 1 : 0) : p)) as (string | number | bigint | null | Uint8Array)[]
+const norm = (params: Param[]) => params.map((p) => (p === undefined ? null : typeof p === 'boolean' ? (p ? 1 : 0) : p)) as SqlValue[]
 
 export function all<T = any>(sql: string, ...params: Param[]): T[] {
-  return stmt(sql).all(...norm(params)) as T[]
+  return use().all(sql, norm(params)) as T[]
 }
 export function get<T = any>(sql: string, ...params: Param[]): T | undefined {
-  return stmt(sql).get(...norm(params)) as T | undefined
+  return use().all(sql, norm(params))[0] as T | undefined
 }
 export function run(sql: string, ...params: Param[]) {
-  const r = stmt(sql).run(...norm(params))
-  return { id: Number(r.lastInsertRowid), changes: Number(r.changes) }
+  return use().run(sql, norm(params))
+}
+
+/** Query with ":name" placeholders. They are rewritten to positional ones, which every driver supports. */
+export function allNamed<T = any>(sql: string, params: Record<string, Param>): T[] {
+  const values: Param[] = []
+  const positional = sql.replace(/(?<![:\w]):([a-zA-Z_]\w*)/g, (match, name: string) => {
+    if (!(name in params)) return match
+    values.push(params[name])
+    return '?'
+  })
+  return all<T>(positional, ...values)
 }
 
 let depth = 0
 export function tx<T>(fn: () => T): T {
   if (depth > 0) return fn()
-  db.exec('BEGIN IMMEDIATE')
   depth++
   try {
-    const result = fn()
-    db.exec('COMMIT')
-    return result
-  } catch (err) {
-    db.exec('ROLLBACK')
-    throw err
+    return use().transaction(fn)
   } finally {
     depth--
   }
@@ -239,11 +248,11 @@ const migrations: string[] = [
 ]
 
 export function migrate() {
-  db.exec('CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)')
+  use().exec('CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)')
   const applied = (get<{ n: number }>('SELECT COALESCE(MAX(id), 0) AS n FROM _migrations')?.n ?? 0)
   for (let i = applied; i < migrations.length; i++) {
     tx(() => {
-      db.exec(migrations[i])
+      use().exec(migrations[i])
       run('INSERT INTO _migrations (id, applied_at) VALUES (?, ?)', i + 1, now())
     })
     console.log(`[db] applied migration ${i + 1}`)

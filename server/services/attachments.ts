@@ -1,8 +1,6 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import crypto from 'node:crypto'
 import { get, run, now } from '../db.ts'
-import { config } from '../config.ts'
+import { blobs } from '../blobs.ts'
 
 export interface StoredAttachment {
   id: number
@@ -20,9 +18,8 @@ export function storeAttachment(
 ): StoredAttachment {
   const date = new Date()
   const dir = `${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, '0')}`
-  fs.mkdirSync(path.join(config.attachmentsDir, dir), { recursive: true })
   const key = `${dir}/${crypto.randomBytes(16).toString('hex')}`
-  fs.writeFileSync(path.join(config.attachmentsDir, key), data)
+  blobs.put(key, data)
   const filename = safeName(meta.filename)
   const mime = meta.mime || 'application/octet-stream'
   const { id } = run(
@@ -40,14 +37,14 @@ export function storeAttachment(
   return { id, filename, mime, size: data.byteLength, url: `/api/attachments/${id}/${encodeURIComponent(filename)}` }
 }
 
-export function attachmentFile(id: number): { path: string; filename: string; mime: string; size: number } | null {
+export function attachmentFile(id: number): { data: Uint8Array; filename: string; mime: string; size: number } | null {
   const row = get<any>('SELECT * FROM attachments WHERE id = ?', id)
   if (!row) return null
-  const file = path.join(config.attachmentsDir, row.storage_key)
-  if (!file.startsWith(config.attachmentsDir) || !fs.existsSync(file)) return null
-  return { path: file, filename: row.filename, mime: row.mime, size: row.size }
+  const data = blobs.get(row.storage_key)
+  if (!data) return null
+  return { data, filename: row.filename, mime: row.mime, size: data.byteLength }
 }
 
 export function removeFiles(keys: string[]) {
-  for (const key of keys) fs.rm(path.join(config.attachmentsDir, key), { force: true }, () => {})
+  for (const key of keys) blobs.remove(key)
 }

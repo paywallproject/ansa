@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow'
-import { all, get, run, now } from '../db.ts'
+import { all, get, run, now, getSetting, setSetting } from '../db.ts'
 import { config } from '../config.ts'
 import { decrypt } from '../crypto.ts'
 import { publish } from '../events.ts'
@@ -52,7 +52,6 @@ class MailboxWorker {
   private timer: NodeJS.Timeout | null = null
   private retry: NodeJS.Timeout | null = null
   private failures = 0
-  private badUids = new Map<number, number>()
   constructor(readonly mailboxId: number) {}
 
   private mailbox() {
@@ -67,7 +66,9 @@ class MailboxWorker {
   async start() {
     const mailbox = this.mailbox()
     if (this.stopped || !mailbox || !mailbox.imap_enabled || !mailbox.imap_host) return
-    this.setStatus('connecting')
+    this.teardown()
+    // In poll-only mode this runs every minute, so skip the status write when all is well.
+    if (!config.imapPollOnly || mailbox.sync_status !== 'ok') this.setStatus('connecting')
     const client = clientFor({
       host: mailbox.imap_host,
       port: mailbox.imap_port,
@@ -88,6 +89,11 @@ class MailboxWorker {
       this.failures = 0
       await this.sync()
       if (this.stopped || this.client !== client) return // dropped during the first sync; a reconnect is already scheduled
+      if (config.imapPollOnly) {
+        this.client = null
+        await client.logout().catch(() => client.close())
+        return
+      }
       this.timer = setInterval(() => void this.sync(), config.imapPollSeconds * 1000)
     } catch (err) {
       this.reconnect(explainMailError(err))
@@ -100,6 +106,7 @@ class MailboxWorker {
     this.failures++
     const delay = Math.min(5 * 60_000, 5000 * 2 ** Math.min(this.failures - 1, 6))
     this.setStatus('error', reason)
+    if (config.imapPollOnly) return // the next scheduled check tries again
     this.retry = setTimeout(() => void this.start(), delay)
   }
 
@@ -169,14 +176,16 @@ class MailboxWorker {
                 await ingestRaw(this.mailboxId, message.source, { historical: uid <= historicalUpTo })
               } catch (err) {
                 // Stop here and try this message again on the next pass (a full disk recovers; a bad message is skipped after 3 tries).
-                const tries = (this.badUids.get(uid) ?? 0) + 1
+                // Kept in the database: in poll-only mode the process does not live between checks.
+                const badKey = `imap_bad_uid_${this.mailboxId}`
+                const bad = getSetting<{ uid: number; tries: number }>(badKey, { uid: 0, tries: 0 })
+                const tries = (bad.uid === uid ? bad.tries : 0) + 1
                 console.error(`[imap ${mailbox.email}] could not import message uid ${uid} (try ${tries}):`, (err as Error).message)
                 if (tries < 3) {
-                  this.badUids.set(uid, tries)
+                  setSetting(badKey, { uid, tries })
                   this.setStatus('error', `Could not import a message: ${(err as Error).message}`)
                   return
                 }
-                this.badUids.delete(uid)
               }
             }
             run('UPDATE mailboxes SET imap_last_uid = ? WHERE id = ?', uid, this.mailboxId)
@@ -214,7 +223,15 @@ export async function restartMailbox(mailboxId: number) {
   }
   const worker = new MailboxWorker(mailboxId)
   workers.set(mailboxId, worker)
-  void worker.start()
+  if (config.imapPollOnly) await worker.start()
+  else void worker.start()
+}
+
+/** Poll-only platforms call this on a schedule: check every connected mailbox once. */
+export async function pollAllMailboxes() {
+  if (config.mailDisabled) return
+  const ids = all<{ id: number }>(`SELECT id FROM mailboxes WHERE imap_enabled = 1 AND imap_host != ''`).map((m) => m.id)
+  await Promise.allSettled(ids.map((id) => restartMailbox(id)))
 }
 
 export function startAllMailboxes() {
@@ -223,7 +240,7 @@ export function startAllMailboxes() {
 
 export async function syncMailboxNow(mailboxId: number) {
   const worker = workers.get(mailboxId)
-  if (!worker) return restartMailbox(mailboxId)
+  if (!worker || config.imapPollOnly) return restartMailbox(mailboxId)
   await worker.sync()
 }
 

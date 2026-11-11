@@ -1,54 +1,13 @@
+import './platform-node.ts'
 import fs from 'node:fs'
 import path from 'node:path'
-import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { config } from './config.ts'
-import { migrate } from './db.ts'
-import { api } from './api.ts'
-import { userFromBearer } from './auth.ts'
-import { handleMcp } from './mcp.ts'
+import { createApp, prepareData, startTimers } from './app.ts'
 import { startAllMailboxes, stopAllMailboxes } from './mail/imap.ts'
-import { wakeSnoozed } from './services/conversations.ts'
-import { bodyLimit } from 'hono/body-limit'
-import { run } from './db.ts'
 
-migrate()
-// Replies that were mid-send when the process stopped were never delivered. Flag them so an agent can re-send.
-const interrupted = run(`UPDATE threads SET state = 'failed', error = 'Ansa restarted before this reply was sent. Send it again.' WHERE state = 'sending'`).changes
-if (interrupted) console.log(`[mail] ${interrupted} unsent repl${interrupted === 1 ? 'y was' : 'ies were'} flagged for re-sending`)
-
-const app = new Hono()
-
-app.use('*', async (c, next) => {
-  await next()
-  c.header('X-Content-Type-Options', 'nosniff')
-  c.header('X-Frame-Options', 'DENY')
-  c.header('Referrer-Policy', 'no-referrer')
-  if (!c.res.headers.has('Content-Security-Policy')) {
-    c.header(
-      'Content-Security-Policy',
-      "default-src 'self'; img-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-    )
-  }
-})
-
-app.get('/healthz', (c) => c.json({ ok: true }))
-
-// Model Context Protocol endpoint. Authenticate with an API token from Settings → API & MCP.
-app.all('/mcp', bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
-  const user = userFromBearer(c.req.header('authorization'))
-  if (!user) {
-    return c.json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized. Send "Authorization: Bearer <Ansa API token>".' }, id: null }, 401, {
-      'WWW-Authenticate': 'Bearer realm="ansa"',
-    })
-  }
-  if (c.req.method !== 'POST') {
-    return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless: use POST.' }, id: null }, 405, { Allow: 'POST' })
-  }
-  return handleMcp(c.req.raw, user)
-})
-
-app.route('/api', api)
+prepareData()
+const app = createApp()
 
 // The built web app. Unknown paths fall back to index.html so client-side routes work on reload.
 const webRoot = path.resolve(process.env.WEB_DIR || 'web/dist')
@@ -96,7 +55,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
 })
 
 startAllMailboxes()
-setInterval(wakeSnoozed, 30_000).unref()
+startTimers()
 
 const shutdown = () => {
   console.log('Shutting down…')

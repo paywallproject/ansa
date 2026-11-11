@@ -5,6 +5,7 @@
  *     -e GREENMAIL_OPTS='-Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.imap -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled' \
  *     greenmail/standalone:2.1.3
  *   npm run test:mail
+ *   TEST_BASE_URL=http://localhost:8787 TEST_WAIT_MS=90000 npm run test:mail   (against `npm run dev:cf`, empty database)
  *
  * It starts Ansa on a throwaway data directory, then: customer email -> conversation,
  * agent reply -> customer's inbox, customer reply -> same conversation with the quote trimmed.
@@ -19,20 +20,26 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 
 const PORT = 3912
-const BASE = `http://localhost:${PORT}`
-const SMTP = { host: 'localhost', port: Number(process.env.TEST_SMTP_PORT || 3025) }
-const IMAP = { host: 'localhost', port: Number(process.env.TEST_IMAP_PORT || 3143) }
+/** Set TEST_BASE_URL to check an instance that is already running (for example `wrangler dev`) instead of starting one. */
+const EXTERNAL = process.env.TEST_BASE_URL
+const BASE = EXTERNAL || `http://localhost:${PORT}`
+const WAIT = Number(process.env.TEST_WAIT_MS || 30_000)
+const HOST = process.env.TEST_MAIL_HOST || 'localhost'
+const SMTP = { host: HOST, port: Number(process.env.TEST_SMTP_PORT || 3025) }
+const IMAP = { host: HOST, port: Number(process.env.TEST_IMAP_PORT || 3143) }
 const run = Date.now().toString(36)
 const SUPPORT = `support-${run}@test.local`
 const CUSTOMER = `jane-${run}@test.local`
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ansa-e2e-'))
-const server = spawn('npx', ['tsx', 'server/index.ts'], {
-  env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir, IMAP_POLL_SECONDS: '2', MAIL_DISABLED: '' },
-  stdio: ['ignore', 'inherit', 'inherit'],
-})
+const server = EXTERNAL
+  ? null
+  : spawn('npx', ['tsx', 'server/index.ts'], {
+      env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir, IMAP_POLL_SECONDS: '2', MAIL_DISABLED: '' },
+      stdio: ['ignore', 'inherit', 'inherit'],
+    })
 const cleanup = () => {
-  server.kill()
+  server?.kill()
   fs.rmSync(dataDir, { recursive: true, force: true })
 }
 
@@ -50,7 +57,7 @@ async function call<T = any>(method: string, url: string, body?: unknown): Promi
   return data
 }
 
-async function until<T>(what: string, fn: () => Promise<T | null | undefined | false>, timeout = 30_000): Promise<T> {
+async function until<T>(what: string, fn: () => Promise<T | null | undefined | false>, timeout = WAIT): Promise<T> {
   const deadline = Date.now() + timeout
   for (;;) {
     const value = await fn().catch(() => null)

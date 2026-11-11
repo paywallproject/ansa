@@ -8,6 +8,7 @@ import path from 'node:path'
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ansa-test-'))
 process.env.MAIL_DISABLED = '1'
 
+await import('../platform-node.ts')
 const html = await import('../mail/html.ts')
 const { migrate, run, get, all } = await import('../db.ts')
 const { ingestRaw } = await import('../mail/ingest.ts')

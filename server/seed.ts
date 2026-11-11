@@ -4,6 +4,7 @@
  *   node dist/seed.js       (production build / Docker)
  * Sign in with demo@ansa.local / demo1234. Nothing is emailed: seeded replies skip delivery.
  */
+import './platform-node.ts'
 import { get, migrate, run, now } from './db.ts'
 import { hashPassword } from './crypto.ts'
 import { USER_COLORS } from './auth.ts'

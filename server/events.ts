@@ -58,7 +58,8 @@ export function leavePresence(conversationId: number, userId: number) {
   publish({ type: 'presence', conversationId, viewers: viewersOf(conversationId) })
 }
 
-setInterval(() => {
+/** Forget viewers who stopped sending heartbeats. The platform calls this every few seconds. */
+export function prunePresence() {
   const cutoff = Date.now() - PRESENCE_TTL
   for (const [conversationId, entries] of presence) {
     let changed = false
@@ -71,4 +72,4 @@ setInterval(() => {
     if (entries.size === 0) presence.delete(conversationId)
     if (changed) publish({ type: 'presence', conversationId, viewers: viewersOf(conversationId) })
   }
-}, 15_000).unref()
+}

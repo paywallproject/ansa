@@ -1,5 +1,3 @@
-import fs from 'node:fs'
-import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { bodyLimit } from 'hono/body-limit'
@@ -564,7 +562,7 @@ api.get('/attachments/:id/:name?', (c) => {
   if (!file) throw new AppError('File not found.', 404)
   const inline = INLINE_SAFE.has(file.mime) && c.req.query('download') === undefined
   const encoded = encodeURIComponent(file.filename).replace(/['()]/g, escape)
-  return new Response(Readable.toWeb(fs.createReadStream(file.path)) as ReadableStream, {
+  return new Response(file.data as Uint8Array<ArrayBuffer>, {
     headers: {
       'Content-Type': inline ? file.mime : 'application/octet-stream',
       'Content-Length': String(file.size),

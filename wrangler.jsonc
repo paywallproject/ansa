@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ansa",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The built web app. Unknown paths fall back to index.html so client-side routes work on reload.
+  "assets": {
+    "directory": "./web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/mcp", "/healthz"]
+  },
+  // One SQLite-backed Durable Object holds the database and the attachments.
+  "durable_objects": {
+    "bindings": [{ "name": "ANSA", "class_name": "AnsaStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AnsaStore"] }],
+  "observability": { "enabled": true },
+  "vars": {
+    // Seconds between checks for new email.
+    "IMAP_POLL_SECONDS": "60"
+    // Optional: "APP_URL": "https://support.example.com"
+  }
+}

@@ -1,34 +1,33 @@
-import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 
-const dataDir = path.resolve(process.env.DATA_DIR || './data')
-fs.mkdirSync(path.join(dataDir, 'attachments'), { recursive: true })
+const env = (name: string): string | undefined => (typeof process !== 'undefined' ? process.env?.[name] : undefined)
 
-function loadSecret(): string {
-  if (process.env.APP_SECRET && process.env.APP_SECRET.length >= 16) return process.env.APP_SECRET
-  const file = path.join(dataDir, 'secret.key')
-  if (fs.existsSync(file)) return fs.readFileSync(file, 'utf8').trim()
-  const secret = crypto.randomBytes(32).toString('hex')
-  fs.writeFileSync(file, secret, { mode: 0o600 })
-  return secret
-}
+const dataDir = path.resolve(env('DATA_DIR') || './data')
+const port = Number(env('PORT') || 3000)
+const configuredUrl = (env('APP_URL') || '').replace(/\/+$/, '')
 
-const port = Number(process.env.PORT || 3000)
-
+/**
+ * Settings from the environment. This module has no side effects: the platform module
+ * (platform-node.ts or worker/) fills in `secret` and, when APP_URL is not set, `appUrl`.
+ */
 export const config = {
   port,
-  host: process.env.HOST || '0.0.0.0',
+  host: env('HOST') || '0.0.0.0',
   dataDir,
   attachmentsDir: path.join(dataDir, 'attachments'),
   dbPath: path.join(dataDir, 'ansa.db'),
   /** Public URL of this install, used in links inside emails. No trailing slash. */
-  appUrl: (process.env.APP_URL || `http://localhost:${port}`).replace(/\/+$/, ''),
-  secret: loadSecret(),
-  /** Seconds between IMAP polls when the server cannot IDLE. */
-  imapPollSeconds: Number(process.env.IMAP_POLL_SECONDS || 60),
-  maxAttachmentBytes: Number(process.env.MAX_ATTACHMENT_MB || 25) * 1024 * 1024,
+  appUrl: configuredUrl || `http://localhost:${port}`,
+  /** True when APP_URL was set explicitly, so the platform must not guess it. */
+  appUrlFixed: configuredUrl !== '',
+  /** Key material for encrypting saved mail passwords. Set by the platform module at start. */
+  secret: env('APP_SECRET') && env('APP_SECRET')!.length >= 16 ? env('APP_SECRET')! : '',
+  /** Seconds between IMAP checks. */
+  imapPollSeconds: Number(env('IMAP_POLL_SECONDS') || 60),
+  /** True where long-lived connections are not possible: connect, fetch new mail, disconnect. */
+  imapPollOnly: false,
+  maxAttachmentBytes: Number(env('MAX_ATTACHMENT_MB') || 25) * 1024 * 1024,
   /** Set to "1" to disable all outgoing/incoming mail (used by the demo seed). */
-  mailDisabled: process.env.MAIL_DISABLED === '1',
-  isProd: process.env.NODE_ENV === 'production',
+  mailDisabled: env('MAIL_DISABLED') === '1',
+  isProd: env('NODE_ENV') === 'production',
 }

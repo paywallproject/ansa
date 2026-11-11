@@ -115,9 +115,10 @@ export function allowAttempt(key: string, max = 10): boolean {
 }
 export const clearAttempts = (key: string) => attempts.delete(key)
 
-setInterval(() => {
+/** Drop expired sessions and stale login counters. The platform calls this about once an hour. */
+export function pruneSessions() {
   run('DELETE FROM sessions WHERE expires_at < ?', now())
   for (const [key, entry] of attempts) if (entry.resetAt < Date.now()) attempts.delete(key)
-}, 3_600_000).unref()
+}
 
 export const USER_COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6']
