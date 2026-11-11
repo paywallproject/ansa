@@ -652,12 +652,9 @@ function dayLabel(ts: number): string {
 
 function ThreadList({ conversation, composing, onCompose }: { conversation: Conversation; composing: boolean; onCompose: (mode: 'reply' | 'note') => void }) {
   const scroller = useRef<HTMLDivElement>(null)
-  const messages = conversation.threads.filter((t) => t.type !== 'event')
   const lastId = conversation.threads[conversation.threads.length - 1]?.id
-  // Long threads start with older messages folded so the latest exchange is on screen.
-  const initiallyFolded = useMemo(() => new Set(messages.length > 4 ? messages.slice(0, -3).map((t) => t.id) : []), [conversation.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [folded, setFolded] = useState(initiallyFolded)
-  useEffect(() => setFolded(initiallyFolded), [initiallyFolded])
+  // Every message starts open. Click a name to fold one away; the choice resets when another conversation opens.
+  const [folded, setFolded] = useState<Set<number>>(() => new Set())
   useLayoutEffect(() => {
     const el = scroller.current
     if (el) el.scrollTop = el.scrollHeight
