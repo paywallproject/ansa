@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, CircleCheck, Inbox, Paperclip, Search, ShieldAlert, Trash2, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Check, Inbox, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime } from '../lib/format'
 import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession } from '../lib/hooks'
@@ -118,23 +118,32 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   return (
     <section className="flex h-full flex-col" aria-label="Conversations">
       {checked.size > 0 ? (
-        <div className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-accent-soft px-3 md:px-4">
-          <IconButton label="Clear selection" size="sm" onClick={() => setChecked(new Set())}>
-            <X className="size-4" />
-          </IconButton>
-          <span className="flex-1 text-[13px] font-semibold text-accent-fg">{checked.size} selected</span>
-          <Button size="sm" icon={<CircleCheck />} onClick={() => bulk.mutate({ patch: { status: 'closed' } })} disabled={bulk.isPending}>
-            <span className="hidden sm:inline">Close</span>
-          </Button>
-          <Button size="sm" icon={<UserRoundCheck />} onClick={() => bulk.mutate({ patch: { assigneeId: user.id } })} disabled={bulk.isPending}>
-            <span className="hidden sm:inline">Assign to me</span>
-          </Button>
-          <Button size="sm" icon={<ShieldAlert />} onClick={() => bulk.mutate({ patch: { status: 'spam' } })} disabled={bulk.isPending}>
-            <span className="hidden sm:inline">Spam</span>
-          </Button>
-          <Button size="sm" icon={<Trash2 />} onClick={() => void bulkDelete()} disabled={bulk.isPending}>
-            <span className="hidden sm:inline">Delete</span>
-          </Button>
+        <div className="flex h-14 shrink-0 items-center gap-1.5 border-b border-accent/20 bg-accent-soft pr-3 pl-3 md:pr-4">
+          <button type="button" aria-label="Clear selection" onClick={() => setChecked(new Set())} className="flex size-8 shrink-0 items-center justify-center rounded-lg text-accent-fg transition-colors hover:bg-accent/10">
+            <X className="size-4" aria-hidden />
+          </button>
+          <span className="text-[13px] font-semibold whitespace-nowrap text-accent-fg">
+            <span className="tabular-nums">{checked.size}</span> selected
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { status: 'closed' } })} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent pr-3 pl-2.5 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(34,31,92,0.25)] transition-colors hover:bg-accent-hover disabled:opacity-60">
+              <Check className="size-4" aria-hidden />
+              Close
+            </button>
+            <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { assigneeId: user.id } })} aria-label="Assign to me" className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/25 bg-surface pr-3 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:border-accent disabled:opacity-60">
+              <UserRoundCheck className="size-4 text-fg-2" aria-hidden />
+              <span className="hidden sm:inline">Assign to me</span>
+            </button>
+            <span className="mx-1.5 hidden h-5 w-px bg-accent/25 sm:block" aria-hidden />
+            <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { status: 'spam' } })} aria-label="Mark as spam" className="flex h-8 items-center gap-1.5 rounded-lg pr-2.5 pl-2 text-[13px] font-medium text-fg-2 transition-colors hover:bg-accent/10 hover:text-fg disabled:opacity-60">
+              <ShieldAlert className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Spam</span>
+            </button>
+            <button type="button" disabled={bulk.isPending} onClick={() => void bulkDelete()} aria-label="Delete" className="flex h-8 items-center gap-1.5 rounded-lg pr-2.5 pl-2 text-[13px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-60">
+              <Trash2 className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+          </div>
         </div>
       ) : (
         <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-4 md:px-5">
@@ -205,7 +214,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
           <>
             <div className="sticky top-0 z-20 hidden h-10 items-center border-b border-line bg-surface text-xs text-fg-3 md:flex">
               <div className="flex w-12 shrink-0 justify-center">
-                <CheckBox checked={allChecked} label="Select all conversations" onClick={toggleAll} />
+                <CheckBox checked={allChecked} mixed={!allChecked && checked.size > 0} label="Select all conversations" onClick={toggleAll} />
               </div>
               <div className={cx(COLS, 'flex-1 pr-5')}>
                 <span>Customer</span>
@@ -239,19 +248,20 @@ export function InboxPage({ search = false }: { search?: boolean }) {
 }
 
 /** Column template shared by the header and every row, from the md breakpoint up. */
-const COLS = 'md:grid md:grid-cols-[minmax(110px,190px)_minmax(0,1fr)_auto_64px_92px] md:items-center md:gap-x-5'
+const COLS = 'md:grid md:grid-cols-[minmax(110px,194px)_minmax(0,1fr)_auto_64px_92px] md:items-center md:gap-x-4'
 
-function CheckBox({ checked, label, onClick }: { checked: boolean; label: string; onClick: () => void }) {
+function CheckBox({ checked, mixed, label, onClick }: { checked: boolean; mixed?: boolean; label: string; onClick: () => void }) {
+  const on = checked || mixed
   return (
     <button
       type="button"
       role="checkbox"
-      aria-checked={checked}
+      aria-checked={mixed ? 'mixed' : checked}
       aria-label={label}
       onClick={onClick}
-      className={cx('flex size-4 items-center justify-center rounded border transition-colors', checked ? 'border-accent bg-accent text-white' : 'border-line-strong bg-surface hover:border-fg-3')}
+      className={cx('flex size-4 items-center justify-center rounded-[4px] border text-white transition-colors', on ? 'border-accent bg-accent' : 'border-line-strong bg-surface hover:border-fg-3')}
     >
-      {checked && <Check className="size-3" strokeWidth={3} aria-hidden />}
+      {checked ? <Check className="size-3" strokeWidth={3} aria-hidden /> : mixed ? <Minus className="size-3" strokeWidth={3} aria-hidden /> : null}
     </button>
   )
 }
@@ -264,12 +274,12 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
   const when = openFolder && c.waitingSince ? c.waitingSince : c.updatedAt
 
   return (
-    <li className={cx('group flex border-b border-line transition-shadow hover:shadow-[inset_2px_0_0_var(--accent)]', checked ? 'bg-accent-soft' : 'hover:bg-sunken')}>
+    <li className={cx('group flex border-b border-line transition-shadow hover:shadow-[inset_2px_0_0_var(--accent)]', checked ? 'bg-accent-soft/60' : 'hover:bg-sunken')}>
       <div className="flex w-10 shrink-0 justify-center pt-3.5 md:w-12 md:items-center md:pt-0">
         <CheckBox checked={checked} label={`Select conversation: ${c.subject}`} onClick={onCheck} />
       </div>
       <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2.5 pr-4 outline-offset-[-2px] md:pr-5')}>
-        <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg-2')}>{c.customer.name || c.customer.email}</span>
+        <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>

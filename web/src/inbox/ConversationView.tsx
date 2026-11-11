@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -15,17 +16,20 @@ import {
   PanelRight,
   Plus,
   RefreshCw,
+  Reply,
   ShieldAlert,
   ShieldCheck,
+  StickyNote,
   Tag as TagIcon,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { fileSize, fullTime, messageTime, STATUS_LABEL } from '../lib/format'
 import { useDebounced, useDocumentTitle, useHotkeys, useMailboxes, useSession, useTags, useUsers } from '../lib/hooks'
 import type { Attachment, Conversation, ConversationSummary, Status, Thread, Viewer } from '../lib/types'
-import { Avatar, Button, EmptyState, IconButton, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, TagChip, cx, useFeedback } from '../ui'
+import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { Composer, type ComposerHandle } from './Composer'
 import { CustomerPanel } from './CustomerPanel'
 
@@ -40,6 +44,13 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
   const [panel, setPanel] = useState(false)
   const [typing, setTyping] = useState(false)
   const [merging, setMerging] = useState(false)
+  // The composer stays closed until someone asks to write. An unsent draft reopens it.
+  const [composing, setComposing] = useState(false)
+  const openComposer = (mode: 'reply' | 'note') => {
+    // Show it first, in the same tick: a hidden editor cannot take focus, and the next keys must land in it.
+    flushSync(() => setComposing(true))
+    composer.current?.focus(mode)
+  }
 
   const query = useQuery({
     queryKey: ['conversation', id],
@@ -108,11 +119,11 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
     {
       r: (e) => {
         e.preventDefault()
-        composer.current?.focus('reply')
+        openComposer('reply')
       },
       n: (e) => {
         e.preventDefault()
-        composer.current?.focus('note')
+        openComposer('note')
       },
       a: () => conversation && update.mutate({ assigneeId: conversation.assignee?.id === user.id ? null : user.id }),
       e: () => setStatus('closed'),
@@ -145,18 +156,23 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           onMerge={() => setMerging(true)}
           onTogglePanel={() => setPanel((open) => !open)}
         />
-        <ThreadList conversation={conversation} />
+        <ThreadList conversation={conversation} composing={composing} onCompose={openComposer} />
         <Composer
           key={conversation.id}
           ref={composer}
+          open={composing}
+          onOpenChange={setComposing}
           conversation={conversation}
           agentName={user.name}
           othersReplying={viewers.filter((v) => v.state === 'replying')}
           onTyping={setTyping}
-          onSent={(status) => status === 'closed' && onDone()}
+          onSent={(status) => {
+            setComposing(false)
+            if (status === 'closed') onDone()
+          }}
         />
       </div>
-      <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-line xl:block 2xl:w-80" aria-label="Customer">
+      <aside className="hidden w-[300px] shrink-0 overflow-y-auto border-l border-line xl:block" aria-label="Customer">
         <CustomerPanel conversation={conversation} />
       </aside>
       {panel && (
@@ -186,7 +202,15 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
 // Header: subject, status, assignee, tags, snooze, more
 // ---------------------------------------------------------------------------------------------
 
-const pill = 'inline-flex h-7 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2 text-[13px] font-medium text-fg transition-colors hover:bg-sunken'
+const pill = 'inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-line bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken'
+const STATUS_PILL: Record<string, string> = {
+  active: 'border-ok/25 bg-ok-soft text-ok hover:bg-ok-soft',
+  pending: 'border-warn/25 bg-warn-soft text-warn hover:bg-warn-soft',
+  closed: 'bg-sunken',
+  spam: 'border-danger/25 bg-danger-soft text-danger hover:bg-danger-soft',
+}
+const STATUS_HINT: Record<string, string> = { active: 'needs a reply', pending: 'waiting on them', closed: 'done' }
+const MAX_TAGS = 3
 
 function Header({
   conversation: c,
@@ -211,6 +235,7 @@ function Header({
 }) {
   const users = useUsers()
   const mailboxes = useMailboxes()
+  const { user } = useSession()
   const [editing, setEditing] = useState(false)
   const [subject, setSubject] = useState(c.subject)
   useEffect(() => setSubject(c.subject), [c.subject])
@@ -222,37 +247,51 @@ function Header({
   const otherMailboxes = (mailboxes.data ?? []).filter((m) => m.id !== c.mailboxId)
 
   return (
-    <header className="shrink-0 border-b border-line px-4 pt-3 pb-3 md:px-6">
-      <div className="flex items-start gap-2">
-        <IconButton label="Back to the list" onClick={onBack} className="-ml-1.5">
-          <ArrowLeft className="size-4.5" />
-        </IconButton>
-        <div className="min-w-0 flex-1">
-          {editing ? (
-            <Input
-              autoFocus
-              aria-label="Subject"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              onBlur={saveSubject}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') saveSubject()
-                if (e.key === 'Escape') {
-                  setSubject(c.subject)
-                  setEditing(false)
-                }
-              }}
-              className="h-8 text-base font-semibold"
-            />
-          ) : (
-            <h1 className="text-[17px] leading-7 font-semibold tracking-tight">
-              <button type="button" onClick={() => setEditing(true)} title="Edit subject" className="rounded text-left hover:bg-sunken">
-                {c.subject}
+    <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-line py-2 pr-3 pl-3 md:pr-4">
+      {/* Title and tags */}
+      <div className="flex min-w-[min(100%,260px)] flex-1 items-center gap-2">
+        <button type="button" aria-label="Back to the list" onClick={onBack} className="flex size-8 shrink-0 items-center justify-center rounded-md text-fg-2 transition-colors hover:bg-sunken">
+          <ArrowLeft className="size-4" aria-hidden />
+        </button>
+        {editing ? (
+          <Input
+            autoFocus
+            aria-label="Subject"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            onBlur={saveSubject}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveSubject()
+              if (e.key === 'Escape') {
+                setSubject(c.subject)
+                setEditing(false)
+              }
+            }}
+            className="h-8 max-w-md text-base font-semibold"
+          />
+        ) : (
+          <h1 className="min-w-0 truncate text-base font-semibold tracking-tight">
+            <button type="button" onClick={() => setEditing(true)} title="Edit subject" className="max-w-full truncate rounded text-left align-bottom hover:bg-sunken">
+              {c.subject}
+            </button>
+          </h1>
+        )}
+        <span className="shrink-0 text-[13px] text-fg-3 tabular-nums">#{c.id}</span>
+        <div className="ml-2 flex shrink-0 items-center gap-1.5">
+          {c.tags.slice(0, MAX_TAGS).map((tag) => (
+            <span key={tag.id} className="hidden h-6 items-center gap-1 rounded-md bg-sunken pr-1 pl-2 text-xs font-medium text-fg-2 lg:flex">
+              {tag.name}
+              <button type="button" aria-label={`Remove tag ${tag.name}`} onClick={() => onPatch({ removeTags: [tag.name] })} className="flex size-4 items-center justify-center rounded text-fg-3 hover:text-fg">
+                <X className="size-3" aria-hidden />
               </button>
-              <span className="ml-2 text-sm font-normal text-fg-3 tabular-nums">#{c.id}</span>
-            </h1>
-          )}
+            </span>
+          ))}
+          <TagMenu current={c.tags.map((t) => t.name)} hiddenCount={Math.max(0, c.tags.length - MAX_TAGS)} onAdd={(name) => onPatch({ addTags: [name] })} onRemove={(name) => onPatch({ removeTags: [name] })} />
         </div>
+      </div>
+
+      {/* Properties */}
+      <div className="ml-auto flex items-center gap-1.5">
         {viewers.length > 0 && (
           <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-warn-soft py-0.5 pr-2.5 pl-1 text-xs font-medium text-warn" role="status">
             <span className="flex -space-x-1.5">
@@ -265,18 +304,17 @@ function Header({
             </span>
           </div>
         )}
-        <IconButton label="Customer details" onClick={onTogglePanel} className="xl:hidden">
-          <PanelRight className="size-4.5" />
-        </IconButton>
-      </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <SnoozeMenu snoozedUntil={c.snoozedUntil} onSnooze={(until) => onPatch({ snoozedUntil: until })} />
+
         <Popover
+          align="end"
+          width={224}
           trigger={({ ref, ...props }) => (
-            <button ref={ref} type="button" {...props} className={pill} aria-label={`Status: ${STATUS_LABEL[c.status]}`} disabled={busy}>
+            <button ref={ref} type="button" {...props} className={cx(pill, STATUS_PILL[c.status])} aria-label={`Status: ${STATUS_LABEL[c.status]}`} disabled={busy}>
               <StatusDot status={c.status} />
               {STATUS_LABEL[c.status]}
-              <ChevronDown className="size-3.5 text-fg-3" aria-hidden />
+              <ChevronDown className="size-3.5 opacity-60" aria-hidden />
             </button>
           )}
         >
@@ -291,43 +329,53 @@ function Header({
                   onStatus(status)
                 }}
               >
-                {STATUS_LABEL[status]}
+                {STATUS_LABEL[status]} <span className="ml-1 text-fg-3">{STATUS_HINT[status]}</span>
               </MenuItem>
             ))
           }
         </Popover>
 
         <Popover
+          align="end"
           width={230}
           trigger={({ ref, ...props }) => (
-            <button ref={ref} type="button" {...props} className={pill} aria-label={`Assignee: ${c.assignee?.name ?? 'nobody'}`}>
-              {c.assignee ? <Avatar name={c.assignee.name} color={c.assignee.color} size={18} /> : <UserRound className="size-3.5 text-fg-3" aria-hidden />}
-              {c.assignee?.name ?? 'Unassigned'}
-              <ChevronDown className="size-3.5 text-fg-3" aria-hidden />
+            <button ref={ref} type="button" {...props} className={cx(pill, 'pl-1.5')} aria-label={`Assignee: ${c.assignee?.name ?? 'nobody'}`}>
+              {c.assignee ? (
+                <Avatar name={c.assignee.name} color={c.assignee.color} size={20} />
+              ) : (
+                <span className="flex size-5 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3">
+                  <UserRound className="size-3" aria-hidden />
+                </span>
+              )}
+              <span className="max-w-28 truncate">{c.assignee ? c.assignee.name.split(' ')[0] : 'Unassigned'}</span>
+              <ChevronDown className="size-3.5 opacity-60" aria-hidden />
             </button>
           )}
         >
           {(close) => (
             <>
-              <MenuLabel>Assign to</MenuLabel>
               {(users.data ?? [])
                 .filter((u) => !u.disabled)
                 .map((u) => (
                   <MenuItem
                     key={u.id}
-                    icon={<Avatar name={u.name} color={u.color} size={18} />}
+                    icon={<Avatar name={u.name} color={u.color} size={20} />}
                     checked={c.assignee?.id === u.id}
                     onSelect={() => {
                       close()
                       onPatch({ assigneeId: u.id })
                     }}
                   >
-                    {u.name}
+                    {u.name} {u.id === user.id && <span className="ml-1 text-fg-3">you</span>}
                   </MenuItem>
                 ))}
               <MenuDivider />
               <MenuItem
-                icon={<UserRound />}
+                icon={
+                  <span className="flex size-5 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3">
+                    <UserRound className="size-3" aria-hidden />
+                  </span>
+                }
                 checked={!c.assignee}
                 onSelect={() => {
                   close()
@@ -340,21 +388,13 @@ function Header({
           )}
         </Popover>
 
-        <SnoozeMenu snoozedUntil={c.snoozedUntil} onSnooze={(until) => onPatch({ snoozedUntil: until })} />
-
-        {c.tags.map((tag) => (
-          <TagChip key={tag.id} name={tag.name} color={tag.color} onRemove={() => onPatch({ removeTags: [tag.name] })} />
-        ))}
-        <TagMenu current={c.tags.map((t) => t.name)} onAdd={(name) => onPatch({ addTags: [name] })} onRemove={(name) => onPatch({ removeTags: [name] })} />
-
-        <div className="flex-1" />
         <Popover
           align="end"
           width={220}
           trigger={({ ref, ...props }) => (
-            <IconButton ref={ref} {...props} label="More actions" size="sm">
-              <Ellipsis className="size-4" />
-            </IconButton>
+            <button ref={ref} type="button" {...props} aria-label="More actions" className="flex size-8 shrink-0 items-center justify-center rounded-lg text-fg-2 transition-colors hover:bg-sunken aria-expanded:bg-sunken">
+              <Ellipsis className="size-4" aria-hidden />
+            </button>
           )}
         >
           {(close) => (
@@ -421,6 +461,10 @@ function Header({
             </>
           )}
         </Popover>
+
+        <button type="button" aria-label="Customer details" onClick={onTogglePanel} className="flex size-8 shrink-0 items-center justify-center rounded-lg text-fg-2 transition-colors hover:bg-sunken xl:hidden">
+          <PanelRight className="size-4" aria-hidden />
+        </button>
       </div>
     </header>
   )
@@ -447,17 +491,17 @@ function SnoozeMenu({ snoozedUntil, onSnooze }: { snoozedUntil: number | null; o
   const [custom, setCustom] = useState('')
   return (
     <Popover
-      width={250}
+      align="end"
+      width={256}
       trigger={({ ref, ...props }) =>
         snoozedUntil ? (
           <button ref={ref} type="button" {...props} className={cx(pill, 'border-transparent bg-accent-soft text-accent-fg hover:bg-accent-soft')}>
-            <AlarmClock className="size-3.5" aria-hidden />
-            Until {messageTime(snoozedUntil)}
+            <AlarmClock className="size-4" aria-hidden />
+            <span className="hidden sm:inline">Until {messageTime(snoozedUntil)}</span>
           </button>
         ) : (
-          <button ref={ref} type="button" {...props} className={cx(pill, 'text-fg-2')}>
-            <AlarmClock className="size-3.5 text-fg-3" aria-hidden />
-            Snooze
+          <button ref={ref} type="button" {...props} aria-label="Snooze" title="Snooze" className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line text-fg-2 transition-colors hover:bg-sunken aria-expanded:bg-sunken">
+            <AlarmClock className="size-4" aria-hidden />
           </button>
         )
       }
@@ -514,7 +558,7 @@ function SnoozeMenu({ snoozedUntil, onSnooze }: { snoozedUntil: number | null; o
   )
 }
 
-function TagMenu({ current, onAdd, onRemove }: { current: string[]; onAdd: (name: string) => void; onRemove: (name: string) => void }) {
+function TagMenu({ current, hiddenCount, onAdd, onRemove }: { current: string[]; hiddenCount: number; onAdd: (name: string) => void; onRemove: (name: string) => void }) {
   const tags = useTags()
   const [filter, setFilter] = useState('')
   const clean = filter.trim().toLowerCase().replace(/\s+/g, '-')
@@ -525,10 +569,10 @@ function TagMenu({ current, onAdd, onRemove }: { current: string[]; onAdd: (name
       width={230}
       onOpenChange={(open) => open && setFilter('')}
       trigger={({ ref, ...props }) => (
-        <button ref={ref} type="button" {...props} className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-fg-3 transition-colors hover:bg-hover hover:text-fg">
-          <TagIcon className="size-3.5" aria-hidden />
-          {current.length === 0 && 'Add tag'}
-          {current.length > 0 && <Plus className="size-3" aria-label="Add tag" />}
+        <button ref={ref} type="button" {...props} aria-label="Add or remove tags" className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed border-line-strong px-2 text-xs font-medium text-fg-3 transition-colors hover:border-fg-3 hover:text-fg aria-expanded:border-fg-3 aria-expanded:text-fg">
+          <TagIcon className="size-3" aria-hidden />
+          <span className={cx(current.length > 0 && 'lg:hidden')}>{current.length > 0 ? current.length : 'Add tag'}</span>
+          {current.length > 0 && <span className="hidden lg:inline">{hiddenCount > 0 ? `+${hiddenCount}` : 'Add tag'}</span>}
         </button>
       )}
     >
@@ -583,7 +627,18 @@ function TagMenu({ current, onAdd, onRemove }: { current: string[]; onAdd: (name
 // Thread
 // ---------------------------------------------------------------------------------------------
 
-function ThreadList({ conversation }: { conversation: Conversation }) {
+const CUSTOMER_COLOR = '#6fa3e8'
+const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+const dayKey = (ts: number) => new Date(ts).toDateString()
+function dayLabel(ts: number): string {
+  const date = new Date(ts)
+  const today = new Date()
+  const days = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()) / 86_400_000)
+  const short = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) }).format(date)
+  return days === 0 ? `Today, ${short}` : days === 1 ? `Yesterday, ${short}` : short
+}
+
+function ThreadList({ conversation, composing, onCompose }: { conversation: Conversation; composing: boolean; onCompose: (mode: 'reply' | 'note') => void }) {
   const scroller = useRef<HTMLDivElement>(null)
   const messages = conversation.threads.filter((t) => t.type !== 'event')
   const lastId = conversation.threads[conversation.threads.length - 1]?.id
@@ -594,29 +649,52 @@ function ThreadList({ conversation }: { conversation: Conversation }) {
   useLayoutEffect(() => {
     const el = scroller.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [conversation.id, lastId])
+  }, [conversation.id, lastId, composing])
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
-      <ol className="mx-auto flex max-w-3xl flex-col gap-3">
-        {conversation.threads.map((thread) =>
-          thread.type === 'event' ? (
-            <EventLine key={thread.id} thread={thread} />
-          ) : (
-            <Message
-              key={thread.id}
-              thread={thread}
-              folded={folded.has(thread.id)}
-              onToggle={() =>
-                setFolded((set) => {
-                  const next = new Set(set)
-                  if (next.has(thread.id)) next.delete(thread.id)
-                  else next.add(thread.id)
-                  return next
-                })
-              }
-            />
-          ),
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-5 md:px-6">
+      <ol className="mx-auto flex max-w-[720px] flex-col gap-3 pt-5 pb-3">
+        {conversation.threads.map((thread, index) => {
+          const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
+          return (
+            <Fragment key={thread.id}>
+              {newDay && (
+                <li className="flex items-center gap-3 text-xs text-fg-3">
+                  <span className="h-px flex-1 bg-line" aria-hidden />
+                  <time dateTime={new Date(thread.createdAt).toISOString().slice(0, 10)}>{dayLabel(thread.createdAt)}</time>
+                  <span className="h-px flex-1 bg-line" aria-hidden />
+                </li>
+              )}
+              {thread.type === 'event' ? (
+                <EventLine thread={thread} />
+              ) : (
+                <Message
+                  thread={thread}
+                  folded={folded.has(thread.id)}
+                  onToggle={() =>
+                    setFolded((set) => {
+                      const next = new Set(set)
+                      if (next.has(thread.id)) next.delete(thread.id)
+                      else next.add(thread.id)
+                      return next
+                    })
+                  }
+                />
+              )}
+            </Fragment>
+          )
+        })}
+        {!composing && (
+          <li className="mt-1 flex items-center justify-center gap-2">
+            <button type="button" onClick={() => onCompose('reply')} className="flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover">
+              <Reply className="size-4" aria-hidden />
+              Reply
+            </button>
+            <button type="button" onClick={() => onCompose('note')} className="flex h-9 items-center gap-2 rounded-lg border border-note-line bg-note px-3.5 text-[13px] font-medium text-note-fg transition-colors hover:brightness-[0.98]">
+              <StickyNote className="size-4" aria-hidden />
+              Note
+            </button>
+          </li>
         )}
       </ol>
     </div>
@@ -648,12 +726,8 @@ function eventText(thread: Thread): ReactNode {
 
 function EventLine({ thread }: { thread: Thread }) {
   return (
-    <li className="flex items-center gap-3 py-0.5 text-xs text-fg-3">
-      <span className="h-px flex-1 bg-line" aria-hidden />
-      <span>
-        {eventText(thread)} · <time title={fullTime(thread.createdAt)}>{messageTime(thread.createdAt)}</time>
-      </span>
-      <span className="h-px flex-1 bg-line" aria-hidden />
+    <li className="py-0.5 text-center text-xs text-fg-3">
+      {eventText(thread)} · <time title={fullTime(thread.createdAt)}>{timeOnly.format(thread.createdAt)}</time>
     </li>
   )
 }
@@ -671,35 +745,38 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
-  const color = thread.author.kind === 'user' ? thread.author.color : undefined
-  const verb = isNote ? 'added a note' : thread.type === 'reply' ? (thread.via === 'auto' ? 'sent automatically' : 'replied') : ''
+  const color = thread.author.kind === 'user' ? thread.author.color : isCustomer ? CUSTOMER_COLOR : undefined
+  const verb = thread.type === 'reply' && thread.via === 'auto' ? 'sent automatically' : thread.type === 'reply' && thread.via === 'email' ? 'replied by email' : ''
   const files = thread.attachments.filter((a) => !a.inline)
   const text = useMemo(() => (folded ? stripTags(thread.bodyHtml) : ''), [folded, thread.bodyHtml])
   const html = showQuoted && quoted.data ? quoted.data : thread.bodyHtml
 
   return (
-    <li
-      className={cx(
-        'rounded-xl border',
-        isNote ? 'border-note-line bg-note' : isCustomer ? 'border-line bg-surface shadow-card' : 'border-line bg-sunken/60',
-        thread.state === 'failed' && 'border-danger/50',
-      )}
-    >
-      <article aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}>
-        <header className={cx('flex items-center gap-2.5 px-4', folded ? 'py-2.5' : 'pt-3')}>
-          <Avatar name={name} color={color} size={28} />
+    <li>
+      <article
+        aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
+        className={cx(
+          'relative rounded-xl py-4',
+          // Customer messages: outlined card, avatar on the left. Ours: filled card, avatar on the right.
+          isCustomer ? 'border border-line bg-surface pr-4 pl-9' : 'pr-9 pl-4',
+          isNote ? 'border border-note-line bg-note' : !isCustomer && 'bg-sunken',
+          thread.state === 'failed' && 'ring-1 ring-danger/50',
+        )}
+      >
+        <Avatar name={name} color={color} size={32} className={cx('absolute top-3 ring-4 ring-surface', isCustomer ? '-left-4' : '-right-4')} />
+        <header className="flex items-baseline gap-2">
           <button type="button" onClick={onToggle} aria-expanded={!folded} className="flex min-w-0 flex-1 items-baseline gap-1.5 rounded text-left">
-            <span className="shrink-0 text-[13px] font-semibold">{name}</span>
-            {verb && <span className={cx('shrink-0 text-[13px]', isNote ? 'text-note-fg' : 'text-fg-3')}>{verb}</span>}
+            <span className="shrink-0 text-sm font-semibold">{name}</span>
+            {verb && <span className="shrink-0 text-[13px] text-fg-3">{verb}</span>}
             {folded && <span className="min-w-0 flex-1 truncate text-[13px] text-fg-3">{text}</span>}
           </button>
           {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
-          <time className="shrink-0 text-xs text-fg-3" title={fullTime(thread.createdAt)}>
-            {messageTime(thread.createdAt)}
+          <time className={cx('shrink-0 text-xs tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
+            {timeOnly.format(thread.createdAt)}
           </time>
         </header>
         {!folded && (
-          <div className="px-4 pt-1 pb-3.5 pl-[54px]">
+          <div className="mt-1.5">
             {!isNote && (thread.cc.length > 0 || (thread.type === 'reply' && thread.to.length > 0)) && (
               <p className="mb-2 text-xs text-fg-3">
                 {thread.type === 'reply' && thread.to.length > 0 && <>To {thread.to.join(', ')}</>}
@@ -728,7 +805,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 type="button"
                 onClick={() => setShowQuoted((open) => !open)}
                 aria-expanded={showQuoted}
-                className="mt-2 inline-flex h-5 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-3 hover:bg-hover hover:text-fg"
+                className={cx('mt-2 inline-flex h-5 items-center rounded-md px-1.5 text-xs font-medium text-fg-3 hover:text-fg', isCustomer ? 'bg-sunken hover:bg-hover' : 'bg-black/5 hover:bg-black/10 dark:bg-white/10')}
               >
                 {quoted.isFetching ? 'Loading…' : showQuoted ? 'Hide quoted text' : 'Show quoted text'}
               </button>
