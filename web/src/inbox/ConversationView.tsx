@@ -653,7 +653,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
-        <ol className={cx('mx-auto flex max-w-[800px] flex-col gap-4 pt-5', composing ? 'pb-4' : 'pb-24')}>
+        <ol className={cx('mx-auto flex max-w-[800px] flex-col gap-4 pt-5', composing ? 'pb-4' : 'pb-28')}>
           {conversation.threads.map((thread, index) => {
             const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
             return (
@@ -687,14 +687,14 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
         </ol>
       </div>
       {!composing && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center gap-2">
-          <button type="button" onClick={() => onCompose('reply')} className="pointer-events-auto flex h-10 items-center gap-2 rounded-lg bg-accent pr-2.5 pl-4 text-[13px] font-semibold text-white shadow-[0_6px_16px_-4px_rgba(34,31,92,0.45)] transition-colors hover:bg-accent-hover">
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center gap-2.5">
+          <button type="button" onClick={() => onCompose('reply')} className="pointer-events-auto flex h-11 min-w-[124px] items-center justify-center gap-2.5 rounded-[10px] bg-accent pr-3 pl-5 text-sm font-semibold text-white shadow-[0_6px_16px_-4px_rgba(34,31,92,0.45)] transition-colors hover:bg-accent-hover">
             Reply
-            <kbd className="flex size-5 items-center justify-center rounded bg-white/20 font-sans text-[11px] font-semibold">R</kbd>
+            <kbd className="flex size-[22px] items-center justify-center rounded-md bg-white/20 font-sans text-xs font-semibold">R</kbd>
           </button>
-          <button type="button" onClick={() => onCompose('note')} className="pointer-events-auto flex h-10 items-center gap-2 rounded-lg border border-note-line bg-note pr-2.5 pl-4 text-[13px] font-semibold text-note-fg shadow-[0_6px_16px_-6px_rgba(24,24,29,0.3)] transition-[filter] hover:brightness-[0.98]">
+          <button type="button" onClick={() => onCompose('note')} className="pointer-events-auto flex h-11 min-w-[124px] items-center justify-center gap-2.5 rounded-[10px] border border-note-line bg-note pr-3 pl-5 text-sm font-semibold text-note-fg shadow-[0_6px_16px_-6px_rgba(24,24,29,0.3)] transition-[filter] hover:brightness-[0.98]">
             Note
-            <kbd className="flex size-5 items-center justify-center rounded bg-note-line/70 font-sans text-[11px] font-semibold">N</kbd>
+            <kbd className="flex size-[22px] items-center justify-center rounded-md bg-note-line/70 font-sans text-xs font-semibold">N</kbd>
           </button>
         </div>
       )}
@@ -787,7 +787,12 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   if (thread.type === 'reply' && thread.to.length > 0) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
   if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
   if (isNote) meta.push(<>Only your team sees this</>)
-  const how = isNote ? 'Note' : thread.type === 'reply' ? (thread.via === 'auto' ? 'Auto reply' : thread.via === 'email' ? 'Replied by email' : thread.via === 'mcp' || thread.via === 'api' ? 'Sent through the API' : '') : ''
+  const channel = thread.type === 'reply' ? (thread.via === 'auto' ? 'Auto reply' : thread.via === 'email' ? 'Replied by email' : thread.via === 'mcp' || thread.via === 'api' ? 'Sent through the API' : '') : ''
+  if (channel) meta.push(<>{channel}</>)
+  // What the message did to the conversation at that moment: a customer message makes it active,
+  // a reply sets the status the teammate chose when sending. An auto reply changes nothing.
+  const sentStatus = isCustomer ? 'active' : thread.type === 'reply' && thread.via !== 'auto' ? (thread.event?.status as string | undefined) : undefined
+  const how = isNote ? 'Note' : sentStatus ? (STATUS_LABEL[sentStatus] ?? '') : ''
 
   return (
     <li className="relative md:px-14">
@@ -830,7 +835,11 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                     </Fragment>
                   ))}
                 </p>
-                {how && <span className="shrink-0">{how}</span>}
+                {how && (
+                  <span className="shrink-0" title={sentStatus ? `This message set the conversation to ${how.toLowerCase()}` : undefined}>
+                    {how}
+                  </span>
+                )}
               </div>
             )
           )}

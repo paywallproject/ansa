@@ -12,8 +12,7 @@ export interface ComposerHandle {
 }
 
 type SendStatus = 'closed' | 'pending' | 'active'
-const SEND_LABEL: Record<SendStatus, string> = { closed: 'Send and close', pending: 'Send as pending', active: 'Send and keep active' }
-const AFTER_SENDING: Record<SendStatus, string> = { closed: 'Close the conversation', pending: 'Set to pending', active: 'Keep it active' }
+const STATUS_NAME: Record<SendStatus, string> = { active: 'Active', pending: 'Pending', closed: 'Closed' }
 const SEND_DOT: Record<SendStatus, string> = { closed: 'bg-fg-3', pending: 'bg-warn', active: 'bg-ok' }
 
 const splitEmails = (value: string) => value.split(/[,;\s]+/).filter(Boolean)
@@ -248,25 +247,31 @@ export const Composer = forwardRef<
                 Add note
               </Button>
             ) : (
-              <div className="ml-1.5 flex">
-                <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="rounded-r-none" icon={<Send className="size-3.5" aria-hidden />}>
-                  <span className="sm:hidden">Send</span>
-                  <span className="hidden sm:inline">{SEND_LABEL[sendStatus]}</span>
-                </Button>
+              <>
+                {/* The status this reply gives the conversation. It is shown on the message afterwards. */}
                 <Popover
                   align="end"
                   side="top"
-                  width={240}
+                  width={200}
                   trigger={({ ref: triggerRef, ...props }) => (
-                    <Button ref={triggerRef} {...props} variant="primary" aria-label="Choose what happens after sending" className="rounded-l-none border-l border-white/25 px-2">
-                      <ChevronDown className="size-3.5" />
-                    </Button>
+                    <button
+                      ref={triggerRef}
+                      type="button"
+                      {...props}
+                      aria-label={`Status after sending: ${STATUS_NAME[sendStatus]}`}
+                      title="Status after sending"
+                      className="ml-1.5 flex h-8 shrink-0 items-center gap-2 rounded-full border border-line-strong bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
+                    >
+                      <span className={cx('size-2 shrink-0 rounded-full', SEND_DOT[sendStatus])} aria-hidden />
+                      {STATUS_NAME[sendStatus]}
+                      <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                    </button>
                   )}
                 >
                   {(close) => (
                     <>
                       <MenuLabel>After sending</MenuLabel>
-                      {(Object.keys(SEND_LABEL) as SendStatus[]).map((status) => (
+                      {(['active', 'pending', 'closed'] as SendStatus[]).map((status) => (
                         <MenuItem
                           key={status}
                           icon={<span className={cx('size-2 shrink-0 rounded-full', SEND_DOT[status])} aria-hidden />}
@@ -276,13 +281,16 @@ export const Composer = forwardRef<
                             close()
                           }}
                         >
-                          {AFTER_SENDING[status]}
+                          {STATUS_NAME[status]}
                         </MenuItem>
                       ))}
                     </>
                   )}
                 </Popover>
-              </div>
+                <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<Send className="size-3.5" aria-hidden />}>
+                  Send
+                </Button>
+              </>
             )}
           </div>
         </div>
