@@ -498,6 +498,30 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
 }
 
 /**
+ * Fold one customer into another: the same person wrote from two addresses.
+ * Conversations, messages and addresses move to the target. Empty profile fields are filled from the source.
+ */
+export function mergeCustomers(targetId: number, sourceId: number) {
+  if (targetId === sourceId) return
+  const target = getCustomer(targetId)
+  const source = getCustomer(sourceId)
+  tx(() => {
+    const moved = all<{ id: number }>('SELECT id FROM conversations WHERE customer_id = ?', sourceId)
+    run('UPDATE conversations SET customer_id = ? WHERE customer_id = ?', targetId, sourceId)
+    run('UPDATE threads SET customer_id = ? WHERE customer_id = ?', targetId, sourceId)
+    run('UPDATE customer_emails SET customer_id = ? WHERE customer_id = ?', targetId, sourceId)
+    for (const field of ['company', 'title', 'phone', 'location'] as const) {
+      if (!target[field] && source[field]) run(`UPDATE customers SET ${field} = ? WHERE id = ?`, source[field], targetId)
+    }
+    if (source.notes.trim()) run('UPDATE customers SET notes = ? WHERE id = ?', [target.notes.trim(), source.notes.trim()].filter(Boolean).join('\n\n').slice(0, 5000), targetId)
+    run('DELETE FROM customers WHERE id = ?', sourceId)
+    // The customer's name is part of the search index.
+    for (const { id } of moved) reindex(id)
+  })
+  publish({ type: 'refresh', scope: 'customers' })
+}
+
+/**
  * Find "@Full Name" in a note and remember who was mentioned. Returns the teammates to tell.
  * This always works. The workspace setting only decides if the Mentioned folder is shown.
  */

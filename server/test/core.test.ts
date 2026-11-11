@@ -430,3 +430,27 @@ test('Help Scout import: conversations, threads, tags, files; skips spam; safe t
     server.close()
   }
 })
+
+test('merging customers moves conversations and addresses to one profile', async () => {
+  const customers = await import('../services/customers.ts')
+  const make = (email: string, name: string, subject: string) =>
+    conversations.createConversation({ mailboxId, customerEmail: email, customerName: name, subject, bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' }).id
+  const work = make('sam@work.test', 'Sam Rivers', 'From work')
+  const home = make('sam@home.test', 'Sammy', 'From home')
+  const target = conversations.getConversation(work).customer
+  const source = conversations.getConversation(home).customer
+  customers.updateCustomer(source.id, { phone: '555-0100', notes: 'Prefers calls' })
+  assert.throws(() => customers.updateCustomer(target.id, { emails: ['sam@work.test', 'sam@home.test'] }), /another customer/)
+
+  conversations.mergeCustomers(target.id, source.id)
+  const merged = customers.getCustomer(target.id)
+  assert.deepEqual(merged.emails, ['sam@work.test', 'sam@home.test'])
+  assert.deepEqual([merged.name, merged.phone, merged.notes, merged.conversationCount], ['Sam Rivers', '555-0100', 'Prefers calls', 2])
+  assert.equal(conversations.getConversation(home).customer.id, target.id)
+  assert.throws(() => customers.getCustomer(source.id), /not found/)
+  assert.ok(conversations.listConversations({ q: 'Rivers' }).items.some((c) => c.id === home), 'search finds the moved conversation by the new name')
+  // New mail from the second address now lands with the same customer.
+  assert.equal(customers.findOrCreateCustomer('sam@home.test').id, target.id)
+  // The primary address can be switched.
+  assert.equal(customers.updateCustomer(target.id, { emails: ['sam@home.test', 'sam@work.test'] }).email, 'sam@home.test')
+})

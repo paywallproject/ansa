@@ -37,6 +37,7 @@ import {
   type ConversationPatch,
   type Folder,
   type Status,
+  mergeCustomers,
 } from './services/conversations.ts'
 import { AppError, createCustomer, getCustomer, isEmail, listCustomers, normEmail, updateCustomer } from './services/customers.ts'
 import { attachmentFile, removeFiles, storeAttachment } from './services/attachments.ts'
@@ -622,12 +623,30 @@ api.post('/customers', async (c) => {
   return c.json({ customer: createCustomer({ ...data, email: str(data.email, 200) }) }, 201)
 })
 
+// Who owns an email address. The customer form uses it to offer a merge.
+api.get('/customers/lookup', (c) => {
+  const email = str(c.req.query('email'), 254).toLowerCase()
+  const owner = isEmail(email) ? get<{ customer_id: number }>('SELECT customer_id FROM customer_emails WHERE email = ?', email) : undefined
+  return c.json({ customer: owner ? getCustomer(owner.customer_id) : null })
+})
+
 api.get('/customers/:id', (c) => {
   const id = idParam(c.req.param('id'))
   return c.json({ customer: getCustomer(id), conversations: listConversations({ customerId: id, limit: 50 }).items })
 })
 
-api.patch('/customers/:id', async (c) => c.json({ customer: updateCustomer(idParam(c.req.param('id')), await body(c)) }))
+api.patch('/customers/:id', async (c) => {
+  const id = idParam(c.req.param('id'))
+  const data = await body(c)
+  // Merge first: afterwards the other customer's addresses belong to this one and can be saved.
+  const sources = (Array.isArray(data.mergeFrom) ? data.mergeFrom : []).map(int).filter((source: number) => source > 0 && source !== id).slice(0, 20)
+  return c.json({
+    customer: tx(() => {
+      for (const source of sources) mergeCustomers(id, source)
+      return updateCustomer(id, data)
+    }),
+  })
+})
 
 // ---------------------------------------------------------------------------------------------
 // Tags, saved replies, workflows
