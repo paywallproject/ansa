@@ -12,7 +12,7 @@ An app is a web address you own. You do not install code into Ansa, so an app ca
 
 Create apps in **Settings → Apps**. Only admins can.
 
-![Two apps in the conversation sidebar](apps-sidebar.png)
+![Two apps in the conversation sidebar](screenshots/apps-sidebar.png)
 
 ## Level 1: text and links, no code
 

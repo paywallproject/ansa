@@ -2,6 +2,7 @@
   "name": "ansa",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "Ansa — a self-hosted shared inbox and help desk",
   "type": "module",
   "engines": {
