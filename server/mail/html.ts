@@ -70,6 +70,36 @@ export function stripQuotedHtml(rawHtml: string): string | null {
   return htmlToText(cleaned).trim().length > 0 ? cleaned : null
 }
 
+const NOTIFICATION_MARK = /Please (reply|type your reply) above this line/i
+const THREAD_HEADER = /<h3[^>]*>\s*(?:<span[^>]*>\s*)?<strong[^>]*>[^<]{1,120}<\/strong>\s*[a-z ]{3,40}?\s*(?:<\/span>\s*)?<\/h3>/gi
+const CONTENT_CELL = /<td[^>]*colspan\s*=\s*"?2"?[^>]*>/gi
+const NEXT_ITEM = /<tr[^>]*>\s*<td[^>]*>\s*<table[^>]*>\s*<tr[^>]*>\s*<td[^>]*>\s*<table[^>]*>\s*<tr[^>]*>/i
+const FOOTER = /<a[^>]*>\s*Notification Settings\s*<\/a>|\{#FS:/i
+
+/**
+ * Notification emails from FreeScout-style help desks carry the whole conversation: a header,
+ * then every message, newest first. Keep only the newest message.
+ * Returns the trimmed HTML, or null when the mail is not such a notification.
+ */
+export function stripHelpdeskNotification(rawHtml: string): string | null {
+  if (rawHtml.length > MAX_STRIP_BYTES || !NOTIFICATION_MARK.test(rawHtml.slice(0, 20_000))) return null
+  THREAD_HEADER.lastIndex = 0
+  const header = THREAD_HEADER.exec(rawHtml)
+  if (!header) return null
+  // The message body is the second two-column cell after the header: the first one is a spacer.
+  CONTENT_CELL.lastIndex = THREAD_HEADER.lastIndex
+  const spacer = CONTENT_CELL.exec(rawHtml)
+  const cell = spacer && rawHtml.slice(CONTENT_CELL.lastIndex, CONTENT_CELL.lastIndex + 200).replace(/&nbsp;|\s|\u00a0/g, '').startsWith('</td>') ? CONTENT_CELL.exec(rawHtml) : spacer
+  if (!cell) return null
+  const start = cell.index + cell[0].length
+  const rest = rawHtml.slice(start)
+  const ends = [NEXT_ITEM.exec(rest)?.index, FOOTER.exec(rest)?.index].filter((i): i is number => i !== undefined)
+  const body = rest.slice(0, ends.length ? Math.min(...ends) : rest.length)
+  // Unmatched closing tags from the surrounding table are dropped by the cleaner.
+  const cleaned = cleanHtml(body.replace(/\{#FS:[^}]*#\}/g, ''))
+  return htmlToText(cleaned).trim().length > 0 ? cleaned : null
+}
+
 /** Same idea for plain-text mail. Returns null when nothing was removed. */
 export function stripQuotedText(text: string): string | null {
   const lines = text.replace(/\r\n/g, '\n').split('\n')

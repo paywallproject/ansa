@@ -1,6 +1,6 @@
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
 import { get, run } from '../db.ts'
-import { cleanHtml, fillTemplate, htmlToText, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
+import { cleanHtml, fillTemplate, htmlToText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
 import type { MailboxRow } from './outbound.ts'
 import { addCustomerMessage, addReply, createConversation } from '../services/conversations.ts'
 import { findOrCreateCustomer, isEmail, normEmail } from '../services/customers.ts'
@@ -69,7 +69,7 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
   let stripped: string | null = null
   if (mail.html) {
     full = cleanHtml(mail.html)
-    if (!created) stripped = stripQuotedHtml(mail.html)
+    stripped = stripHelpdeskNotification(mail.html) ?? (created ? null : stripQuotedHtml(mail.html))
   } else {
     const text = mail.text || ''
     full = textToHtml(text)

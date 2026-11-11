@@ -254,3 +254,19 @@ test('apps: static sidebar fills placeholders safely, webhooks are signed', asyn
     server.close()
   }
 })
+
+test('help desk notification emails keep only the newest message', () => {
+  const item = (who: string, verb: string, body: string) =>
+    `<tr><td><table><tr><td><table><tr><td><h3 style="margin:0"><span><strong>${who}</strong> ${verb}</span></h3></td><td><div>Nov 10, 10:15pm</div></td></tr><tr><td colspan="2">&nbsp;</td></tr><tr><td colspan="2" style="padding:0"><div>${body}</div></td></tr></table></td></tr></table></td></tr>`
+  const mail = `<table><tr><td><table><tr><td><p>-- Please reply above this line --</p></td></tr></table><table><tr><td><p><strong>Jane Doe</strong> replied to conversation <a href="https://desk.test/conversation/7">#7</a></p></td></tr>${item('Jane Doe', 'replied', '<div>Newest message</div><table><tr><td>a cell</td></tr></table>')}<tr><td><table><tr><td><table><tr><td><div>Sam assigned to you</div></td><td><div>Nov 8</div></td></tr></table></td></tr></table></td></tr>${item('Sam Agent', 'added a note', 'Older note')}${item('Jane Doe', 'started the conversation', 'First message')}<tr><td><p><a href="https://desk.test/users/notifications/7">Notification Settings</a></p></td></tr></table></td></tr></table>`
+  const out = html.stripHelpdeskNotification(mail)!
+  const text = html.htmlToText(out)
+  assert.ok(text.includes('Newest message') && text.includes('a cell'), text)
+  assert.ok(!/Older note|First message|assigned to you|Notification Settings|reply above/.test(text), text)
+  // A single message still ends at the footer.
+  const single = html.htmlToText(html.stripHelpdeskNotification(mail.replace(item('Sam Agent', 'added a note', 'Older note'), '').replace(item('Jane Doe', 'started the conversation', 'First message'), '').replace(/<tr><td><table><tr><td><table><tr><td><div>Sam assigned.*?<\/table><\/td><\/tr><\/table><\/td><\/tr>/, ''))!)
+  assert.ok(single.includes('Newest message') && !single.includes('Notification Settings'), single)
+  // Ordinary mail is left alone, even when it mentions the marker phrase.
+  assert.equal(html.stripHelpdeskNotification('<p>Please reply above this line</p><p>Hello</p>'), null)
+  assert.equal(html.stripHelpdeskNotification('<h3><strong>Jane</strong> replied</h3><p>Hello</p>'), null)
+})
