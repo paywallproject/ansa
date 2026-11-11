@@ -88,7 +88,8 @@ function Home() {
 function ConversationRedirect() {
   const { conversationId } = useParams()
   const { user } = useSession()
-  const query = useQuery({ queryKey: ['conversation', Number(conversationId)], queryFn: () => api.get<{ conversation: Conversation }>(`/conversations/${conversationId}`).then((r) => r.conversation) })
+  // Same key and same shape as the conversation view, so the two share one cache entry.
+  const query = useQuery({ queryKey: ['conversation', Number(conversationId)], queryFn: () => api.get<{ conversation: Conversation }>(`/conversations/${conversationId}`), select: (r) => r.conversation })
   if (query.isPending) return <Splash />
   if (query.isError) return <Navigate to="/" replace />
   const c = query.data

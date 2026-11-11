@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Briefcase, Building2, Copy, Lock, Mail, MapPin, Pencil, Phone, RefreshCw, SquarePen } from 'lucide-react'
+import { Briefcase, Building2, Copy, Info, Lock, Mail, MapPin, Pencil, Phone, RefreshCw, SquarePen } from 'lucide-react'
 import { api } from '../lib/api'
 import { ago, dateOnly, STATUS_LABEL } from '../lib/format'
 import type { Conversation, Customer } from '../lib/types'
@@ -30,7 +30,7 @@ function AppPanels({ conversationId, customerId }: { conversationId: number; cus
   return (
     <>
       {apps.data.map((app) => (
-        <section key={app.id} aria-label={app.name} className="border-t border-line p-5">
+        <section key={app.id} aria-label={app.name} className="rounded-xl border border-line bg-surface p-4">
           <div className="mb-2 flex h-5 items-center justify-between">
             <h3 className="font-semibold">{app.name}</h3>
             <IconButton label={`Reload ${app.name}`} size="sm" className="size-6" onClick={() => void apps.refetch()} disabled={apps.isFetching}>
@@ -83,8 +83,29 @@ export function CustomerPanel({ conversation }: { conversation: Conversation }) 
   const iconButton = 'flex size-7 shrink-0 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-sunken hover:text-fg'
 
   return (
-    <div className="text-[13px]">
-      <section className="p-5">
+    <div className="flex flex-col gap-2 p-2 text-[13px]">
+      <section className="rounded-xl border border-line bg-surface p-4" aria-label="Overview">
+        <h3 className="flex h-5 items-center gap-2 font-semibold">
+          <Info className="size-3.5 text-fg-3" aria-hidden />
+          Overview
+        </h3>
+        <dl className="mt-3 grid grid-cols-[92px_minmax(0,1fr)] items-center gap-y-2.5">
+          <dt className="text-fg-3">Status</dt>
+          <dd className="flex items-center gap-2 font-medium">
+            <StatusDot status={conversation.status} />
+            {STATUS_LABEL[conversation.status]}
+          </dd>
+          <dt className="text-fg-3">Assigned to</dt>
+          <dd className="flex min-w-0 items-center gap-2 font-medium">
+            {conversation.assignee ? <Avatar name={conversation.assignee.name} color={conversation.assignee.color} size={18} /> : null}
+            <span className="truncate">{conversation.assignee?.name ?? 'Nobody'}</span>
+          </dd>
+          <dt className="text-fg-3">Mailbox</dt>
+          <dd className="truncate font-medium">{conversation.mailboxName}</dd>
+        </dl>
+      </section>
+
+      <section className="rounded-xl border border-line bg-surface p-4">
         <div className="flex items-start gap-3">
           <Avatar name={displayName} color="#6fa3e8" size={44} />
           <div className="min-w-0 flex-1 pt-0.5">
@@ -125,7 +146,7 @@ export function CustomerPanel({ conversation }: { conversation: Conversation }) 
         </dl>
       </section>
 
-      <section className="border-t border-line p-5">
+      <section className="rounded-xl border border-line bg-surface p-4">
         <div className="flex h-5 items-center">
           <h3 className="font-semibold">
             <label htmlFor="customer-notes">Notes</label>
@@ -149,7 +170,7 @@ export function CustomerPanel({ conversation }: { conversation: Conversation }) 
 
       <AppPanels conversationId={conversation.id} customerId={customer.id} />
 
-      <section className="border-t border-line p-5">
+      <section className="rounded-xl border border-line bg-surface p-4">
         <div className="flex h-5 items-center">
           <h3 className="font-semibold">Conversations</h3>
           <span className="ml-1.5 text-fg-3 tabular-nums">{conversation.previousConversations.length + 1}</span>

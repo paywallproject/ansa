@@ -146,8 +146,8 @@ export const Composer = forwardRef<
   )
 
   return (
-    <div className={cx('shrink-0 px-5 pb-5 md:px-6', !open && 'hidden')}>
-      <div className="mx-auto max-w-[720px]">
+    <div className={cx('shrink-0 px-4 pb-5 md:px-6', !open && 'hidden')}>
+      <div className="mx-auto max-w-[800px] md:px-14">
         {othersReplying.length > 0 && !isNote && (
           <div className="mb-2">
             <Banner kind="warn">

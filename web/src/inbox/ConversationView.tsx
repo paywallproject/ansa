@@ -16,10 +16,8 @@ import {
   PanelRight,
   Plus,
   RefreshCw,
-  Reply,
   ShieldAlert,
   ShieldCheck,
-  StickyNote,
   Tag as TagIcon,
   Trash2,
   UserRound,
@@ -172,12 +170,12 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           }}
         />
       </div>
-      <aside className="hidden w-[300px] shrink-0 overflow-y-auto border-l border-line xl:block" aria-label="Customer">
+      <aside className="hidden w-[316px] shrink-0 overflow-y-auto border-l border-line bg-canvas xl:block" aria-label="Customer">
         <CustomerPanel conversation={conversation} />
       </aside>
       {panel && (
         <div className="animate-fade fixed inset-0 z-30 flex justify-end bg-black/40 xl:hidden" onClick={() => setPanel(false)}>
-          <aside className="h-full w-80 max-w-[88vw] overflow-y-auto bg-surface shadow-pop" onClick={(e) => e.stopPropagation()} aria-label="Customer">
+          <aside className="h-full w-80 max-w-[88vw] overflow-y-auto bg-canvas shadow-pop" onClick={(e) => e.stopPropagation()} aria-label="Customer">
             <CustomerPanel conversation={conversation} />
           </aside>
         </div>
@@ -652,51 +650,54 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
   }, [conversation.id, lastId, composing])
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-5 md:px-6">
-      <ol className="mx-auto flex max-w-[720px] flex-col gap-3 pt-5 pb-3">
-        {conversation.threads.map((thread, index) => {
-          const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
-          return (
-            <Fragment key={thread.id}>
-              {newDay && (
-                <li className="flex items-center gap-3 text-xs text-fg-3">
-                  <span className="h-px flex-1 bg-line" aria-hidden />
-                  <time dateTime={new Date(thread.createdAt).toISOString().slice(0, 10)}>{dayLabel(thread.createdAt)}</time>
-                  <span className="h-px flex-1 bg-line" aria-hidden />
-                </li>
-              )}
-              {thread.type === 'event' ? (
-                <EventLine thread={thread} />
-              ) : (
-                <Message
-                  thread={thread}
-                  folded={folded.has(thread.id)}
-                  onToggle={() =>
-                    setFolded((set) => {
-                      const next = new Set(set)
-                      if (next.has(thread.id)) next.delete(thread.id)
-                      else next.add(thread.id)
-                      return next
-                    })
-                  }
-                />
-              )}
-            </Fragment>
-          )
-        })}
-        {!composing && (
-          <li className="mt-1 flex items-center justify-center gap-2">
-            <button type="button" onClick={() => onCompose('reply')} className="flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover">
-              <Reply className="size-4" aria-hidden />
-              Reply
-            </button>
-            <button type="button" onClick={() => onCompose('note')} className="flex h-9 items-center gap-2 rounded-lg border border-note-line bg-note px-3.5 text-[13px] font-medium text-note-fg transition-colors hover:brightness-[0.98]">
-              <StickyNote className="size-4" aria-hidden />
-              Note
-            </button>
-          </li>
-        )}
-      </ol>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
+        {/* The extra bottom space keeps the last message clear of the floating buttons. */}
+        <ol className={cx('mx-auto flex max-w-[800px] flex-col gap-4 pt-5', composing ? 'pb-4' : 'pb-24')}>
+          {conversation.threads.map((thread, index) => {
+            const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
+            return (
+              <Fragment key={thread.id}>
+                {newDay && (
+                  <li className="flex items-center gap-3 text-xs text-fg-3 md:px-14">
+                    <span className="h-px flex-1 bg-line" aria-hidden />
+                    <time dateTime={new Date(thread.createdAt).toISOString().slice(0, 10)}>{dayLabel(thread.createdAt)}</time>
+                    <span className="h-px flex-1 bg-line" aria-hidden />
+                  </li>
+                )}
+                {thread.type === 'event' ? (
+                  <EventLine thread={thread} />
+                ) : (
+                  <Message
+                    thread={thread}
+                    folded={folded.has(thread.id)}
+                    onToggle={() =>
+                      setFolded((set) => {
+                        const next = new Set(set)
+                        if (next.has(thread.id)) next.delete(thread.id)
+                        else next.add(thread.id)
+                        return next
+                      })
+                    }
+                  />
+                )}
+              </Fragment>
+            )
+          })}
+        </ol>
+      </div>
+      {!composing && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center gap-2">
+          <button type="button" onClick={() => onCompose('reply')} className="pointer-events-auto flex h-10 items-center gap-2 rounded-lg bg-accent pr-2.5 pl-4 text-[13px] font-semibold text-white shadow-[0_6px_16px_-4px_rgba(34,31,92,0.45)] transition-colors hover:bg-accent-hover">
+            Reply
+            <kbd className="flex size-5 items-center justify-center rounded bg-white/20 font-sans text-[11px] font-semibold">R</kbd>
+          </button>
+          <button type="button" onClick={() => onCompose('note')} className="pointer-events-auto flex h-10 items-center gap-2 rounded-lg border border-note-line bg-note pr-2.5 pl-4 text-[13px] font-semibold text-note-fg shadow-[0_6px_16px_-6px_rgba(24,24,29,0.3)] transition-[filter] hover:brightness-[0.98]">
+            Note
+            <kbd className="flex size-5 items-center justify-center rounded bg-note-line/70 font-sans text-[11px] font-semibold">N</kbd>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -732,6 +733,35 @@ function EventLine({ thread }: { thread: Thread }) {
   )
 }
 
+const KEEP_EMPTY = new Set(['IMG', 'HR', 'TABLE', 'VIDEO', 'AUDIO', 'IFRAME'])
+const isBlank = (node: Node): boolean => {
+  if (node.nodeType === Node.TEXT_NODE) return !(node.textContent || '').replace(/[\s ​‌]/g, '')
+  if (node.nodeType !== Node.ELEMENT_NODE) return true
+  const el = node as Element
+  if (KEEP_EMPTY.has(el.tagName) || el.querySelector('img, hr, table')) return false
+  return !(el.textContent || '').replace(/[\s ​‌]/g, '')
+}
+/**
+ * Emails often end, and sometimes start, with empty lines. Drop them so every card has the same padding.
+ * The HTML was cleaned by the server; it is parsed here in an inert template and nothing in it runs.
+ */
+function trimBlankEdges(html: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const trim = (parent: Node, edge: 'firstChild' | 'lastChild') => {
+    for (let node = parent[edge]; node; node = parent[edge]) {
+      if (isBlank(node)) parent.removeChild(node)
+      else {
+        if (node.nodeType === Node.ELEMENT_NODE && !KEEP_EMPTY.has((node as Element).tagName)) trim(node, edge)
+        break
+      }
+    }
+  }
+  trim(template.content, 'lastChild')
+  trim(template.content, 'firstChild')
+  return template.innerHTML
+}
+
 function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean; onToggle: () => void }) {
   const client = useQueryClient()
   const { toast } = useFeedback()
@@ -746,50 +776,69 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
   const color = thread.author.kind === 'user' ? thread.author.color : isCustomer ? CUSTOMER_COLOR : undefined
-  const verb = thread.type === 'reply' && thread.via === 'auto' ? 'sent automatically' : thread.type === 'reply' && thread.via === 'email' ? 'replied by email' : ''
   const files = thread.attachments.filter((a) => !a.inline)
   const text = useMemo(() => (folded ? stripTags(thread.bodyHtml) : ''), [folded, thread.bodyHtml])
-  const html = showQuoted && quoted.data ? quoted.data : thread.bodyHtml
+  const html = useMemo(() => trimBlankEdges(showQuoted && quoted.data ? quoted.data : thread.bodyHtml), [showQuoted, quoted.data, thread.bodyHtml])
+
+  // The line under the name says where the message came from or went, and how.
+  const meta: ReactNode[] = []
+  const sender = thread.from || (thread.author.kind === 'customer' ? thread.author.email : '')
+  if (isCustomer && sender) meta.push(<><span className="font-medium text-fg-2">From</span> {sender}</>)
+  if (thread.type === 'reply' && thread.to.length > 0) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
+  if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
+  if (isNote) meta.push(<>Only your team sees this</>)
+  const how = isNote ? 'Note' : thread.type === 'reply' ? (thread.via === 'auto' ? 'Auto reply' : thread.via === 'email' ? 'Replied by email' : thread.via === 'mcp' || thread.via === 'api' ? 'Sent through the API' : '') : ''
 
   return (
-    <li>
+    <li className="relative md:px-14">
+      {/* The avatar sits outside the card: left for the customer, right for the team. */}
+      <Avatar name={name} color={color} size={40} className={cx('absolute top-4 hidden md:inline-flex', isCustomer ? 'left-0' : 'right-0')} />
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
-          'relative rounded-xl py-4',
-          // Customer messages and replies share one white outlined card. The avatar side tells them apart:
-          // left for the customer, right for us. Notes are yellow.
-          isCustomer ? 'pr-4 pl-9' : 'pr-9 pl-4',
-          isNote ? 'border border-note-line bg-note' : 'border border-line bg-surface',
+          'relative rounded-xl border px-5 md:px-11',
+          folded ? 'py-4' : 'pt-5 pb-6',
+          isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
           thread.state === 'failed' && 'ring-1 ring-danger/50',
         )}
       >
-        <Avatar name={name} color={color} size={32} className={cx('absolute top-3 ring-4 ring-surface', isCustomer ? '-left-4' : '-right-4')} />
-        <header className="flex items-baseline gap-2">
-          <button type="button" onClick={onToggle} aria-expanded={!folded} className="flex min-w-0 flex-1 items-baseline gap-1.5 rounded text-left">
-            <span className="shrink-0 text-sm font-semibold">{name}</span>
-            {verb && <span className="shrink-0 text-[13px] text-fg-3">{verb}</span>}
-            {folded && <span className="min-w-0 flex-1 truncate text-[13px] text-fg-3">{text}</span>}
-          </button>
-          {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
-          <time className={cx('shrink-0 text-xs tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
-            {timeOnly.format(thread.createdAt)}
-          </time>
+        {/* A bar down the left edge marks what the team wrote. */}
+        {!isCustomer && <span className={cx('absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
+        <header>
+          <div className="flex items-center gap-2.5">
+            <Avatar name={name} color={color} size={24} className="md:hidden" />
+            <button type="button" onClick={onToggle} aria-expanded={!folded} className="flex min-w-0 flex-1 items-baseline rounded text-left">
+              <span className="truncate text-sm font-semibold">{name}</span>
+            </button>
+            {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
+            <time className={cx('shrink-0 text-xs tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
+              {timeOnly.format(thread.createdAt)}
+            </time>
+          </div>
+          {folded ? (
+            <button type="button" onClick={onToggle} tabIndex={-1} className="mt-1 block w-full truncate text-left text-[13px] text-fg-3">
+              {text || 'No message text'}
+            </button>
+          ) : (
+            (meta.length > 0 || how) && (
+              <div className={cx('mt-1 flex items-baseline gap-3 text-xs', isNote ? 'text-note-fg' : 'text-fg-3')}>
+                <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  {meta.map((part, index) => (
+                    <Fragment key={index}>
+                      {index > 0 && <span className="mx-1.5" aria-hidden>·</span>}
+                      {part}
+                    </Fragment>
+                  ))}
+                </p>
+                {how && <span className="shrink-0">{how}</span>}
+              </div>
+            )
+          )}
         </header>
         {!folded && (
-          <div className="mt-1.5">
-            {!isNote && (thread.cc.length > 0 || (thread.type === 'reply' && thread.to.length > 0)) && (
-              <p className="mb-2 text-xs text-fg-3">
-                {thread.type === 'reply' && thread.to.length > 0 && <>To {thread.to.join(', ')}</>}
-                {thread.cc.length > 0 && (
-                  <>
-                    {thread.type === 'reply' && thread.to.length > 0 ? ' · ' : ''}Cc {thread.cc.join(', ')}
-                  </>
-                )}
-              </p>
-            )}
+          <div className={cx('mt-4 border-t pt-5', isNote ? 'border-note-line' : 'border-line')}>
             {thread.state === 'failed' && (
-              <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-[13px] text-danger">
+              <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-[13px] text-danger">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">This reply was not sent.</p>
@@ -806,13 +855,13 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 type="button"
                 onClick={() => setShowQuoted((open) => !open)}
                 aria-expanded={showQuoted}
-                className={cx('mt-2 inline-flex h-5 items-center rounded-md px-1.5 text-xs font-medium text-fg-3 hover:text-fg', isNote ? 'bg-black/5 hover:bg-black/10 dark:bg-white/10' : 'bg-sunken hover:bg-hover')}
+                className={cx('mt-4 inline-flex h-6 items-center rounded-md px-2 text-xs font-medium text-fg-3 hover:text-fg', isNote ? 'bg-black/5 hover:bg-black/10 dark:bg-white/10' : 'bg-sunken hover:bg-hover')}
               >
                 {quoted.isFetching ? 'Loading…' : showQuoted ? 'Hide quoted text' : 'Show quoted text'}
               </button>
             )}
             {files.length > 0 && (
-              <ul className="mt-3 flex flex-wrap gap-2">
+              <ul className="mt-4 flex flex-wrap gap-2">
                 {files.map((file) => (
                   <AttachmentChip key={file.id} file={file} />
                 ))}
