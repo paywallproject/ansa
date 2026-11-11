@@ -5,7 +5,7 @@ import { api } from './lib/api'
 import { SessionContext, useLiveEvents, useMailboxes, useSession } from './lib/hooks'
 import type { Conversation, User } from './lib/types'
 import { Spinner } from './ui'
-import { applyWorkspace, brand, type Workspace } from './lib/workspace'
+import { applyWorkspace, brand, workspace, type Workspace } from './lib/workspace'
 import { Login, Setup } from './pages/Auth'
 import { Shell } from './Shell'
 import { InboxPage } from './inbox/InboxPage'
@@ -98,6 +98,6 @@ function ConversationRedirect() {
   if (query.isError) return <Navigate to="/" replace />
   const c = query.data
   const folder =
-    c.status === 'closed' ? 'closed' : c.status === 'spam' ? 'spam' : c.snoozedUntil ? 'snoozed' : !c.assignee ? 'unassigned' : c.assignee.id === user.id ? 'mine' : 'assigned'
+    c.status === 'closed' ? 'closed' : c.status === 'spam' ? 'spam' : c.snoozedUntil ? 'snoozed' : c.status === 'pending' && workspace().fourStatuses ? 'pending' : !c.assignee ? 'unassigned' : c.assignee.id === user.id ? 'mine' : 'assigned'
   return <Navigate to={`/m/${c.mailboxId}/${folder}/${c.id}`} replace />
 }

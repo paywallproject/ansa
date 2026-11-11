@@ -102,7 +102,7 @@ export function WorkspaceSettings() {
           />
           {workspace.fourStatuses ? (
             <Banner>
-              A new conversation is <strong>Active</strong>. When the customer answers, it becomes <strong>Waiting on me</strong>. Pick <strong>Waiting on customer</strong> or <strong>Closed</strong> when you reply. Turning this off moves "Waiting on me" conversations back to Active, and "Waiting on customer" shows as Pending.
+              A new conversation is <strong>Active</strong>. When the customer answers, it becomes <strong>Waiting on me</strong>. Pick <strong>Waiting on customer</strong> or <strong>Closed</strong> when you reply. Conversations that wait on the customer leave Unassigned, Mine and Assigned, and move to their own folder. Turning this off moves "Waiting on me" conversations back to Active, and "Waiting on customer" shows as Pending.
             </Banner>
           ) : null}
         </div>

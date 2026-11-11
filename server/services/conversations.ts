@@ -14,7 +14,7 @@ import { brandName, getWorkspace } from './workspace.ts'
  */
 export type Status = 'active' | 'waiting' | 'pending' | 'closed' | 'spam'
 export const STATUSES: Status[] = ['active', 'waiting', 'pending', 'closed', 'spam']
-export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'snoozed' | 'closed' | 'spam' | 'all' | 'open'
+export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'pending' | 'snoozed' | 'closed' | 'spam' | 'all' | 'open'
 
 export interface Actor {
   userId: number | null
@@ -24,16 +24,25 @@ export interface Actor {
 const OPEN = `c.status IN ('active', 'waiting', 'pending')`
 /** Open and our turn to act. */
 const NEEDS_US = `c.status IN ('active', 'waiting')`
-const FOLDER_SQL: Record<Folder, string> = {
-  unassigned: `${OPEN} AND c.assignee_id IS NULL AND c.snoozed_until IS NULL`,
-  mine: `${OPEN} AND c.assignee_id = :me AND c.snoozed_until IS NULL`,
-  mentioned: `${OPEN} AND c.id IN (SELECT conversation_id FROM mentions WHERE user_id = :me)`,
-  assigned: `${OPEN} AND c.assignee_id IS NOT NULL AND c.snoozed_until IS NULL`,
-  snoozed: `${OPEN} AND c.snoozed_until IS NOT NULL`,
-  closed: `c.status = 'closed'`,
-  spam: `c.status = 'spam'`,
-  open: OPEN,
-  all: `c.status != 'spam'`,
+/**
+ * Which conversations each folder holds. With four statuses, "waiting on customer" is not our
+ * work, so it leaves Unassigned, Mine and Assigned and gets a folder of its own.
+ */
+function folderSql(folder: Folder): string | undefined {
+  const working = getWorkspace().fourStatuses ? NEEDS_US : OPEN
+  const folders: Record<Folder, string> = {
+    unassigned: `${working} AND c.assignee_id IS NULL AND c.snoozed_until IS NULL`,
+    mine: `${working} AND c.assignee_id = :me AND c.snoozed_until IS NULL`,
+    mentioned: `${OPEN} AND c.id IN (SELECT conversation_id FROM mentions WHERE user_id = :me)`,
+    assigned: `${working} AND c.assignee_id IS NOT NULL AND c.snoozed_until IS NULL`,
+    pending: `c.status = 'pending' AND c.snoozed_until IS NULL`,
+    snoozed: `${OPEN} AND c.snoozed_until IS NOT NULL`,
+    closed: `c.status = 'closed'`,
+    spam: `c.status = 'spam'`,
+    open: OPEN,
+    all: `c.status != 'spam'`,
+  }
+  return folders[folder]
 }
 
 const BASE_SELECT = `
@@ -114,8 +123,9 @@ export function listConversations(opts: ListOptions) {
     where.push('c.mailbox_id = :mailbox')
     params.mailbox = opts.mailboxId
   }
-  if (opts.folder && FOLDER_SQL[opts.folder]) {
-    where.push(`(${FOLDER_SQL[opts.folder]})`)
+  const inFolder = opts.folder ? folderSql(opts.folder) : undefined
+  if (inFolder) {
+    where.push(`(${inFolder})`)
     if (opts.folder === 'mine' || opts.folder === 'mentioned') params.me = opts.me ?? 0
   }
   if (opts.status) {

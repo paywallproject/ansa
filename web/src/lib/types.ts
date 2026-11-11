@@ -1,5 +1,5 @@
 export type Status = 'active' | 'waiting' | 'pending' | 'closed' | 'spam'
-export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'snoozed' | 'closed' | 'spam' | 'all'
+export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'pending' | 'snoozed' | 'closed' | 'spam' | 'all'
 
 export interface User {
   id: number

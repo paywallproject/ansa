@@ -18,6 +18,7 @@ const PAGE = 40
 const EMPTY: Record<Folder, { title: string; body: string }> = {
   unassigned: { title: 'All caught up', body: 'New conversations that nobody owns yet show up here.' },
   mine: { title: 'Nothing on your plate', body: 'Conversations assigned to you show up here.' },
+  pending: { title: 'Nothing is waiting on a customer', body: 'Conversations you answered and set to “Waiting on customer” stay here until the customer writes back.' },
   mentioned: { title: 'No mentions', body: 'Open conversations where a teammate mentioned you in a note show up here.' },
   assigned: { title: 'Nothing assigned', body: 'Open conversations that have an owner show up here.' },
   snoozed: { title: 'Nothing snoozed', body: 'Snooze a conversation to hide it until you need it.' },
@@ -339,7 +340,7 @@ function CheckBox({ checked, mixed, label, onClick }: { checked: boolean; mixed?
 function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { conversation: ConversationSummary; to: string; checked: boolean; onCheck: () => void; showMailbox: boolean; folder: Folder | null }) {
   const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
   const openFolder = folder === 'unassigned' || folder === 'mine' || folder === 'assigned' || folder === 'mentioned'
-  const showStatus = folder === null || folder === 'all' || ((c.status === 'pending' || (c.status === 'waiting' && workspace().fourStatuses)) && folder !== 'closed') || folder === 'snoozed'
+  const showStatus = folder === null || folder === 'all' || ((c.status === 'pending' || (c.status === 'waiting' && workspace().fourStatuses)) && folder !== 'closed' && folder !== 'pending') || folder === 'snoozed'
   const showAssignee = c.assignee && folder !== 'mine'
   const when = openFolder && c.waitingSince ? c.waitingSince : c.updatedAt
 

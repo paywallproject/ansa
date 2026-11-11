@@ -314,8 +314,12 @@ test('workspace features: mentions always work; four statuses are off until enab
 
     conversations.addReply(second, { bodyHtml: '<p>Checking</p>', status: 'pending', skipDelivery: true }, { userId: agentId, via: 'web' })
     assert.equal(conversations.getSummary(second).status, 'pending')
+    conversations.updateConversation(second, { assigneeId: agentId }, { userId: agentId, via: 'web' })
+    const inFolder = (folder: 'mine' | 'pending') => conversations.listConversations({ mailboxId, folder, me: agentId }).items.some((c) => c.id === second)
+    assert.deepEqual([inFolder('mine'), inFolder('pending')], [false, true], 'waiting on customer leaves Mine')
     conversations.addCustomerMessage(second, { customerId: get<{ customer_id: number }>('SELECT customer_id FROM conversations WHERE id = ?', second)!.customer_id, bodyHtml: '<p>Any news?</p>' })
     assert.equal(conversations.getSummary(second).status, 'waiting', 'a customer answer puts it on our side')
+    assert.deepEqual([inFolder('mine'), inFolder('pending')], [true, false], 'waiting on me is in Mine')
     assert.equal(workspace.statusLabel('waiting'), 'Waiting on me')
     assert.equal(workspace.statusLabel('pending'), 'Waiting on customer')
 

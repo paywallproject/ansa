@@ -488,7 +488,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         }
       />
       {createPortal(
-        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[60] flex flex-col items-center gap-2 px-4" aria-live="polite">
+        <div className="pointer-events-none fixed inset-x-0 top-16 z-[60] flex flex-col items-center gap-2 px-4" aria-live="polite">
           {toasts.map((t) => (
             <div key={t.id} role={t.kind === 'error' ? 'alert' : 'status'} className="animate-toast pointer-events-auto flex max-w-md items-center gap-2.5 rounded-xl bg-fg py-2.5 pr-3 pl-3.5 text-[13px] font-medium text-surface shadow-pop">
               {t.kind === 'error' ? <CircleAlert className="size-4 shrink-0 text-danger" aria-hidden /> : <CircleCheck className="size-4 shrink-0 text-ok" aria-hidden />}

@@ -93,7 +93,7 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
       {
         onSuccess: () => {
           toast(`Marked as ${STATUS_LABEL[status].toLowerCase()}`, { action: { label: 'Undo', run: () => update.mutate({ status: previous }) } })
-          if (status === 'closed' || status === 'spam') onDone()
+          if (status === 'closed' || status === 'spam' || (status === 'pending' && workspace().fourStatuses)) onDone()
         },
       },
     )
@@ -167,7 +167,8 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           onTyping={setTyping}
           onSent={(status) => {
             setComposing(false)
-            if (status === 'closed') onDone()
+            // The conversation leaves this folder, so move on to the next one.
+            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone()
           }}
         />
       </div>

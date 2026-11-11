@@ -6,6 +6,7 @@ import {
   AlarmClock,
   Archive,
   AtSign,
+  Hourglass,
   ChartNoAxesColumn,
   ChevronDown,
   Inbox,
@@ -45,13 +46,17 @@ export const FOLDERS: { id: Folder; label: string; icon: typeof Inbox; countKey?
   { id: 'mine', label: 'Mine', icon: UserRound, countKey: 'mine' },
   { id: 'mentioned', label: 'Mentioned', icon: AtSign, countKey: 'mentioned' },
   { id: 'assigned', label: 'Assigned', icon: Users, countKey: 'assigned' },
+  { id: 'pending', label: 'Waiting on customer', icon: Hourglass },
   { id: 'snoozed', label: 'Snoozed', icon: AlarmClock },
   { id: 'closed', label: 'Closed', icon: Archive },
   { id: 'spam', label: 'Spam', icon: ShieldAlert },
 ]
 
-/** The Mentioned folder is shown only when the workspace turned it on. Mentions themselves always work. */
-export const visibleFolders = () => FOLDERS.filter((f) => f.id !== 'mentioned' || workspace().mentions)
+/**
+ * The Mentioned folder is shown only when the workspace turned it on. With four statuses there is
+ * also a folder for conversations that wait on the customer, because they leave the working folders.
+ */
+export const visibleFolders = () => FOLDERS.filter((f) => (f.id !== 'mentioned' || workspace().mentions) && (f.id !== 'pending' || workspace().fourStatuses))
 
 const folderItem = (active: boolean) =>
   cx(
