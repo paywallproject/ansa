@@ -69,8 +69,10 @@ async function until<T>(what: string, fn: () => Promise<T | null | undefined | f
 
 const customerSmtp = nodemailer.createTransport({ ...SMTP, secure: false, ignoreTLS: true })
 
-async function customerInbox() {
-  const client = new ImapFlow({ ...IMAP, secure: false, auth: { user: CUSTOMER, pass: 'x' }, logger: false })
+const AGENT = `agent-${run}@test.local`
+const customerInbox = () => inboxOf(CUSTOMER)
+async function inboxOf(address: string) {
+  const client = new ImapFlow({ ...IMAP, secure: false, auth: { user: address, pass: 'x' }, logger: false })
   await client.connect()
   const lock = await client.getMailboxLock('INBOX')
   try {
@@ -87,7 +89,7 @@ const step = (text: string) => console.log(`\n✓ ${text}`)
 
 try {
   await until('server start', async () => (await fetch(`${BASE}/healthz`)).ok)
-  await call('POST', '/setup', { name: 'Test Agent', email: 'agent@test.local', password: 'password123' })
+  await call('POST', '/setup', { name: 'Test Agent', email: AGENT, password: 'password123' })
 
   const settings = {
     name: 'Support',
@@ -183,6 +185,38 @@ try {
   await call('POST', `/threads/${failed.id}/retry`)
   await until('retry to succeed', async () => (await call('GET', `/conversations/${conv.id}`)).conversation.threads.every((t: any) => t.state === 'sent'))
   step(`failed send was flagged ("${failed.error}") and the retry delivered it`)
+
+  // 5. The agent got a notification about the customer's reply, and answers it from their mail client.
+  const notice = await until('notification to reach the agent', async () => (await inboxOf(AGENT)).find((m) => m.subject === `[Support #${conv.id}] Order 1042 arrived damaged`))
+  assert.ok(notice.html && notice.html.includes('Please reply above this line') && notice.html.includes('great news'), 'notification carries the marker and the conversation')
+  assert.ok(notice.html.includes(`Replying to this notification will email Jane Doe`))
+  const quoted = `<div class="gmail_quote"><div class="gmail_attr">On Tue, Support (Ansa) wrote:</div><blockquote class="gmail_quote">${notice.html}</blockquote></div>`
+  const before = (await customerInbox()).length
+
+  // 5a. A reply from the wrong address is refused, and the agent is told.
+  await customerSmtp.sendMail({ from: `stranger-${run}@test.local`, to: SUPPORT, subject: `Re: ${notice.subject}`, inReplyTo: notice.messageId, references: [notice.messageId!], html: `<div>Sneaky reply</div>${quoted}` })
+  await until('rejection notice to reach the agent', async () => (await inboxOf(AGENT)).find((m) => /was not sent/.test(m.subject || '')))
+
+  // 5b. The agent's own reply goes to the customer, without the quoted notification.
+  await customerSmtp.sendMail({ from: { name: 'Test Agent', address: AGENT }, to: SUPPORT, subject: `Re: ${notice.subject}`, inReplyTo: notice.messageId, references: [notice.messageId!], html: `<div dir="ltr">Answered from my phone. The courier comes tomorrow.</div><br>${quoted}`, attachments: [{ filename: 'label.txt', content: 'shipping label' }] })
+  const byEmail = await until('emailed reply to appear in the conversation', async () => {
+    const c = (await call('GET', `/conversations/${conv.id}`)).conversation
+    return c.threads.find((t: any) => t.type === 'reply' && t.via === 'email' && t.state === 'sent') ? c : null
+  })
+  const emailed = byEmail.threads.find((t: any) => t.type === 'reply' && t.via === 'email')
+  assert.ok(emailed.bodyHtml.includes('courier comes tomorrow') && !/reply above|great news|Sneaky/.test(emailed.bodyHtml), emailed.bodyHtml)
+  assert.equal(emailed.author.name, 'Test Agent')
+  assert.equal(emailed.attachments[0]?.filename, 'label.txt')
+  assert.equal(byEmail.status, 'pending')
+  assert.ok(!byEmail.threads.some((t: any) => /Sneaky/.test(t.bodyHtml)), 'the stranger reply was not added')
+  const delivered = await until('emailed reply to reach the customer', async () => {
+    const all = await customerInbox()
+    return all.length > before ? all[all.length - 1] : null
+  })
+  assert.ok(delivered.text?.includes('courier comes tomorrow') && !delivered.text.includes('reply above this line'))
+  assert.equal(delivered.attachments[0]?.filename, 'label.txt')
+  assert.equal((await call('GET', `/conversations?mailbox=${mailbox.id}&folder=all`)).items.length, 1, 'no stray conversation was created')
+  step('agent replied to a notification by email; the customer got it, a stranger could not')
 
   console.log('\nAll mail checks passed.')
   cleanup()

@@ -17,7 +17,7 @@ Run it on a VPS as one container with one SQLite file, or on Cloudflare Workers 
 - **Customers.** A profile for each person, with every conversation they had with you.
 - **Saved replies** with placeholders such as `{{customer.firstName}}`.
 - **Workflows.** Rules that tag, assign, close or annotate incoming email.
-- **Auto reply** for new conversations, and email notifications for teammates.
+- **Auto reply** for new conversations, and email notifications for teammates. Reply to a notification from your mail client, and Ansa sends your answer to the customer.
 - **Reports.** Volume, response time, resolution time, busiest hours, tags and team activity.
 - **Search** across subjects, messages, notes and customers. Press `⌘K`.
 - **MCP server and REST API.** Assistants such as Claude can read, tag, note and reply.

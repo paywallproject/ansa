@@ -1,11 +1,12 @@
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
-import { get, run } from '../db.ts'
-import { cleanHtml, fillTemplate, htmlToText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
+import { get, run, getSetting, setSetting } from '../db.ts'
+import { cleanHtml, fillTemplate, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
 import type { MailboxRow } from './outbound.ts'
 import { addCustomerMessage, addReply, createConversation } from '../services/conversations.ts'
 import { findOrCreateCustomer, isEmail, normEmail } from '../services/customers.ts'
 import { storeAttachment } from '../services/attachments.ts'
 import { runWorkflows } from '../services/workflows.ts'
+import { notifyReplyRejected, parseNotificationRef } from '../services/notify.ts'
 
 export interface IngestResult {
   conversationId: number
@@ -30,6 +31,42 @@ function isAutomated(mail: ParsedMail): boolean {
 }
 
 const autoReplyLog = new Map<string, number>()
+
+const SEEN_KEY = 'notification_replies_seen'
+
+/** Turn a teammate's emailed answer to a notification into a reply to the customer. */
+function teammateReply(mailbox: MailboxRow, mail: ParsedMail, ref: { conversationId: number; userId: number }, historical: boolean): IngestResult | null {
+  // Never act on old mail or on robots: an out-of-office answer must not reach the customer.
+  if (historical || isAutomated(mail)) return null
+  const seen = getSetting<string[]>(SEEN_KEY, [])
+  const messageId = mail.messageId || ''
+  if (messageId && seen.includes(messageId)) return null
+  if (messageId) setSetting(SEEN_KEY, [...seen, messageId].slice(-300))
+
+  const user = get<{ id: number; email: string }>('SELECT id, email FROM users WHERE id = ? AND disabled = 0', ref.userId)
+  if (!user || !get('SELECT 1 FROM conversations WHERE id = ?', ref.conversationId)) return null
+  const from = normEmail(mail.from?.value[0]?.address || '')
+  if (from !== user.email.toLowerCase()) {
+    notifyReplyRejected(mailbox, user.email, ref.conversationId, `A reply to your notification came from ${from || 'an unknown address'}. Ansa only accepts replies from ${user.email}, the address on your profile.`)
+    return null
+  }
+
+  const bodyHtml = mail.html ? replyAboveMarker(mail.html) : textToHtml(replyAboveMarkerText(mail.text || ''))
+  const attachmentIds = mail.attachments
+    .filter((part) => !(part.cid && (part.related || part.contentDisposition === 'inline')))
+    .map((part) => storeAttachment(part.content, { filename: part.filename || 'attachment', mime: part.contentType, uploadedBy: user.id }).id)
+  if (!htmlToText(bodyHtml).trim() && attachmentIds.length === 0) {
+    notifyReplyRejected(mailbox, user.email, ref.conversationId, 'Your reply was empty. Write your answer above the quoted notification.')
+    return null
+  }
+  try {
+    const threadId = addReply(ref.conversationId, { bodyHtml, status: 'pending', attachmentIds }, { userId: user.id, via: 'email' })
+    return { conversationId: ref.conversationId, threadId, created: false }
+  } catch (err) {
+    notifyReplyRejected(mailbox, user.email, ref.conversationId, `Ansa could not send your reply: ${(err as Error).message}`)
+    return null
+  }
+}
 
 /** Parse one raw RFC 822 message and file it under the right conversation. Returns null when the message is skipped. */
 export async function ingestRaw(mailboxId: number, source: Buffer | string, opts: { historical?: boolean } = {}): Promise<IngestResult | null> {
@@ -62,6 +99,11 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
       conversationId = hit.conversation_id
       break
     }
+  }
+  // A teammate answered a notification email: send their words to the customer as a reply.
+  for (const id of candidates) {
+    const ref = parseNotificationRef(id)
+    if (ref) return teammateReply(mailbox, mail, ref, !!opts.historical)
   }
   const created = conversationId === null
 

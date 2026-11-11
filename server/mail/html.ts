@@ -100,6 +100,32 @@ export function stripHelpdeskNotification(rawHtml: string): string | null {
   return htmlToText(cleaned).trim().length > 0 ? cleaned : null
 }
 
+export const REPLY_MARKER = '-- Please reply above this line --'
+
+/**
+ * A teammate's reply to an Ansa notification: keep what they wrote above the quoted notification.
+ * Known mail clients are handled by stripQuotedHtml; the marker line catches the rest.
+ */
+export function replyAboveMarker(rawHtml: string): string {
+  const stripped = stripQuotedHtml(rawHtml)
+  let html = stripped ?? cleanHtml(rawHtml)
+  const at = html.search(NOTIFICATION_MARK)
+  if (at >= 0) {
+    // Drop the half-open tags and the "On … wrote:" line that lead into the quote.
+    const head = html.slice(0, at).replace(/(<[^>]*>|&nbsp;|[\s\u00a0>-])+$/, '').replace(/(On\s[^<]{5,200}\swrote:|Le\s[^<]{5,200}\sa écrit\s?:|Am\s[^<]{5,200}\sschrieb[^<]{0,80}:)\s*$/i, '')
+    html = cleanHtml(head)
+  }
+  return html.replace(/<img[^>]+src="cid:[^>]*>/gi, '').trim()
+}
+
+/** The plain-text version of replyAboveMarker. */
+export function replyAboveMarkerText(text: string): string {
+  let head = stripQuotedText(text) ?? text
+  const at = head.search(NOTIFICATION_MARK)
+  if (at >= 0) head = head.slice(0, at).replace(/[\s>-]+$/, '').replace(/\n?On\s[^\n]{5,200}\swrote:\s*$/i, '')
+  return head.trim()
+}
+
 /** Same idea for plain-text mail. Returns null when nothing was removed. */
 export function stripQuotedText(text: string): string | null {
   const lines = text.replace(/\r\n/g, '\n').split('\n')

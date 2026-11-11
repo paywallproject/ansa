@@ -1,7 +1,8 @@
+import crypto from 'node:crypto'
 import { get } from '../db.ts'
 import { config } from '../config.ts'
-import { escapeHtml } from '../mail/html.ts'
-import { sendMail, type MailboxRow } from '../mail/outbound.ts'
+import { escapeHtml, REPLY_MARKER } from '../mail/html.ts'
+import { sendMail, wrapEmailHtml, type MailboxRow } from '../mail/outbound.ts'
 import { getConversation, type ThreadView } from './conversations.ts'
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
@@ -37,6 +38,45 @@ function eventText(thread: ThreadView, viewerId: number): string {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Reply by email: the notification's Message-ID names the conversation and the teammate, signed
+// with the install's secret. A reply carries it back in In-Reply-To, which proves it answers a
+// notification this install sent to that teammate.
+// ---------------------------------------------------------------------------------------------
+
+const REF_MAX_AGE = 90 * 86_400_000
+const refSignature = (conversationId: number, userId: number, stamp: string) =>
+  crypto.createHmac('sha256', config.secret).update(`notification:${conversationId}:${userId}:${stamp}`).digest('hex').slice(0, 32)
+
+export function notificationMessageId(conversationId: number, userId: number, mailboxEmail: string, at = Date.now()): string {
+  const stamp = at.toString(36)
+  const nonce = crypto.randomBytes(4).toString('hex')
+  return `<ansa-n.${conversationId}.${userId}.${stamp}.${refSignature(conversationId, userId, stamp)}.${nonce}@${mailboxEmail.split('@')[1] || 'ansa.local'}>`
+}
+
+/** Read a Message-ID back. Returns null unless it is a notification id that this install signed, and not too old. */
+export function parseNotificationRef(messageId: string): { conversationId: number; userId: number } | null {
+  const match = /^<?ansa-n\.(\d+)\.(\d+)\.([0-9a-z]+)\.([0-9a-f]{32})\.[0-9a-f]+@/.exec(messageId.trim())
+  if (!match) return null
+  const [, conversation, user, stamp, signature] = match
+  const expected = refSignature(Number(conversation), Number(user), stamp)
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null
+  if (Date.now() - parseInt(stamp, 36) > REF_MAX_AGE) return null
+  return { conversationId: Number(conversation), userId: Number(user) }
+}
+
+/** Tell a teammate that their emailed reply was not sent to the customer. */
+export function notifyReplyRejected(mailbox: MailboxRow, to: string, conversationId: number, reason: string) {
+  if (config.mailDisabled || !mailbox.smtp_host) return
+  sendMail(mailbox, {
+    to: [to],
+    subject: `Your reply was not sent (conversation #${conversationId})`,
+    html: wrapEmailHtml(`<p>${escapeHtml(reason)}</p><p>Nothing was sent to the customer. <a href="${config.appUrl}/c/${conversationId}">Open conversation #${conversationId}</a> to reply in Ansa.</p>`),
+    fromName: `${mailbox.name} (Ansa)`,
+    headers: { 'X-Ansa-Notification': '1', 'Auto-Submitted': 'auto-generated' },
+  }).catch((err) => console.error('[notify] could not send:', (err as Error).message))
+}
+
 /** Inline images point at this server and need a login, so they cannot show inside an email. */
 const emailSafe = (html: string) => html.replace(/<img[^>]+src="\/api\/[^>]*>/g, '<span style="color:#8a8f98;">[image: open the conversation to see it]</span>')
 
@@ -45,6 +85,8 @@ export interface NotificationView {
   viewerId: number
   /** One line above the subject, already escaped HTML. Example: "<strong>Maya</strong> assigned you conversation". */
   leadHtml: string
+  /** True when a reply to this email reaches the customer (the mailbox fetches incoming mail). */
+  replyByEmail?: boolean
   conversation: Pick<ReturnType<typeof getConversation>, 'id' | 'subject' | 'status' | 'mailboxName' | 'assignee' | 'threads' | 'customer'>
 }
 
@@ -86,9 +128,13 @@ export function renderNotification(view: NotificationView): string {
   return `<div style="background:#f1f2f4; margin:0; padding:24px 12px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:650px;">
+      ${view.replyByEmail ? `<tr><td align="center" style="font:11px ${FONT}; color:#a3a8b0; padding:0 8px 14px;">${REPLY_MARKER}</td></tr>` : ''}
       <tr><td align="center" style="font:15px ${FONT}; color:#3d4148; padding:4px 8px 20px;">
-        Reply to ${escapeHtml(c.customer.name || c.customer.email)} in Ansa:
-        <a href="${url}" style="color:#3b5bdb;">open conversation #${c.id}</a>
+        ${
+          view.replyByEmail
+            ? `Replying to this notification will email ${escapeHtml(c.customer.name || c.customer.email)} (<a href="mailto:${escapeHtml(c.customer.email)}" style="color:#3b5bdb; text-decoration:none;">${escapeHtml(c.customer.email)}</a>)`
+            : `Reply to ${escapeHtml(c.customer.name || c.customer.email)} in Ansa: <a href="${url}" style="color:#3b5bdb;">open conversation #${c.id}</a>`
+        }
       </td></tr>
       <tr><td style="background:#ffffff; border:1px solid #dcdfe3;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -132,7 +178,8 @@ function send(conversationId: number, userId: number, flag: 'notify_assigned' | 
     to: [user.email],
     // The same subject for every notification of a conversation, so mail clients group them.
     subject: `[${mailbox.name} #${conversation.id}] ${conversation.subject}`,
-    html: renderNotification({ appUrl: config.appUrl, viewerId: userId, leadHtml, conversation }),
+    html: renderNotification({ appUrl: config.appUrl, viewerId: userId, leadHtml, conversation, replyByEmail: !!mailbox.imap_enabled && !!mailbox.imap_host }),
+    messageId: notificationMessageId(conversation.id, userId, mailbox.email),
     fromName: `${mailbox.name} (Ansa)`,
     headers: { 'X-Ansa-Notification': '1', 'Auto-Submitted': 'auto-generated' },
   }).catch((err) => console.error('[notify] could not send:', (err as Error).message))
