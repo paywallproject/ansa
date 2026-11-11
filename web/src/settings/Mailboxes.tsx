@@ -103,8 +103,16 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
 
   // Follows the host field, so typing your own server clears the highlighted provider.
   const preset = PRESETS.find((p) => p.smtpHost === form.smtpHost.trim().toLowerCase())?.id ?? null
+  const [pickedOther, setPickedOther] = useState(false)
+  const other = !preset && (pickedOther || form.smtpHost.trim() !== '')
+  /** "Other" clears a filled-in provider so you can type your own server. Your own entries are kept. */
+  const applyOther = () => {
+    setPickedOther(true)
+    if (preset) setForm((f) => ({ ...f, smtpHost: '', imapHost: '', smtpUser: f.smtpUser || f.email }))
+  }
   const applyPreset = (id: string) => {
     const p = PRESETS.find((x) => x.id === id)!
+    setPickedOther(false)
     setForm((f) => ({ ...f, smtpHost: p.smtpHost, smtpPort: p.smtpPort, smtpSecurity: p.smtpSecurity, imapHost: p.imapHost, imapPort: p.imapPort, imapSecurity: 'ssl', smtpUser: f.smtpUser || f.email, sameLogin: true }))
   }
   const payload = () => ({
@@ -169,7 +177,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         </div>
       </Section>
 
-      <Section title="Email provider" description="Pick your provider to fill in the server details, or enter them yourself below.">
+      <Section title="Email provider" description="Pick your provider to fill in the server details, or choose Other to enter your own.">
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => (
             <button
@@ -182,7 +190,20 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
               {p.label}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={other}
+            onClick={applyOther}
+            className={cx('h-8 rounded-lg border px-3 text-[13px] font-medium transition-colors', other ? 'border-accent bg-accent-soft text-accent-fg' : 'border-line-strong hover:bg-sunken')}
+          >
+            Other (custom SMTP)
+          </button>
         </div>
+        {other && (
+          <Banner>
+            Any mail server works, including the one from your web hosting. Enter the host, port and login from your provider&rsquo;s email settings. The host is often <strong>mail.yourdomain.com</strong>, with port 465 (SSL/TLS) or 587 (STARTTLS), and the full email address as the username.
+          </Banner>
+        )}
         {google && (
           <Banner>
             Google needs an <strong>app password</strong>, not your normal one. Turn on 2-Step Verification, then create one at{' '}
@@ -196,7 +217,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
 
       <Section title="Sending (SMTP)" description="Ansa sends replies through this server, so they come from your own address.">
         <div className="grid gap-4 sm:grid-cols-[1fr_110px_150px]">
-          <Field label="SMTP host">{(id) => <Input id={id} value={form.smtpHost} onChange={text('smtpHost')} placeholder="smtp.gmail.com" />}</Field>
+          <Field label="SMTP host">{(id) => <Input id={id} value={form.smtpHost} onChange={text('smtpHost')} placeholder={other ? "mail.yourdomain.com" : "smtp.gmail.com"} />}</Field>
           <Field label="Port">{(id) => <Input id={id} type="number" value={form.smtpPort} onChange={(e) => set('smtpPort', Number(e.target.value))} />}</Field>
           <Field label="Security">
             {(id) => (
@@ -222,7 +243,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         {form.imapEnabled && (
           <>
             <div className="grid gap-4 sm:grid-cols-[1fr_110px_150px]">
-              <Field label="IMAP host">{(id) => <Input id={id} value={form.imapHost} onChange={text('imapHost')} placeholder="imap.gmail.com" />}</Field>
+              <Field label="IMAP host">{(id) => <Input id={id} value={form.imapHost} onChange={text('imapHost')} placeholder={other ? "mail.yourdomain.com" : "imap.gmail.com"} />}</Field>
               <Field label="Port">{(id) => <Input id={id} type="number" value={form.imapPort} onChange={(e) => set('imapPort', Number(e.target.value))} />}</Field>
               <Field label="Security">
                 {(id) => (
