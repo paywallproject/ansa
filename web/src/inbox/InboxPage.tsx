@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, Inbox, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Check, ChevronDown, Inbox, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
-import { plural, shortTime } from '../lib/format'
-import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession } from '../lib/hooks'
+import { plural, shortTime, STATUS_LABEL } from '../lib/format'
+import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers } from '../lib/hooks'
 import type { ConversationSummary, Folder } from '../lib/types'
-import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
+import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback, MenuDivider, MenuLabel } from '../ui'
 import { FOLDERS } from '../Shell'
-import { workspace } from '../lib/workspace'
+import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { ConversationView } from './ConversationView'
 
 type Sort = 'recent' | 'waiting' | 'oldest'
@@ -33,6 +33,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const { user } = useSession()
   const { toast, confirm } = useFeedback()
   const mailboxes = useMailboxes()
+  const users = useUsers()
   const [searchParams, setSearchParams] = useSearchParams()
   const mailboxId = Number(params.mailboxId) || undefined
   const folder = (params.folder as Folder) || 'all'
@@ -128,14 +129,81 @@ export function InboxPage({ search = false }: { search?: boolean }) {
             <span className="tabular-nums">{checked.size}</span> selected
           </span>
           <div className="ml-auto flex items-center gap-1.5">
-            <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { status: 'closed' } })} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent pr-3 pl-2.5 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(34,31,92,0.25)] transition-colors hover:bg-accent-hover disabled:opacity-60">
-              <Check className="size-4" aria-hidden />
-              Close
-            </button>
-            <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { assigneeId: user.id } })} aria-label="Assign to me" className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/25 bg-surface pr-3 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:border-accent disabled:opacity-60">
-              <UserRoundCheck className="size-4 text-fg-2" aria-hidden />
-              <span className="hidden sm:inline">Assign to me</span>
-            </button>
+            <Popover
+              align="end"
+              width={230}
+              trigger={({ ref, ...props }) => (
+                <button ref={ref} type="button" {...props} disabled={bulk.isPending} aria-label="Set status" className="flex h-8 items-center gap-1.5 rounded-lg bg-accent pr-2 pl-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(34,31,92,0.25)] transition-colors hover:bg-accent-hover disabled:opacity-60">
+                  Status
+                  <ChevronDown className="size-3.5 opacity-80" aria-hidden />
+                </button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <MenuLabel>Set status to</MenuLabel>
+                  {statusOptions().map((status) => (
+                    <MenuItem
+                      key={status}
+                      icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
+                      onSelect={() => {
+                        close()
+                        bulk.mutate({ patch: { status } })
+                      }}
+                    >
+                      {STATUS_LABEL[status]}
+                    </MenuItem>
+                  ))}
+                </>
+              )}
+            </Popover>
+            <Popover
+              align="end"
+              width={230}
+              trigger={({ ref, ...props }) => (
+                <button ref={ref} type="button" {...props} disabled={bulk.isPending} aria-label="Assign" className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/25 bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:border-accent disabled:opacity-60">
+                  <UserRoundCheck className="size-4 text-fg-2" aria-hidden />
+                  <span className="hidden sm:inline">Assign</span>
+                  <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                </button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <MenuLabel>Assign to</MenuLabel>
+                  {(users.data ?? [])
+                    .filter((u) => !u.disabled)
+                    // Yourself first: it is the most common choice.
+                    .sort((x, y) => Number(y.id === user.id) - Number(x.id === user.id))
+                    .map((u) => (
+                      <MenuItem
+                        key={u.id}
+                        icon={<Avatar name={u.name} color={u.color} size={20} />}
+                        onSelect={() => {
+                          close()
+                          bulk.mutate({ patch: { assigneeId: u.id } })
+                        }}
+                      >
+                        {u.name} {u.id === user.id && <span className="ml-1 text-fg-3">you</span>}
+                      </MenuItem>
+                    ))}
+                  <MenuDivider />
+                  <MenuItem
+                    icon={
+                      <span className="flex size-5 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3">
+                        <UserRound className="size-3" aria-hidden />
+                      </span>
+                    }
+                    onSelect={() => {
+                      close()
+                      bulk.mutate({ patch: { assigneeId: null } })
+                    }}
+                  >
+                    Unassigned
+                  </MenuItem>
+                </>
+              )}
+            </Popover>
             <span className="mx-1.5 hidden h-5 w-px bg-accent/25 sm:block" aria-hidden />
             <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { status: 'spam' } })} aria-label="Mark as spam" className="flex h-8 items-center gap-1.5 rounded-lg pr-2.5 pl-2 text-[13px] font-medium text-fg-2 transition-colors hover:bg-accent/10 hover:text-fg disabled:opacity-60">
               <ShieldAlert className="size-4" aria-hidden />
