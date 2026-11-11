@@ -245,6 +245,34 @@ const migrations: string[] = [
   );
   CREATE VIRTUAL TABLE search USING fts5(subject, body, customer, tokenize = 'porter unicode61 remove_diacritics 2');
   `,
+  `
+  CREATE TABLE apps (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    sidebar_mode TEXT NOT NULL DEFAULT 'none',
+    sidebar_content TEXT NOT NULL DEFAULT '',
+    sidebar_url TEXT NOT NULL DEFAULT '',
+    webhook_url TEXT NOT NULL DEFAULT '',
+    events TEXT NOT NULL DEFAULT '[]',
+    mailbox_id INTEGER REFERENCES mailboxes(id) ON DELETE CASCADE,
+    secret_enc TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE app_deliveries (
+    id INTEGER PRIMARY KEY,
+    app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    event TEXT NOT NULL,
+    conversation_id INTEGER,
+    ok INTEGER NOT NULL,
+    status INTEGER,
+    detail TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX app_deliveries_app ON app_deliveries(app_id, id);
+  `,
 ]
 
 export function migrate() {

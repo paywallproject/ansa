@@ -7,7 +7,7 @@ import { useSession } from '../lib/hooks'
 import type { ApiToken } from '../lib/types'
 import { Banner, Button, Card, EmptyState, Field, IconButton, Input, PageHeader, Spinner, cx, useFeedback } from '../ui'
 
-function CodeBlock({ code, label }: { code: string; label: string }) {
+export function CodeBlock({ code, label }: { code: string; label: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="relative">

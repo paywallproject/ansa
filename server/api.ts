@@ -42,6 +42,8 @@ import { AppError, createCustomer, getCustomer, isEmail, listCustomers, normEmai
 import { attachmentFile, removeFiles, storeAttachment } from './services/attachments.ts'
 import { buildReport } from './services/reports.ts'
 import { runWorkflows } from './services/workflows.ts'
+import { createApp as createIntegration, deleteApp, getApp, listApps, listDeliveries, sidebarsFor, testApp, updateApp } from './services/apps.ts'
+import { APP_EVENTS } from './hooks.ts'
 
 export const api = new Hono<Env>()
 
@@ -714,6 +716,22 @@ function workflowFields(data: Record<string, any>) {
     actions: JSON.stringify(actions),
   }
 }
+
+// Apps: sidebar content and webhooks. See docs/apps.md.
+api.get('/apps', requireAdmin, (c) => c.json({ apps: listApps(), events: APP_EVENTS }))
+api.post('/apps', requireAdmin, async (c) => c.json({ app: createIntegration(await body(c)) }, 201))
+api.patch('/apps/:id', requireAdmin, async (c) => c.json({ app: updateApp(idParam(c.req.param('id')), await body(c)) }))
+api.delete('/apps/:id', requireAdmin, (c) => {
+  deleteApp(idParam(c.req.param('id')))
+  return c.json({ ok: true })
+})
+api.post('/apps/:id/test', requireAdmin, async (c) => c.json(await testApp(idParam(c.req.param('id')))))
+api.get('/apps/:id/deliveries', requireAdmin, (c) => {
+  const id = idParam(c.req.param('id'))
+  getApp(id)
+  return c.json({ deliveries: listDeliveries(id) })
+})
+api.get('/conversations/:id/apps', async (c) => c.json({ apps: await sidebarsFor(idParam(c.req.param('id'))) }))
 
 api.get('/workflows', (c) => c.json({ workflows: all('SELECT * FROM workflows ORDER BY id').map(serializeWorkflow) }))
 

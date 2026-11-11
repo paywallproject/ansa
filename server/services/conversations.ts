@@ -1,5 +1,6 @@
 import { all, allNamed, get, run, tx, now, parseJson } from '../db.ts'
 import { publish } from '../events.ts'
+import { emitAppEvent, type AppEvent } from '../hooks.ts'
 import { cleanHtml, htmlToText, previewOf } from '../mail/html.ts'
 import { newMessageId, queueDelivery, type MailboxRow } from '../mail/outbound.ts'
 import { config } from '../config.ts'
@@ -258,6 +259,13 @@ function touch(conversationId: number, mailboxId: number, reason: string, actor:
   publish({ type: 'conversation', id: conversationId, mailboxId, reason, actorId: actor.userId })
 }
 
+/** Tell apps about a reply or note. A conversation that starts with one also counts as created. */
+function announceAgentThread(event: 'conversation.agent_replied' | 'conversation.note_added', conversationId: number, threadId: number, historical: boolean) {
+  const first = (get<{ n: number }>('SELECT thread_count AS n FROM conversations WHERE id = ?', conversationId)?.n ?? 0) <= 1
+  if (first) emitAppEvent('conversation.created', conversationId, { threadId, historical })
+  emitAppEvent(event, conversationId, { threadId, historical })
+}
+
 function addEvent(conversationId: number, actor: Actor, event: Record<string, unknown>, at = now()) {
   run(
     `INSERT INTO threads (conversation_id, type, user_id, event, via, created_at) VALUES (?, 'event', ?, ?, ?, ?)`,
@@ -340,6 +348,7 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
   })
   const conv = get<any>('SELECT mailbox_id, thread_count, assignee_id FROM conversations WHERE id = ?', conversationId)
   touch(conversationId, conv.mailbox_id, conv.thread_count <= 1 ? 'created' : 'customer_reply', { userId: null, via: 'email' })
+  emitAppEvent(conv.thread_count <= 1 ? 'conversation.created' : 'conversation.customer_replied', conversationId, { threadId, historical: input.historical })
   if (conv.thread_count > 1 && conv.assignee_id && !input.historical) notifyCustomerReply(conversationId)
   return threadId
 }
@@ -423,6 +432,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     return id
   })
   touch(conversationId, mailboxId, 'reply', actor)
+  announceAgentThread('conversation.agent_replied', conversationId, threadId, input.createdAt !== undefined)
   if (!input.skipDelivery && !config.mailDisabled) queueDelivery(threadId)
   return threadId
 }
@@ -460,6 +470,7 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
     return id
   })
   touch(conversationId, mailboxId, 'note', actor)
+  announceAgentThread('conversation.note_added', conversationId, threadId, input.createdAt !== undefined)
   return threadId
 }
 
@@ -560,6 +571,8 @@ export interface ConversationPatch {
 export function updateConversation(id: number, patch: ConversationPatch, actor: Actor): ConversationSummary {
   let notify: number | null = null
   const mailboxIds = new Set<number>()
+  const changes: [AppEvent, Record<string, unknown>][] = []
+  const tagNames = () => all<{ name: string }>('SELECT t.name FROM conversation_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.conversation_id = ? ORDER BY t.name', id).map((t) => t.name)
   tx(() => {
     const conv = get<any>('SELECT * FROM conversations WHERE id = ?', id)
     if (!conv) throw new AppError('Conversation not found.', 404)
@@ -578,6 +591,7 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
         id,
       )
       addEvent(id, actor, { kind: 'status', from: conv.status, to: patch.status }, at)
+      changes.push(['conversation.status_changed', { from: conv.status, to: patch.status }])
     }
 
     if (patch.assigneeId !== undefined && patch.assigneeId !== conv.assignee_id) {
@@ -590,6 +604,7 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
       }
       run('UPDATE conversations SET assignee_id = ? WHERE id = ?', patch.assigneeId, id)
       addEvent(id, actor, { kind: 'assigned', to: patch.assigneeId, toName: name }, at)
+      changes.push(['conversation.assigned', { from: conv.assignee_id, to: patch.assigneeId, toName: name }])
     }
 
     if (typeof patch.subject === 'string' && patch.subject.trim() && patch.subject.trim() !== conv.subject) {
@@ -616,6 +631,7 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
       addEvent(id, actor, { kind: 'customer', toName: customer.name || customer.email }, at)
     }
 
+    const tagsBefore = patch.tags || patch.addTags?.length || patch.removeTags?.length ? tagNames() : null
     if (patch.tags) setTags(id, patch.tags)
     for (const name of patch.addTags ?? []) {
       if (name.trim()) run('INSERT OR IGNORE INTO conversation_tags (conversation_id, tag_id) VALUES (?, ?)', id, ensureTag(name))
@@ -623,9 +639,14 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
     for (const name of patch.removeTags ?? []) {
       run('DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id IN (SELECT id FROM tags WHERE name = ?)', id, name.trim())
     }
+    if (tagsBefore) {
+      const tagsAfter = tagNames()
+      if (tagsBefore.join('\n') !== tagsAfter.join('\n')) changes.push(['conversation.tags_changed', { from: tagsBefore, to: tagsAfter }])
+    }
     reindex(id)
   })
   for (const mailboxId of mailboxIds) touch(id, mailboxId, 'updated', actor)
+  for (const [event, change] of changes) emitAppEvent(event, id, { change: { ...change, by: actor.via } })
   if (notify) notifyAssigned(id, notify, actor.userId)
   return getSummary(id)
 }

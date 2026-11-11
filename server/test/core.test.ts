@@ -209,3 +209,48 @@ test('a customer reply releases a conversation from a deactivated teammate', asy
   conversations.addCustomerMessage(created.id, { customerId, bodyHtml: '<p>Still broken</p>' })
   assert.equal(conversations.getSummary(created.id).assignee, null)
 })
+
+test('apps: static sidebar fills placeholders safely, webhooks are signed', async () => {
+  const http = await import('node:http')
+  const crypto = await import('node:crypto')
+  const apps = await import('../services/apps.ts')
+  const received: { event: string; signature: string; body: string }[] = []
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', () => {
+      received.push({ event: String(req.headers['x-ansa-event']), signature: String(req.headers['x-ansa-signature']), body })
+      res.end('ok')
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, resolve))
+  const port = (server.address() as { port: number }).port
+  try {
+    apps.createApp({ name: 'Links', sidebarMode: 'static', sidebarContent: '[Admin](https://admin.test/u?email={{customer.email|url}})\n\nHello {{customer.name}}' })
+    const hook = apps.createApp({ name: 'Hook', webhookUrl: `http://127.0.0.1:${port}/hook`, events: ['conversation.created', 'conversation.status_changed'] })
+    assert.throws(() => apps.createApp({ name: 'Bad', webhookUrl: 'ftp://x', events: ['conversation.created'] }))
+
+    const { id } = conversations.createConversation(
+      { mailboxId, customerEmail: 'eve+x@apps.test', customerName: 'Eve <script>alert(1)</script>', subject: 'Apps', bodyHtml: '<p>Hi</p>', kind: 'customer' },
+      { userId: null, via: 'email' },
+    )
+    conversations.updateConversation(id, { status: 'closed' }, { userId: agentId, via: 'web' })
+
+    const panels = await apps.sidebarsFor(id)
+    const links = panels.find((p) => p.name === 'Links')!
+    assert.ok(links.html.includes('href="https://admin.test/u?email=eve%2Bx%40apps.test"'), links.html)
+    assert.ok(links.html.includes('>Admin</a>'), links.html)
+    assert.ok(!links.html.includes('<script'), 'customer data cannot inject markup')
+
+    for (let i = 0; i < 40 && received.length < 2; i++) await new Promise((r) => setTimeout(r, 50))
+    assert.deepEqual(received.map((r) => r.event).sort(), ['conversation.created', 'conversation.status_changed'])
+    for (const r of received) {
+      assert.equal(r.signature, 'sha256=' + crypto.createHmac('sha256', hook.secret).update(r.body).digest('hex'))
+      assert.equal(JSON.parse(r.body).customer.email, 'eve+x@apps.test')
+    }
+    assert.deepEqual(JSON.parse(received.find((r) => r.event === 'conversation.status_changed')!.body).change.to, 'closed')
+    assert.equal(apps.listDeliveries(hook.id).filter((d) => d.ok).length, 2)
+  } finally {
+    server.close()
+  }
+})

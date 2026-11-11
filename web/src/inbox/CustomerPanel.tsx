@@ -1,12 +1,51 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Briefcase, Building2, Copy, MapPin, Pencil, Phone, SquarePen } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Briefcase, Building2, Copy, MapPin, Pencil, Phone, RefreshCw, SquarePen } from 'lucide-react'
 import { api } from '../lib/api'
 import { ago, dateOnly } from '../lib/format'
 import type { Conversation, Customer } from '../lib/types'
 import { Avatar, Banner, Button, Field, IconButton, Input, Modal, StatusBadge, Textarea, useFeedback } from '../ui'
 import { useShell } from '../Shell'
+
+interface AppPanel {
+  id: number
+  name: string
+  html: string
+  error: string | null
+}
+
+/** Content from the team's apps (Settings → Apps). The server has already cleaned the HTML. */
+function AppPanels({ conversationId, customerId }: { conversationId: number; customerId: number }) {
+  const apps = useQuery({
+    queryKey: ['conversation-apps', conversationId, customerId],
+    queryFn: () => api.get<{ apps: AppPanel[] }>(`/conversations/${conversationId}/apps`).then((r) => r.apps),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
+  if (!apps.data?.length) return null
+  return (
+    <>
+      {apps.data.map((app) => (
+        <section key={app.id} aria-label={app.name}>
+          <div className="mb-1.5 flex items-center justify-between">
+            <h3 className="text-xs font-medium text-fg-3">{app.name}</h3>
+            <IconButton label={`Reload ${app.name}`} size="sm" className="size-6" onClick={() => void apps.refetch()} disabled={apps.isFetching}>
+              <RefreshCw className={apps.isFetching ? 'size-3.5 animate-spin' : 'size-3.5'} />
+            </IconButton>
+          </div>
+          {app.error ? (
+            <p className="text-[13px] text-danger">{app.error}</p>
+          ) : app.html ? (
+            <div className="prose-mail text-[13px]" dangerouslySetInnerHTML={{ __html: app.html }} />
+          ) : (
+            <p className="text-[13px] text-fg-3">Nothing to show.</p>
+          )}
+        </section>
+      ))}
+    </>
+  )
+}
 
 export function CustomerPanel({ conversation }: { conversation: Conversation }) {
   const customer = conversation.customer
@@ -91,6 +130,8 @@ export function CustomerPanel({ conversation }: { conversation: Conversation }) 
           rows={3}
         />
       </section>
+
+      <AppPanels conversationId={conversation.id} customerId={customer.id} />
 
       <section>
         <div className="mb-1.5 flex items-center justify-between">

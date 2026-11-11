@@ -21,6 +21,7 @@ Run it on a VPS as one container with one SQLite file, or on Cloudflare Workers 
 - **Reports.** Volume, response time, resolution time, busiest hours, tags and team activity.
 - **Search** across subjects, messages, notes and customers. Press `⌘K`.
 - **MCP server and REST API.** Assistants such as Claude can read, tag, note and reply.
+- **Apps.** Show data from your own tools beside a conversation, and get webhooks when things happen. See [Build an app](docs/apps.md).
 - **Keyboard shortcuts, dark mode, mobile layout.**
 
 ## Install on a VPS
@@ -143,6 +144,16 @@ The assistant acts as the teammate who created the token. Revoke the token to cu
 | `get_report` | Support metrics for the last N days |
 
 `reply_to_conversation` and `create_conversation` (kind `email`) send real email. The server tells assistants to confirm with you first.
+
+## Apps
+
+An app connects Ansa to your other tools. Create one in **Settings → Apps**.
+
+- **Sidebar.** Links and text with placeholders such as `{{customer.email}}`, with no code. Or live HTML from your own endpoint.
+- **Webhooks.** Signed `POST` requests when a conversation starts, gets a reply, changes status, and more.
+- **Actions.** Your app changes things through the REST API below.
+
+[Build an app](docs/apps.md) has the full guide, the request formats, and two working examples in [`examples/`](examples).
 
 ## REST API
 
