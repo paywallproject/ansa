@@ -1,5 +1,5 @@
-export type Status = 'active' | 'pending' | 'closed' | 'spam'
-export type Folder = 'unassigned' | 'mine' | 'assigned' | 'snoozed' | 'closed' | 'spam' | 'all'
+export type Status = 'active' | 'waiting' | 'pending' | 'closed' | 'spam'
+export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'snoozed' | 'closed' | 'spam' | 'all'
 
 export interface User {
   id: number
@@ -10,6 +10,7 @@ export interface User {
   signature: string
   notifyAssigned: boolean
   notifyReplies: boolean
+  notifyMentions: boolean
   disabled: boolean
   createdAt: number
 }
@@ -20,6 +21,7 @@ export interface FolderCounts {
   assigned: number
   snoozed: number
   spam: number
+  mentioned: number
 }
 
 export interface Mailbox {

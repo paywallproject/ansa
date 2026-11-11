@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, KeyRound, Mail, Plus, Puzzle, Tag as TagIcon, Trash2, UserRound, Users, Workflow as WorkflowIcon } from 'lucide-react'
+import { Bookmark, Building, KeyRound, Mail, Plus, Puzzle, Tag as TagIcon, Trash2, UserRound, Users, Workflow as WorkflowIcon } from 'lucide-react'
 import { api } from '../lib/api'
 import { plural } from '../lib/format'
 import { useDocumentTitle, useSession, useTags, useUsers } from '../lib/hooks'
@@ -12,6 +12,8 @@ import { MailboxesSettings } from './Mailboxes'
 import { SavedRepliesSettings, WorkflowsSettings } from './Automation'
 import { ApiSettings } from './ApiMcp'
 import { AppsSettings } from './Apps'
+import { WorkspaceSettings } from './Workspace'
+import { workspace } from '../lib/workspace'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -21,6 +23,7 @@ const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'saved-replies', label: 'Saved replies', icon: <Bookmark /> },
   { to: 'workflows', label: 'Workflows', icon: <WorkflowIcon />, admin: true },
   { to: 'apps', label: 'Apps', icon: <Puzzle />, admin: true },
+  { to: 'workspace', label: 'Workspace', icon: <Building />, admin: true },
   { to: 'api', label: 'API & MCP', icon: <KeyRound /> },
 ]
 
@@ -64,6 +67,7 @@ export function SettingsPage() {
             <Route path="saved-replies" element={<SavedRepliesSettings />} />
             {admin && <Route path="workflows" element={<WorkflowsSettings />} />}
             {admin && <Route path="apps" element={<AppsSettings />} />}
+            {admin && <Route path="workspace" element={<WorkspaceSettings />} />}
             <Route path="api" element={<ApiSettings />} />
             <Route path="*" element={<Navigate to="profile" replace />} />
           </Routes>
@@ -80,7 +84,7 @@ export function SettingsPage() {
 function ProfileSettings() {
   const { user, refresh } = useSession()
   const { toast } = useFeedback()
-  const [form, setForm] = useState({ name: user.name, email: user.email, signature: user.signature, notifyAssigned: user.notifyAssigned, notifyReplies: user.notifyReplies })
+  const [form, setForm] = useState({ name: user.name, email: user.email, signature: user.signature, notifyAssigned: user.notifyAssigned, notifyReplies: user.notifyReplies, notifyMentions: user.notifyMentions })
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '' })
   const [error, setError] = useState<string | null>(null)
   const [passwordError, setPasswordError] = useState<string | null>(null)
@@ -128,6 +132,7 @@ function ProfileSettings() {
             <h3 className="text-[13px] font-medium">Email me when</h3>
             <Switch checked={form.notifyAssigned} onChange={(v) => setForm({ ...form, notifyAssigned: v })} label="A teammate assigns me a conversation" />
             <Switch checked={form.notifyReplies} onChange={(v) => setForm({ ...form, notifyReplies: v })} label="A customer replies to my conversation" />
+            {workspace().mentions && <Switch checked={form.notifyMentions} onChange={(v) => setForm({ ...form, notifyMentions: v })} label="A teammate mentions me in a note" />}
           </div>
           <div className="flex justify-end">
             <Button type="submit" variant="primary" loading={save.isPending}>

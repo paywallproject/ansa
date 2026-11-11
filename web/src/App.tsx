@@ -5,6 +5,7 @@ import { api } from './lib/api'
 import { SessionContext, useLiveEvents, useMailboxes, useSession } from './lib/hooks'
 import type { Conversation, User } from './lib/types'
 import { Spinner } from './ui'
+import { applyWorkspace, brand, type Workspace } from './lib/workspace'
 import { Login, Setup } from './pages/Auth'
 import { Shell } from './Shell'
 import { InboxPage } from './inbox/InboxPage'
@@ -17,6 +18,7 @@ interface Bootstrap {
   setupRequired: boolean
   user: User | null
   appUrl: string
+  workspace: Workspace
 }
 
 const Splash = () => (
@@ -37,17 +39,19 @@ export function App() {
   if (boot.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm text-fg-2">Ansa could not reach its server.</p>
+        <p className="text-sm text-fg-2">{brand()} could not reach its server.</p>
         <button className="text-sm font-medium text-accent-fg underline" onClick={() => void boot.refetch()}>
           Try again
         </button>
       </div>
     )
   }
+  // Branding and status names must be in place before anything below renders.
+  applyWorkspace(boot.data.workspace)
   if (boot.data.setupRequired) return <Setup onDone={() => void boot.refetch()} />
   if (!boot.data.user) return <Login onDone={() => void boot.refetch()} />
   return (
-    <SessionContext.Provider value={{ user: boot.data.user, appUrl: boot.data.appUrl, refresh: () => void boot.refetch() }}>
+    <SessionContext.Provider value={{ user: boot.data.user, appUrl: boot.data.appUrl, workspace: boot.data.workspace, refresh: () => void boot.refetch() }}>
       <Authed />
     </SessionContext.Provider>
   )

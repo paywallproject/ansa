@@ -5,21 +5,29 @@ import { cleanHtml, htmlToText, previewOf } from '../mail/html.ts'
 import { newMessageId, queueDelivery, type MailboxRow } from '../mail/outbound.ts'
 import { config } from '../config.ts'
 import { AppError, findOrCreateCustomer, getCustomer, isEmail, normEmail } from './customers.ts'
-import { notifyAssigned, notifyCustomerReply } from './notify.ts'
+import { notifyAssigned, notifyCustomerReply, notifyMentioned } from './notify.ts'
+import { brandName, getWorkspace } from './workspace.ts'
 
-export type Status = 'active' | 'pending' | 'closed' | 'spam'
-export const STATUSES: Status[] = ['active', 'pending', 'closed', 'spam']
-export type Folder = 'unassigned' | 'mine' | 'assigned' | 'snoozed' | 'closed' | 'spam' | 'all' | 'open'
+/**
+ * 'waiting' is only used when the workspace turns on four statuses. It means "waiting on us":
+ * the customer answered and it is our turn. 'pending' means waiting on the customer.
+ */
+export type Status = 'active' | 'waiting' | 'pending' | 'closed' | 'spam'
+export const STATUSES: Status[] = ['active', 'waiting', 'pending', 'closed', 'spam']
+export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'snoozed' | 'closed' | 'spam' | 'all' | 'open'
 
 export interface Actor {
   userId: number | null
   via: 'web' | 'api' | 'mcp' | 'workflow' | 'email' | 'system' | 'auto'
 }
 
-const OPEN = `c.status IN ('active', 'pending')`
+const OPEN = `c.status IN ('active', 'waiting', 'pending')`
+/** Open and our turn to act. */
+const NEEDS_US = `c.status IN ('active', 'waiting')`
 const FOLDER_SQL: Record<Folder, string> = {
   unassigned: `${OPEN} AND c.assignee_id IS NULL AND c.snoozed_until IS NULL`,
   mine: `${OPEN} AND c.assignee_id = :me AND c.snoozed_until IS NULL`,
+  mentioned: `${OPEN} AND c.id IN (SELECT conversation_id FROM mentions WHERE user_id = :me)`,
   assigned: `${OPEN} AND c.assignee_id IS NOT NULL AND c.snoozed_until IS NULL`,
   snoozed: `${OPEN} AND c.snoozed_until IS NOT NULL`,
   closed: `c.status = 'closed'`,
@@ -108,7 +116,7 @@ export function listConversations(opts: ListOptions) {
   }
   if (opts.folder && FOLDER_SQL[opts.folder]) {
     where.push(`(${FOLDER_SQL[opts.folder]})`)
-    if (opts.folder === 'mine') params.me = opts.me ?? 0
+    if (opts.folder === 'mine' || opts.folder === 'mentioned') params.me = opts.me ?? 0
   }
   if (opts.status) {
     where.push('c.status = :status')
@@ -155,15 +163,16 @@ export function listConversations(opts: ListOptions) {
 export function folderCounts(userId: number) {
   const rows = all<any>(
     `SELECT c.mailbox_id AS mailboxId,
-       SUM(CASE WHEN c.status = 'active' AND c.assignee_id IS NULL AND c.snoozed_until IS NULL THEN 1 ELSE 0 END) AS unassigned,
-       SUM(CASE WHEN c.status = 'active' AND c.assignee_id = ? AND c.snoozed_until IS NULL THEN 1 ELSE 0 END) AS mine,
-       SUM(CASE WHEN c.status = 'active' AND c.assignee_id IS NOT NULL AND c.snoozed_until IS NULL THEN 1 ELSE 0 END) AS assigned,
+       SUM(CASE WHEN ${NEEDS_US} AND c.assignee_id IS NULL AND c.snoozed_until IS NULL THEN 1 ELSE 0 END) AS unassigned,
+       SUM(CASE WHEN ${NEEDS_US} AND c.assignee_id = ?1 AND c.snoozed_until IS NULL THEN 1 ELSE 0 END) AS mine,
+       SUM(CASE WHEN ${NEEDS_US} AND c.assignee_id IS NOT NULL AND c.snoozed_until IS NULL THEN 1 ELSE 0 END) AS assigned,
        SUM(CASE WHEN ${OPEN} AND c.snoozed_until IS NOT NULL THEN 1 ELSE 0 END) AS snoozed,
-       SUM(CASE WHEN c.status = 'spam' THEN 1 ELSE 0 END) AS spam
+       SUM(CASE WHEN c.status = 'spam' THEN 1 ELSE 0 END) AS spam,
+       SUM(CASE WHEN ${OPEN} AND c.id IN (SELECT conversation_id FROM mentions WHERE user_id = ?1) THEN 1 ELSE 0 END) AS mentioned
      FROM conversations c GROUP BY c.mailbox_id`,
     userId,
   )
-  return rows as { mailboxId: number; unassigned: number; mine: number; assigned: number; snoozed: number; spam: number }[]
+  return rows as { mailboxId: number; unassigned: number; mine: number; assigned: number; snoozed: number; spam: number; mentioned: number }[]
 }
 
 function row(id: number): any {
@@ -185,7 +194,7 @@ function serializeThread(t: any, attachments: any[]) {
         ? { kind: 'customer' as const, id: t.customer_id as number, name: (t.customer_name as string) || t.from_addr, email: (t.customer_email as string) || t.from_addr }
         : t.user_id
           ? { kind: 'user' as const, id: t.user_id as number, name: t.user_name as string, color: t.user_color as string }
-          : { kind: 'system' as const, name: t.via === 'auto' ? 'Auto reply' : t.via === 'workflow' ? 'Workflow' : 'Ansa' },
+          : { kind: 'system' as const, name: t.via === 'auto' ? 'Auto reply' : t.via === 'workflow' ? 'Workflow' : brandName() },
     bodyHtml: t.body_html as string,
     hasQuoted: !!t.body_full_html,
     from: t.from_addr as string,
@@ -335,8 +344,10 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
     const assigneeGone = conv.assignee_id && !get('SELECT 1 FROM users WHERE id = ? AND disabled = 0', conv.assignee_id)
     if (assigneeGone) run('UPDATE conversations SET assignee_id = NULL WHERE id = ?', conversationId)
     run(
-      `UPDATE conversations SET status = CASE WHEN status = 'spam' THEN 'spam' ELSE 'active' END, snoozed_until = NULL, closed_at = NULL, closed_by = NULL,
+      `UPDATE conversations SET status = CASE WHEN status = 'spam' THEN 'spam' ELSE ? END, snoozed_until = NULL, closed_at = NULL, closed_by = NULL,
          preview = ?, thread_count = thread_count + 1, last_customer_at = ?, waiting_since = COALESCE(waiting_since, ?), updated_at = ? WHERE id = ?`,
+      // With four statuses, an answer from the customer puts the conversation on our side. A first message stays "active".
+      getWorkspace().fourStatuses && conv.thread_count > 0 ? 'waiting' : 'active',
       previewOf(text),
       at,
       at,
@@ -469,9 +480,34 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
     reindex(conversationId)
     return id
   })
+  const mentioned = input.createdAt === undefined ? recordMentions(conversationId, threadId, text, actor.userId) : []
   touch(conversationId, mailboxId, 'note', actor)
+  for (const userId of mentioned) notifyMentioned(conversationId, userId, actor.userId)
   announceAgentThread('conversation.note_added', conversationId, threadId, input.createdAt !== undefined)
   return threadId
+}
+
+/**
+ * Find "@Full Name" in a note and remember who was mentioned. Returns the teammates to tell.
+ * Does nothing unless the workspace turned mentions on.
+ */
+function recordMentions(conversationId: number, threadId: number, text: string, authorId: number | null): number[] {
+  if (!getWorkspace().mentions || !text.includes('@')) return []
+  const lower = text.toLowerCase()
+  const users = all<{ id: number; name: string }>('SELECT id, name FROM users WHERE disabled = 0')
+  // Longest names first, so "@Ann Lee" is not also counted for a teammate called "Ann".
+  const found = new Set<number>()
+  let rest = lower
+  for (const user of [...users].sort((a, b) => b.name.length - a.name.length)) {
+    const needle = `@${user.name.toLowerCase()}`
+    if (user.name.trim() && rest.includes(needle)) {
+      found.add(user.id)
+      rest = rest.split(needle).join(' ')
+    }
+  }
+  found.delete(authorId ?? -1)
+  for (const userId of found) run('INSERT INTO mentions (thread_id, conversation_id, user_id, created_at) VALUES (?, ?, ?, ?)', threadId, conversationId, userId, now())
+  return [...found]
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -587,7 +623,7 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
         patch.status,
         closing ? at : null,
         closing ? actor.userId : null,
-        patch.status !== 'active' && patch.status !== 'pending',
+        patch.status === 'closed' || patch.status === 'spam',
         id,
       )
       addEvent(id, actor, { kind: 'status', from: conv.status, to: patch.status }, at)

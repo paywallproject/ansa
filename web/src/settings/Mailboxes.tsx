@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, CircleAlert, CircleCheck, Mail, Plus, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
+import { brand } from '../lib/workspace'
 import { ago } from '../lib/format'
 import { useMailboxes } from '../lib/hooks'
 import type { Mailbox } from '../lib/types'
@@ -215,7 +216,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         )}
       </Section>
 
-      <Section title="Sending (SMTP)" description="Ansa sends replies through this server, so they come from your own address.">
+      <Section title="Sending (SMTP)" description={`${brand()} sends replies through this server, so they come from your own address.`}>
         <div className="grid gap-4 sm:grid-cols-[1fr_110px_150px]">
           <Field label="SMTP host">{(id) => <Input id={id} value={form.smtpHost} onChange={text('smtpHost')} placeholder={other ? "mail.yourdomain.com" : "smtp.gmail.com"} />}</Field>
           <Field label="Port">{(id) => <Input id={id} type="number" value={form.smtpPort} onChange={(e) => set('smtpPort', Number(e.target.value))} />}</Field>
@@ -238,7 +239,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         <TestButton payload={() => ({ ...payload(), kind: 'smtp' })} />
       </Section>
 
-      <Section title="Receiving (IMAP)" description="Ansa watches this inbox and turns new email into conversations. Mail stays in your account too.">
+      <Section title="Receiving (IMAP)" description={`${brand()} watches this inbox and turns new email into conversations. Mail stays in your account too.`}>
         <Switch checked={form.imapEnabled} onChange={(v) => set('imapEnabled', v)} label="Fetch incoming email" />
         {form.imapEnabled && (
           <>
@@ -308,7 +309,7 @@ function SyncStatus({ mailbox }: { mailbox: Mailbox }) {
   if (mailbox.syncStatus === 'error') {
     return (
       <Banner kind="danger" action={<Button size="sm" loading={sync.isPending} onClick={() => sync.mutate()} icon={<RefreshCw className="size-3.5" aria-hidden />}>Retry</Button>}>
-        <strong>Cannot fetch email.</strong> {mailbox.syncError} Ansa keeps retrying.
+        <strong>Cannot fetch email.</strong> {mailbox.syncError} {brand()} keeps retrying.
       </Banner>
     )
   }
@@ -373,7 +374,7 @@ export function MailboxesSettings() {
         <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
             <h2 className="text-[15px] font-semibold">Delete this mailbox</h2>
-            <p className="text-[13px] text-fg-3">Removes the mailbox and all of its conversations from Ansa.</p>
+            <p className="text-[13px] text-fg-3">Removes the mailbox and all of its conversations from {brand()}.</p>
           </div>
           <Button variant="danger" onClick={() => void remove()}>
             Delete mailbox

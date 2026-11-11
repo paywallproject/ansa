@@ -1,3 +1,4 @@
+import { STATUS_LABEL } from './lib/format'
 import {
   createContext,
   forwardRef,
@@ -187,12 +188,13 @@ export function TagChip({ name, color, onRemove }: { name: string; color: string
 
 const STATUS_STYLE: Record<string, string> = {
   active: 'bg-ok-soft text-ok',
+  waiting: 'bg-accent-soft text-accent-fg',
   pending: 'bg-warn-soft text-warn',
   closed: 'bg-sunken text-fg-2',
   spam: 'bg-danger-soft text-danger',
 }
 export const StatusBadge = ({ status, className }: { status: string; className?: string }) => (
-  <span className={cx('inline-flex h-5 items-center rounded-md px-1.5 text-xs font-medium capitalize', STATUS_STYLE[status], className)}>{status}</span>
+  <span className={cx('inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-xs font-medium whitespace-nowrap', STATUS_STYLE[status], className)}>{STATUS_LABEL[status] ?? status}</span>
 )
 
 export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; title: string; body?: ReactNode; action?: ReactNode }) {

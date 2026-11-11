@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { brand, type Workspace } from './workspace'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type { Mailbox, SavedReply, Tag, User, Viewer } from './types'
@@ -6,6 +7,7 @@ import type { Mailbox, SavedReply, Tag, User, Viewer } from './types'
 export interface Session {
   user: User
   appUrl: string
+  workspace: Workspace
   refresh: () => void
 }
 export const SessionContext = createContext<Session | null>(null)
@@ -55,6 +57,9 @@ export function useLiveEvents() {
           client.setQueryData(['presence', event.conversationId], event.viewers as Viewer[])
         } else if (event.type === 'mailbox') {
           void client.invalidateQueries({ queryKey: ['mailboxes'] })
+        } else if (event.type === 'refresh' && event.scope === 'workspace') {
+          // An admin changed branding or features: reload them for everyone who is signed in.
+          void client.invalidateQueries({ queryKey: ['bootstrap'] })
         } else if (event.type === 'hello') {
           refreshLists()
         }
@@ -181,7 +186,8 @@ export function useDebounced<T>(value: T, delay = 250): T {
 }
 
 export function useDocumentTitle(title: string) {
+  const name = brand()
   useEffect(() => {
-    document.title = title ? `${title} · Ansa` : 'Ansa'
-  }, [title])
+    document.title = title ? `${title} · ${name}` : name
+  }, [title, name])
 }

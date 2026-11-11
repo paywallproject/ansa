@@ -7,9 +7,9 @@ import { ago, dateOnly, STATUS_LABEL } from '../lib/format'
 import type { Conversation, Customer } from '../lib/types'
 import { Avatar, Banner, Button, Field, IconButton, Input, Modal, useFeedback } from '../ui'
 import { useShell } from '../Shell'
+import { STATUS_DOT } from '../lib/workspace'
 
-const DOT: Record<string, string> = { active: 'bg-ok', pending: 'bg-warn', closed: 'bg-fg-3', spam: 'bg-danger' }
-const StatusDot = ({ status, className }: { status: string; className?: string }) => <span className={`size-2 shrink-0 rounded-full ${DOT[status] ?? 'bg-fg-3'} ${className ?? ''}`} aria-hidden />
+const StatusDot = ({ status, className }: { status: string; className?: string }) => <span className={`size-2 shrink-0 rounded-full ${STATUS_DOT[status] ?? 'bg-fg-3'} ${className ?? ''}`} aria-hidden />
 
 interface AppPanel {
   id: number

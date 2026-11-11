@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, BookOpen, CircleAlert, CircleCheck, Plus, Puzzle, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
+import { brand } from '../lib/workspace'
 import { ago } from '../lib/format'
 import { useMailboxes } from '../lib/hooks'
 import { Banner, Button, Card, EmptyState, Field, Input, PageHeader, Select, Spinner, Switch, Textarea, cx, useFeedback } from '../ui'
@@ -103,7 +104,7 @@ export function AppsSettings() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Apps"
-        description="Connect Ansa to your own tools. Show customer data beside a conversation, and tell your systems when something happens."
+        description={`Connect ${brand()} to your own tools. Show customer data beside a conversation, and tell your systems when something happens.`}
         action={
           <Button variant="primary" icon={<Plus />} onClick={() => setOpen('new')}>
             New app
@@ -118,7 +119,7 @@ export function AppsSettings() {
           </a>
         }
       >
-        An app is a web address you own. You do not install code into Ansa. The simplest app needs no code at all: a few links that open the customer in your other tools.
+        An app is a web address you own. You do not install code into {brand()}. The simplest app needs no code at all: a few links that open the customer in your other tools.
       </Banner>
       {query.isPending ? (
         <Spinner />
@@ -306,13 +307,13 @@ function AppEditor({ app, events, onBack, onSaved }: { app: App | null; events: 
           </>
         )}
         {form.sidebarMode === 'dynamic' && (
-          <Field label="Sidebar URL" hint={'When a conversation opens, Ansa sends the customer and conversation to this address. Answer with JSON: {"html": "<p>…</p>"}.'}>
+          <Field label="Sidebar URL" hint={`When a conversation opens, ${brand()} sends the customer and conversation to this address. Answer with JSON: {"html": "<p>…</p>"}.`}>
             {(id) => <Input id={id} type="url" value={form.sidebarUrl} onChange={(e) => set('sidebarUrl', e.target.value)} placeholder="https://your-app.example.com/sidebar" />}
           </Field>
         )}
       </Section>
 
-      <Section title="Events (webhook)" description="Ansa sends a message to your address when these things happen. Leave the address empty if you do not need this.">
+      <Section title="Events (webhook)" description={`${brand()} sends a message to your address when these things happen. Leave the address empty if you do not need this.`}>
         <Field label="Webhook URL">{(id) => <Input id={id} type="url" value={form.webhookUrl} onChange={(e) => set('webhookUrl', e.target.value)} placeholder="https://your-app.example.com/webhook" />}</Field>
         {form.webhookUrl.trim() !== '' && (
           <fieldset>
@@ -355,7 +356,7 @@ function AppEditor({ app, events, onBack, onSaved }: { app: App | null; events: 
 
       {app && (
         <>
-          <Section title="Test" description="Ansa calls your app with made-up data, so you see right away if it answers correctly. Save your changes first.">
+          <Section title="Test" description={`${brand()} calls your app with made-up data, so you see right away if it answers correctly. Save your changes first.`}>
             <div>
               <Button icon={<RefreshCw />} loading={test.isPending} disabled={dirty} onClick={() => test.mutate()}>
                 Send a test
@@ -377,7 +378,7 @@ function AppEditor({ app, events, onBack, onSaved }: { app: App | null; events: 
           </Section>
 
           {usesServer && (
-            <Section title="Signing secret" description="Ansa signs every request with this secret. Your server uses it to check that a request really comes from Ansa. The guide shows how.">
+            <Section title="Signing secret" description={`${brand()} signs every request with this secret. Your server uses it to check that a request really comes from ${brand()}. The guide shows how.`}>
               <CodeBlock code={app.secret} label="signing secret" />
               <div>
                 <Button size="sm" loading={rotate.isPending} onClick={() => rotate.mutate()}>

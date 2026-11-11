@@ -8,6 +8,7 @@ import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes
 import type { ConversationSummary, Folder } from '../lib/types'
 import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { FOLDERS } from '../Shell'
+import { workspace } from '../lib/workspace'
 import { ConversationView } from './ConversationView'
 
 type Sort = 'recent' | 'waiting' | 'oldest'
@@ -17,6 +18,7 @@ const PAGE = 40
 const EMPTY: Record<Folder, { title: string; body: string }> = {
   unassigned: { title: 'All caught up', body: 'New conversations that nobody owns yet show up here.' },
   mine: { title: 'Nothing on your plate', body: 'Conversations assigned to you show up here.' },
+  mentioned: { title: 'No mentions', body: 'Open conversations where a teammate wrote @ and your name in a note show up here.' },
   assigned: { title: 'Nothing assigned', body: 'Open conversations that have an owner show up here.' },
   snoozed: { title: 'Nothing snoozed', body: 'Snooze a conversation to hide it until you need it.' },
   closed: { title: 'No closed conversations', body: 'Conversations you close are kept here.' },
@@ -111,7 +113,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     return <ConversationView key={selectedId} id={selectedId} onBack={() => open(null)} onDone={advance} />
   }
 
-  const openFolder = !search && ['unassigned', 'mine', 'assigned'].includes(folder)
+  const openFolder = !search && ['unassigned', 'mine', 'mentioned', 'assigned'].includes(folder)
   const allChecked = items.length > 0 && items.every((c) => checked.has(c.id))
   const toggleAll = () => setChecked(allChecked ? new Set() : new Set(items.map((c) => c.id)))
 
@@ -267,9 +269,9 @@ function CheckBox({ checked, mixed, label, onClick }: { checked: boolean; mixed?
 }
 
 function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { conversation: ConversationSummary; to: string; checked: boolean; onCheck: () => void; showMailbox: boolean; folder: Folder | null }) {
-  const waiting = c.status === 'active' && !!c.waitingSince
-  const openFolder = folder === 'unassigned' || folder === 'mine' || folder === 'assigned'
-  const showStatus = folder === null || folder === 'all' || (c.status === 'pending' && folder !== 'closed') || folder === 'snoozed'
+  const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
+  const openFolder = folder === 'unassigned' || folder === 'mine' || folder === 'assigned' || folder === 'mentioned'
+  const showStatus = folder === null || folder === 'all' || ((c.status === 'pending' || (c.status === 'waiting' && workspace().fourStatuses)) && folder !== 'closed') || folder === 'snoozed'
   const showAssignee = c.assignee && folder !== 'mine'
   const when = openFolder && c.waitingSince ? c.waitingSince : c.updatedAt
 

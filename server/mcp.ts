@@ -82,7 +82,7 @@ const safe =
     }
   }
 
-const STATUS = z.enum(['active', 'pending', 'closed', 'spam'])
+const STATUS = z.enum(['active', 'waiting', 'pending', 'closed', 'spam'])
 
 function buildServer(user: User) {
   const actor: Actor = { userId: user.id, via: 'mcp' }
@@ -169,7 +169,7 @@ function buildServer(user: User) {
       inputSchema: {
         id: z.number().int(),
         body: z.string().min(1),
-        status: z.enum(['active', 'pending', 'closed']).optional(),
+        status: z.enum(['active', 'waiting', 'pending', 'closed']).optional(),
         cc: z.array(z.string()).optional(),
         bcc: z.array(z.string()).optional(),
       },

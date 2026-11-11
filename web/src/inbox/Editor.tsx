@@ -8,7 +8,18 @@ import { fileSize } from '../lib/format'
 import type { Attachment } from '../lib/types'
 import { Button, IconButton, Input, Popover, Spinner, cx, useFeedback } from '../ui'
 
-export function useRichEditor(options: { content?: string; placeholder: string; onChange?: (html: string) => void; onSubmit?: () => void; onFocus?: () => void; editable?: boolean }) {
+export function useRichEditor(options: {
+  content?: string
+  placeholder: string
+  onChange?: (html: string) => void
+  onSubmit?: () => void
+  onFocus?: () => void
+  /** Runs before the editor handles a key. Return true to take the key. */
+  onKeyDown?: (event: KeyboardEvent) => boolean
+  /** Runs when the text or the cursor position changes. */
+  onCaret?: (editor: Editor) => void
+  editable?: boolean
+}) {
   const latest = useRef(options)
   latest.current = options
   return useEditor({
@@ -24,6 +35,7 @@ export function useRichEditor(options: { content?: string; placeholder: string; 
     editorProps: {
       attributes: { class: 'prose-mail', role: 'textbox', 'aria-multiline': 'true', 'aria-label': options.placeholder },
       handleKeyDown: (_view, event) => {
+        if (latest.current.onKeyDown?.(event)) return true
         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
           latest.current.onSubmit?.()
           return true
@@ -31,7 +43,11 @@ export function useRichEditor(options: { content?: string; placeholder: string; 
         return false
       },
     },
-    onUpdate: ({ editor }) => latest.current.onChange?.(editor.isEmpty ? '' : editor.getHTML()),
+    onUpdate: ({ editor }) => {
+      latest.current.onChange?.(editor.isEmpty ? '' : editor.getHTML())
+      latest.current.onCaret?.(editor)
+    },
+    onSelectionUpdate: ({ editor }) => latest.current.onCaret?.(editor),
     onFocus: () => latest.current.onFocus?.(),
   })
 }

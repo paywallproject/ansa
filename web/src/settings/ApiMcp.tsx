@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, KeyRound, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
+import { brand } from '../lib/workspace'
 import { ago, dateOnly } from '../lib/format'
 import { useSession } from '../lib/hooks'
 import type { ApiToken } from '../lib/types'
@@ -86,7 +87,7 @@ export function ApiSettings() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="API & MCP" description="Let AI assistants and your own scripts work in Ansa as you." />
+      <PageHeader title="API & MCP" description={`Let AI assistants and your own scripts work in ${brand()} as you.`} />
 
       <Card className="p-5">
         <h2 className="text-[15px] font-semibold">Access tokens</h2>
@@ -107,7 +108,7 @@ export function ApiSettings() {
         </form>
         {secret && (
           <div className="mt-4 flex flex-col gap-2">
-            <Banner kind="ok">Copy this token now. Ansa does not show it again.</Banner>
+            <Banner kind="ok">Copy this token now. It is not shown again.</Banner>
             <CodeBlock code={secret} label="token" />
           </div>
         )}
@@ -139,7 +140,7 @@ export function ApiSettings() {
       <Card className="p-5">
         <h2 className="text-[15px] font-semibold">Connect an AI assistant (MCP)</h2>
         <p className="mt-0.5 text-[13px] text-fg-3">
-          Ansa has a built-in Model Context Protocol server. Connected assistants can read conversations, draft notes and send replies.
+          {brand()} has a built-in Model Context Protocol server. Connected assistants can read conversations, draft notes and send replies.
           {!secret && ' Create a token above and it is filled in below.'}
         </p>
         <div role="tablist" aria-label="Client" className="mt-4 flex gap-1 border-b border-line">

@@ -44,6 +44,9 @@ import { buildReport } from './services/reports.ts'
 import { runWorkflows } from './services/workflows.ts'
 import { createApp as createIntegration, deleteApp, getApp, listApps, listDeliveries, sidebarsFor, testApp, updateApp } from './services/apps.ts'
 import { APP_EVENTS } from './hooks.ts'
+import { brandName, getWorkspace, publicWorkspace, saveWorkspace } from './services/workspace.ts'
+import { blobs } from './blobs.ts'
+import { publish } from './events.ts'
 
 export const api = new Hono<Env>()
 
@@ -91,7 +94,17 @@ api.onError((err, c) => {
 
 const hasUsers = () => !!get('SELECT 1 FROM users LIMIT 1')
 
-api.get('/bootstrap', (c) => c.json({ setupRequired: !hasUsers(), user: userFromSession(c), appUrl: config.appUrl, version: '1.0.0' }))
+api.get('/bootstrap', (c) => c.json({ setupRequired: !hasUsers(), user: userFromSession(c), appUrl: config.appUrl, version: '1.0.0', workspace: publicWorkspace() }))
+
+// The workspace logo. Public, because the sign-in page shows it.
+api.get('/brand/logo', (c) => {
+  const logo = getWorkspace().logo
+  const data = logo ? blobs.get(logo.key) : null
+  if (!logo || !data) throw new AppError('No logo.', 404)
+  return new Response(data as Uint8Array<ArrayBuffer>, {
+    headers: { 'Content-Type': logo.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff' },
+  })
+})
 
 api.post('/setup', async (c) => {
   if (hasUsers()) throw new AppError('Setup is already complete.', 409)
@@ -154,6 +167,7 @@ api.patch('/me', async (c) => {
   if (typeof data.signature === 'string') run('UPDATE users SET signature = ? WHERE id = ?', cleanSignature(data.signature), user.id)
   if (typeof data.notifyAssigned === 'boolean') run('UPDATE users SET notify_assigned = ? WHERE id = ?', data.notifyAssigned, user.id)
   if (typeof data.notifyReplies === 'boolean') run('UPDATE users SET notify_replies = ? WHERE id = ?', data.notifyReplies, user.id)
+  if (typeof data.notifyMentions === 'boolean') run('UPDATE users SET notify_mentions = ? WHERE id = ?', data.notifyMentions, user.id)
   if (data.newPassword !== undefined) {
     const row = get<any>('SELECT password_hash FROM users WHERE id = ?', user.id)
     if (typeof data.currentPassword !== 'string' || !verifyPassword(data.currentPassword, row.password_hash)) throw new AppError('Your current password is not correct.')
@@ -387,7 +401,7 @@ api.post('/mailboxes/test', requireAdmin, async (c) => {
       user: str(data.smtpUser, 200),
       pass: clean(data.smtpPassword) || decrypt(saved?.smtp_pass_enc),
     })
-    return c.json({ ok: true, message: 'Connected. Ansa can send mail through this server.' })
+    return c.json({ ok: true, message: `Connected. ${brandName()} can send mail through this server.` })
   } catch (err) {
     return c.json({ ok: false, message: explainMailError(err) })
   }
@@ -717,6 +731,47 @@ function workflowFields(data: Record<string, any>) {
   }
 }
 
+// Workspace: branding and optional features. Admins only.
+const LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const LOGO_MAX_BYTES = 512 * 1024
+
+api.patch('/workspace', requireAdmin, async (c) => {
+  const data = await body(c)
+  const patch: Parameters<typeof saveWorkspace>[0] = {}
+  if (typeof data.brandName === 'string') patch.brandName = str(data.brandName, 40)
+  if (typeof data.mentions === 'boolean') patch.mentions = data.mentions
+  if (typeof data.fourStatuses === 'boolean') {
+    patch.fourStatuses = data.fourStatuses
+    // Turning the extra status off folds its conversations back into "active", so none is left without a name.
+    if (!data.fourStatuses) run(`UPDATE conversations SET status = 'active' WHERE status = 'waiting'`)
+  }
+  saveWorkspace(patch)
+  publish({ type: 'refresh', scope: 'workspace' })
+  return c.json({ workspace: publicWorkspace() })
+})
+
+api.post('/workspace/logo', requireAdmin, bodyLimit({ maxSize: LOGO_MAX_BYTES + 64 * 1024, onError: (c) => c.json({ error: 'The logo can be up to 512 KB.' }, 413) }), async (c) => {
+  const file = (await c.req.parseBody()).file
+  if (!(file instanceof File)) throw new AppError('Choose an image.')
+  if (!LOGO_TYPES.has(file.type)) throw new AppError('Use a PNG, JPG, WebP or GIF image.')
+  if (file.size > LOGO_MAX_BYTES) throw new AppError('The logo can be up to 512 KB.', 413)
+  const previous = getWorkspace().logo
+  const key = `brand/logo-${Date.now().toString(36)}`
+  blobs.put(key, new Uint8Array(await file.arrayBuffer()))
+  saveWorkspace({ logo: { key, mime: file.type, version: Date.now() } })
+  if (previous) blobs.remove(previous.key)
+  publish({ type: 'refresh', scope: 'workspace' })
+  return c.json({ workspace: publicWorkspace() })
+})
+
+api.delete('/workspace/logo', requireAdmin, (c) => {
+  const previous = getWorkspace().logo
+  saveWorkspace({ logo: null })
+  if (previous) blobs.remove(previous.key)
+  publish({ type: 'refresh', scope: 'workspace' })
+  return c.json({ workspace: publicWorkspace() })
+})
+
 // Apps: sidebar content and webhooks. See docs/apps.md.
 api.get('/apps', requireAdmin, (c) => c.json({ apps: listApps(), events: APP_EVENTS }))
 api.post('/apps', requireAdmin, async (c) => c.json({ app: createIntegration(await body(c)) }, 201))
@@ -783,7 +838,7 @@ api.get('/tokens', (c) =>
 )
 
 api.post('/tokens', async (c) => {
-  if (c.get('via') !== 'web') throw new AppError('Create tokens from the Ansa web app.', 403)
+  if (c.get('via') !== 'web') throw new AppError('Create tokens from the web app.', 403)
   const data = await body(c)
   const name = str(data.name, 100) || 'API token'
   const token = `ansa_${randomToken(30)}`

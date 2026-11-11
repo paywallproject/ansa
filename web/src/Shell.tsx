@@ -5,6 +5,7 @@ import { Command } from 'cmdk'
 import {
   AlarmClock,
   Archive,
+  AtSign,
   ChartNoAxesColumn,
   ChevronDown,
   Inbox,
@@ -28,6 +29,7 @@ import { useDebounced, useHotkeys, useMailboxes, useSession, useTheme, type Them
 import type { ConversationSummary, Customer, Folder, Mailbox } from './lib/types'
 import { Avatar, Kbd, MenuDivider, MenuItem, MenuLabel, Modal, Popover, StatusBadge, cx } from './ui'
 import { Logo } from './pages/Auth'
+import { brand, workspace } from './lib/workspace'
 import { NewConversation, type ComposePrefill } from './inbox/NewConversation'
 
 interface ShellActions {
@@ -38,14 +40,18 @@ interface ShellActions {
 const ShellContext = createContext<ShellActions>({ compose: () => {}, openPalette: () => {}, openShortcuts: () => {} })
 export const useShell = () => useContext(ShellContext)
 
-export const FOLDERS: { id: Folder; label: string; icon: typeof Inbox; countKey?: 'unassigned' | 'mine' | 'assigned' | 'snoozed' | 'spam' }[] = [
+export const FOLDERS: { id: Folder; label: string; icon: typeof Inbox; countKey?: 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'snoozed' | 'spam' }[] = [
   { id: 'unassigned', label: 'Unassigned', icon: Inbox, countKey: 'unassigned' },
   { id: 'mine', label: 'Mine', icon: UserRound, countKey: 'mine' },
+  { id: 'mentioned', label: 'Mentioned', icon: AtSign, countKey: 'mentioned' },
   { id: 'assigned', label: 'Assigned', icon: Users, countKey: 'assigned' },
   { id: 'snoozed', label: 'Snoozed', icon: AlarmClock },
   { id: 'closed', label: 'Closed', icon: Archive },
   { id: 'spam', label: 'Spam', icon: ShieldAlert },
 ]
+
+/** The Mentioned folder only exists when the workspace turned mentions on. */
+export const visibleFolders = () => FOLDERS.filter((f) => f.id !== 'mentioned' || workspace().mentions)
 
 const folderItem = (active: boolean) =>
   cx(
@@ -86,9 +92,9 @@ function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?
           <MenuIcon />
         </button>
       )}
-      <NavLink to="/" aria-label="Ansa home" className="mr-1 flex h-8 items-center gap-2 rounded-md px-1.5 focus-visible:outline-white">
+      <NavLink to="/" aria-label={`${brand()} home`} className="mr-1 flex h-8 items-center gap-2 rounded-md px-1.5 focus-visible:outline-white">
         <Logo size={22} />
-        <span className="hidden text-[15px] font-semibold tracking-tight text-white sm:block">Ansa</span>
+        <span className="hidden max-w-40 truncate text-[15px] font-semibold tracking-tight text-white sm:block">{brand()}</span>
       </NavLink>
 
       <nav className="flex min-w-0 items-center gap-0.5" aria-label="Main">
@@ -226,7 +232,7 @@ function FolderSidebar({ mailbox, onNavigate }: { mailbox: Mailbox; onNavigate?:
       </div>
       <nav className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3" aria-label={`${mailbox.name} folders`}>
         <ul className="flex flex-col gap-px">
-          {FOLDERS.map((folder) => {
+          {visibleFolders().map((folder) => {
             const count = folder.countKey ? mailbox.counts[folder.countKey] : 0
             const showCount = count > 0 && folder.id !== 'spam'
             return (
@@ -353,7 +359,7 @@ function CommandPalette({ mailboxes, onClose }: { mailboxes: Mailbox[]; onClose:
   const shows = (label: string) => !lower || label.toLowerCase().includes(lower)
 
   const pages = [
-    ...mailboxes.flatMap((m) => FOLDERS.map((f) => ({ label: `${m.name}: ${f.label}`, icon: <f.icon />, path: `/m/${m.id}/${f.id}` }))),
+    ...mailboxes.flatMap((m) => visibleFolders().map((f) => ({ label: `${m.name}: ${f.label}`, icon: <f.icon />, path: `/m/${m.id}/${f.id}` }))),
     { label: 'Customers', icon: <UsersRound />, path: '/customers' },
     { label: 'Reports', icon: <ChartNoAxesColumn />, path: '/reports' },
     { label: 'Settings', icon: <Settings />, path: '/settings' },

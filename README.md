@@ -22,6 +22,9 @@ Run it on a VPS as one container with one SQLite file, or on Cloudflare Workers 
 - **Search** across subjects, messages, notes and customers. Press `⌘K`.
 - **MCP server and REST API.** Assistants such as Claude can read, tag, note and reply.
 - **Apps.** Show data from your own tools beside a conversation, and get webhooks when things happen. See [Build an app](docs/apps.md).
+- **Mentions.** Type `@` in a note to mention a teammate. They get an email and a Mentioned folder. Off by default.
+- **White label.** Your own name and logo in the app, on the sign-in page and in notification emails.
+- **Four statuses.** Active, Waiting on me, Waiting on customer, Closed. Off by default.
 - **Keyboard shortcuts, dark mode, mobile layout.**
 
 ## Install on a VPS

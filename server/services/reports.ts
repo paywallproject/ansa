@@ -108,8 +108,8 @@ export function buildReport(opts: ReportOptions) {
   ).map((u) => ({ id: u.id as number, name: u.name as string, color: u.color as string, replies: u.replies as number, closed: u.closed as number, customers: u.customers as number }))
 
   const open = get<{ active: number; pending: number; unassigned: number }>(
-    `SELECT COALESCE(SUM(c.status = 'active'), 0) AS active, COALESCE(SUM(c.status = 'pending'), 0) AS pending,
-            COALESCE(SUM(c.status = 'active' AND c.assignee_id IS NULL), 0) AS unassigned
+    `SELECT COALESCE(SUM(c.status IN ('active', 'waiting')), 0) AS active, COALESCE(SUM(c.status = 'pending'), 0) AS pending,
+            COALESCE(SUM(c.status IN ('active', 'waiting') AND c.assignee_id IS NULL), 0) AS unassigned
      FROM conversations c WHERE 1 = 1 ${mb}`,
     ...p(),
   )!

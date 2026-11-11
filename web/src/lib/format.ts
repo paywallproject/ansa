@@ -67,4 +67,5 @@ export const colorFor = (seed: string) => AVATAR_COLORS[[...seed].reduce((sum, c
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
-export const STATUS_LABEL: Record<string, string> = { active: 'Active', pending: 'Pending', closed: 'Closed', spam: 'Spam' }
+/** Status names. The workspace settings rewrite these when four statuses are on (see lib/workspace.ts). */
+export const STATUS_LABEL: Record<string, string> = { active: 'Active', waiting: 'Active', pending: 'Pending', closed: 'Closed', spam: 'Spam' }

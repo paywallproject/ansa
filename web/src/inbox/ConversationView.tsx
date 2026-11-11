@@ -29,6 +29,7 @@ import { useDebounced, useDocumentTitle, useHotkeys, useMailboxes, useSession, u
 import type { Attachment, Conversation, ConversationSummary, Status, Thread, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { Composer, type ComposerHandle } from './Composer'
+import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { CustomerPanel } from './CustomerPanel'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
@@ -203,11 +204,14 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
 const pill = 'inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-line bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken'
 const STATUS_PILL: Record<string, string> = {
   active: 'border-ok/25 bg-ok-soft text-ok hover:bg-ok-soft',
+  waiting: 'border-accent/25 bg-accent-soft text-accent-fg hover:bg-accent-soft',
   pending: 'border-warn/25 bg-warn-soft text-warn hover:bg-warn-soft',
   closed: 'bg-sunken',
   spam: 'border-danger/25 bg-danger-soft text-danger hover:bg-danger-soft',
 }
 const STATUS_HINT: Record<string, string> = { active: 'needs a reply', pending: 'waiting on them', closed: 'done' }
+// With four statuses the names say it all, except for the first one.
+const STATUS_HINT_FOUR: Record<string, string> = { active: 'new or in progress', waiting: '', pending: '', closed: '' }
 const MAX_TAGS = 3
 
 function Header({
@@ -307,7 +311,7 @@ function Header({
 
         <Popover
           align="end"
-          width={224}
+          width={248}
           trigger={({ ref, ...props }) => (
             <button ref={ref} type="button" {...props} className={cx(pill, STATUS_PILL[c.status])} aria-label={`Status: ${STATUS_LABEL[c.status]}`} disabled={busy}>
               <StatusDot status={c.status} />
@@ -317,7 +321,7 @@ function Header({
           )}
         >
           {(close) =>
-            (['active', 'pending', 'closed'] as Status[]).map((status) => (
+            statusOptions().map((status) => (
               <MenuItem
                 key={status}
                 icon={<StatusDot status={status} />}
@@ -327,7 +331,7 @@ function Header({
                   onStatus(status)
                 }}
               >
-                {STATUS_LABEL[status]} <span className="ml-1 text-fg-3">{STATUS_HINT[status]}</span>
+                {STATUS_LABEL[status]} <span className="ml-1 text-fg-3">{(workspace().fourStatuses ? STATUS_HINT_FOUR : STATUS_HINT)[status]}</span>
               </MenuItem>
             ))
           }
@@ -468,8 +472,7 @@ function Header({
   )
 }
 
-const DOT: Record<string, string> = { active: 'bg-ok', pending: 'bg-warn', closed: 'bg-fg-3', spam: 'bg-danger' }
-export const StatusDot = ({ status }: { status: string }) => <span className={cx('size-2 shrink-0 rounded-full', DOT[status])} aria-hidden />
+export const StatusDot = ({ status }: { status: string }) => <span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />
 
 function snoozePresets(): { label: string; at: number; hint: string }[] {
   const now = new Date()

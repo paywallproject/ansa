@@ -285,3 +285,49 @@ test('notification email shows the conversation newest first and escapes content
   assert.ok(out.includes('assigned to you') && out.includes('marked as Pending') && out.includes('added a note') && out.includes('started the conversation'))
   assert.ok(out.indexOf('Internal note') < out.indexOf('First message'), 'newest first')
 })
+
+test('workspace features: mentions and four statuses are off until enabled', async () => {
+  const workspace = await import('../services/workspace.ts')
+  const other = run(`INSERT INTO users (name, email, password_hash, role, created_at) VALUES ('Ann Lee', 'ann@acme.test', 'x', 'agent', 1)`).id
+  const shortName = run(`INSERT INTO users (name, email, password_hash, role, created_at) VALUES ('Ann', 'ann2@acme.test', 'x', 'agent', 1)`).id
+  const make = () =>
+    conversations.createConversation({ mailboxId, customerEmail: 'wes@features.test', subject: 'Features', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' }).id
+  const mentionedIn = (userId: number) => conversations.listConversations({ mailboxId, folder: 'mentioned', me: userId }).items.map((c) => c.id)
+
+  // Off: "@Ann Lee" is plain text, and a customer answer makes the conversation active.
+  const first = make()
+  conversations.addNote(first, { bodyHtml: '<p>@Ann Lee please look</p>' }, { userId: agentId, via: 'web' })
+  assert.deepEqual(mentionedIn(other), [])
+  conversations.addReply(first, { bodyHtml: '<p>On it</p>', status: 'pending', skipDelivery: true }, { userId: agentId, via: 'web' })
+  conversations.addCustomerMessage(first, { customerId: get<{ customer_id: number }>('SELECT customer_id FROM conversations WHERE id = ?', first)!.customer_id, bodyHtml: '<p>Thanks</p>' })
+  assert.equal(conversations.getSummary(first).status, 'active')
+
+  workspace.saveWorkspace({ mentions: true, fourStatuses: true })
+  try {
+    const second = make()
+    assert.equal(conversations.getSummary(second).status, 'active', 'a new conversation starts active')
+    conversations.addNote(second, { bodyHtml: '<p>Hey <strong>@Ann Lee</strong> can you check? cc @nobody</p>' }, { userId: agentId, via: 'web' })
+    assert.deepEqual(mentionedIn(other), [second])
+    assert.deepEqual(mentionedIn(shortName), [], '"@Ann Lee" does not also mention "Ann"')
+    assert.deepEqual(mentionedIn(agentId), [], 'the author is not mentioned')
+    assert.equal(conversations.folderCounts(other).find((c) => c.mailboxId === mailboxId)?.mentioned, 1)
+
+    conversations.addReply(second, { bodyHtml: '<p>Checking</p>', status: 'pending', skipDelivery: true }, { userId: agentId, via: 'web' })
+    assert.equal(conversations.getSummary(second).status, 'pending')
+    conversations.addCustomerMessage(second, { customerId: get<{ customer_id: number }>('SELECT customer_id FROM conversations WHERE id = ?', second)!.customer_id, bodyHtml: '<p>Any news?</p>' })
+    assert.equal(conversations.getSummary(second).status, 'waiting', 'a customer answer puts it on our side')
+    assert.equal(workspace.statusLabel('waiting'), 'Waiting on me')
+    assert.equal(workspace.statusLabel('pending'), 'Waiting on customer')
+
+    // Closing the conversation takes it out of the Mentioned folder.
+    conversations.updateConversation(second, { status: 'closed' }, { userId: agentId, via: 'web' })
+    assert.deepEqual(mentionedIn(other), [])
+  } finally {
+    workspace.saveWorkspace({ mentions: false, fourStatuses: false })
+  }
+  assert.equal(workspace.statusLabel('pending'), 'Pending')
+  assert.equal(workspace.brandName(), 'Ansa')
+  workspace.saveWorkspace({ brandName: 'Acme Desk' })
+  assert.equal(workspace.brandName(), 'Acme Desk')
+  workspace.saveWorkspace({ brandName: '' })
+})

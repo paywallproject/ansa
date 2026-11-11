@@ -2,15 +2,20 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { useDocumentTitle } from '../lib/hooks'
 import { Banner, Button, Field, Input } from '../ui'
+import { brand, workspace } from '../lib/workspace'
 
-export const Logo = ({ size = 28 }: { size?: number }) => (
+/** The workspace logo when one is uploaded, otherwise the built-in mark. */
+export const Logo = ({ size = 28 }: { size?: number }) =>
+  workspace().logoUrl ? (
+    <img src={workspace().logoUrl!} alt="" style={{ height: size, maxWidth: size * 5 }} className="w-auto shrink-0 rounded-md object-contain" />
+  ) : (
   <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
     <rect width="32" height="32" rx="8" fill="var(--accent)" />
     <path d="M9 11.5A3.5 3.5 0 0 1 12.5 8h7A3.5 3.5 0 0 1 23 11.5v5a3.5 3.5 0 0 1-3.5 3.5H15l-4.2 3.3a.5.5 0 0 1-.8-.4V19.7A3.5 3.5 0 0 1 9 16.5z" fill="#fff" />
     <circle cx="13.2" cy="14" r="1.25" fill="var(--accent)" />
     <circle cx="18.8" cy="14" r="1.25" fill="var(--accent)" />
   </svg>
-)
+  )
 
 function AuthCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
@@ -46,7 +51,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     }
   }
   return (
-    <AuthCard title="Sign in to Ansa" subtitle="Your team's shared inbox">
+    <AuthCard title={`Sign in to ${brand()}`} subtitle="Your team's shared inbox">
       <form onSubmit={submit} className="flex flex-col gap-4">
         {error && <Banner kind="danger">{error}</Banner>}
         <Field label="Email">{(id) => <Input id={id} type="email" autoComplete="username" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>
@@ -78,7 +83,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
   }
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value })
   return (
-    <AuthCard title="Welcome to Ansa" subtitle="Create the first admin account to get started">
+    <AuthCard title={`Welcome to ${brand()}`} subtitle="Create the first admin account to get started">
       <form onSubmit={submit} className="flex flex-col gap-4">
         {error && <Banner kind="danger">{error}</Banner>}
         <Field label="Your name">{(id) => <Input id={id} autoComplete="name" required autoFocus value={form.name} onChange={set('name')} />}</Field>

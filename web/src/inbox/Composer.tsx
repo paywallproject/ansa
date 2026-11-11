@@ -2,8 +2,10 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, ChevronDown, Send, StickyNote, Trash2, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { useLocalState, useSavedReplies } from '../lib/hooks'
-import type { Conversation, Viewer } from '../lib/types'
+import { useLocalState, useSavedReplies, useSession, useUsers } from '../lib/hooks'
+import type { Conversation, Status, User, Viewer } from '../lib/types'
+import { STATUS_LABEL } from '../lib/format'
+import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { Avatar, Banner, Button, Input, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
 import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
 
@@ -11,9 +13,7 @@ export interface ComposerHandle {
   focus: (mode: 'reply' | 'note') => void
 }
 
-type SendStatus = 'closed' | 'pending' | 'active'
-const STATUS_NAME: Record<SendStatus, string> = { active: 'Active', pending: 'Pending', closed: 'Closed' }
-const SEND_DOT: Record<SendStatus, string> = { closed: 'bg-fg-3', pending: 'bg-warn', active: 'bg-ok' }
+type SendStatus = Exclude<Status, 'spam'>
 
 const splitEmails = (value: string) => value.split(/[,;\s]+/).filter(Boolean)
 
@@ -39,7 +39,9 @@ export const Composer = forwardRef<
   const client = useQueryClient()
   const { toast } = useFeedback()
   const [mode, setMode] = useState<'reply' | 'note'>(conversation.draft?.kind ?? 'reply')
-  const [sendStatus, setSendStatus] = useLocalState<SendStatus>('ansa-send-status', 'closed')
+  const [storedStatus, setSendStatus] = useLocalState<SendStatus>('ansa-send-status', 'closed')
+  // A remembered choice can be one the workspace no longer offers.
+  const sendStatus: SendStatus = (statusOptions() as SendStatus[]).includes(storedStatus) ? storedStatus : 'closed'
   const [showCc, setShowCc] = useState(conversation.cc.length > 0)
   const [showBcc, setShowBcc] = useState(false)
   const [cc, setCc] = useState(conversation.cc.join(', '))
@@ -85,11 +87,51 @@ export const Composer = forwardRef<
   const submitRef = useRef(submit)
   submitRef.current = submit
 
+  // Mentions: typing "@" in a note opens a list of teammates. Picking one writes "@Full Name",
+  // which the server recognises when the note is saved.
+  const { user: me } = useSession()
+  const teammates = useUsers()
+  const [mention, setMention] = useState<{ from: number; to: number; query: string; left: number; bottom: number } | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const candidates: User[] = mention ? (teammates.data ?? []).filter((u) => !u.disabled && u.id !== me.id && u.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6) : []
+  const trackMention = (ed: NonNullable<typeof editor>) => {
+    const { $from, empty } = ed.state.selection
+    const match = empty && modeRef.current === 'note' && workspace().mentions ? /(?:^|\s)@([^\s@]*(?: [^\s@]*)?)$/.exec($from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')) : null
+    if (!match) return setMention(null)
+    const at = ed.view.coordsAtPos($from.pos)
+    setMention({ from: $from.pos - match[1].length - 1, to: $from.pos, query: match[1], left: at.left, bottom: window.innerHeight - at.top + 6 })
+    setMentionIndex(0)
+  }
+  const pickMention = (person: User) => {
+    if (!mention || !editor) return
+    editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: mention.from, to: mention.to }, [
+        { type: 'text', text: `@${person.name}`, marks: [{ type: 'bold' }] },
+        { type: 'text', text: ' ' },
+      ])
+      .run()
+    setMention(null)
+  }
+  const mentionKey = (event: KeyboardEvent): boolean => {
+    if (!mention || candidates.length === 0) return false
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') setMentionIndex((i) => (i + (event.key === 'ArrowDown' ? 1 : candidates.length - 1)) % candidates.length)
+    else if (event.key === 'Enter' || event.key === 'Tab') pickMention(candidates[Math.min(mentionIndex, candidates.length - 1)])
+    else if (event.key === 'Escape') setMention(null)
+    else return false
+    event.preventDefault()
+    event.stopPropagation()
+    return true
+  }
+
   const customerName = conversation.customer.name || conversation.customer.email
   const editor = useRichEditor({
     content: conversation.draft?.bodyHtml ?? '',
-    placeholder: mode === 'reply' ? `Reply to ${customerName}` : 'Write a note for your team. The customer will not see it',
+    placeholder: mode === 'reply' ? `Reply to ${customerName}` : workspace().mentions ? 'Write a note for your team. Type @ to mention a teammate' : 'Write a note for your team. The customer will not see it',
     onSubmit: () => submitRef.current(),
+    onKeyDown: (event) => mentionKey(event),
+    onCaret: (ed) => trackMention(ed),
     onChange: (html) => {
       onTyping(!!html && modeRef.current === 'reply')
       clearTimeout(draftTimer.current)
@@ -146,6 +188,25 @@ export const Composer = forwardRef<
 
   return (
     <div className={cx('shrink-0 px-4 pb-5 md:px-6', !open && 'hidden')}>
+      {mention && candidates.length > 0 && open && (
+        <ul role="listbox" aria-label="Mention a teammate" className="animate-pop fixed z-50 w-60 rounded-lg bg-surface p-1 shadow-pop" style={{ left: Math.max(8, Math.min(mention.left, window.innerWidth - 248)), bottom: mention.bottom }}>
+          {candidates.map((person, index) => (
+            <li key={person.id} role="option" aria-selected={index === mentionIndex}>
+              <button
+                type="button"
+                // Keep the cursor in the editor while clicking.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickMention(person)}
+                onMouseEnter={() => setMentionIndex(index)}
+                className={cx('flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]', index === mentionIndex ? 'bg-accent-soft text-accent-fg' : 'text-fg')}
+              >
+                <Avatar name={person.name} color={person.color} size={20} />
+                <span className="truncate">{person.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mx-auto max-w-[800px] md:px-14">
         {othersReplying.length > 0 && !isNote && (
           <div className="mb-2">
@@ -252,18 +313,18 @@ export const Composer = forwardRef<
                 <Popover
                   align="end"
                   side="top"
-                  width={200}
+                  width={230}
                   trigger={({ ref: triggerRef, ...props }) => (
                     <button
                       ref={triggerRef}
                       type="button"
                       {...props}
-                      aria-label={`Status after sending: ${STATUS_NAME[sendStatus]}`}
+                      aria-label={`Status after sending: ${STATUS_LABEL[sendStatus]}`}
                       title="Status after sending"
                       className="ml-1.5 flex h-8 shrink-0 items-center gap-2 rounded-full border border-line-strong bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
                     >
-                      <span className={cx('size-2 shrink-0 rounded-full', SEND_DOT[sendStatus])} aria-hidden />
-                      {STATUS_NAME[sendStatus]}
+                      <span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
+                      {STATUS_LABEL[sendStatus]}
                       <ChevronDown className="size-3.5 opacity-60" aria-hidden />
                     </button>
                   )}
@@ -271,17 +332,17 @@ export const Composer = forwardRef<
                   {(close) => (
                     <>
                       <MenuLabel>After sending</MenuLabel>
-                      {(['active', 'pending', 'closed'] as SendStatus[]).map((status) => (
+                      {(statusOptions() as SendStatus[]).map((status) => (
                         <MenuItem
                           key={status}
-                          icon={<span className={cx('size-2 shrink-0 rounded-full', SEND_DOT[status])} aria-hidden />}
+                          icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
                           checked={sendStatus === status}
                           onSelect={() => {
                             setSendStatus(status)
                             close()
                           }}
                         >
-                          {STATUS_NAME[status]}
+                          {STATUS_LABEL[status]}
                         </MenuItem>
                       ))}
                     </>

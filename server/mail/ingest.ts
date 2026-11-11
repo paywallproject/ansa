@@ -7,6 +7,7 @@ import { findOrCreateCustomer, isEmail, normEmail } from '../services/customers.
 import { storeAttachment } from '../services/attachments.ts'
 import { runWorkflows } from '../services/workflows.ts'
 import { notifyReplyRejected, parseNotificationRef } from '../services/notify.ts'
+import { brandName } from '../services/workspace.ts'
 
 export interface IngestResult {
   conversationId: number
@@ -47,7 +48,7 @@ function teammateReply(mailbox: MailboxRow, mail: ParsedMail, ref: { conversatio
   if (!user || !get('SELECT 1 FROM conversations WHERE id = ?', ref.conversationId)) return null
   const from = normEmail(mail.from?.value[0]?.address || '')
   if (from !== user.email.toLowerCase()) {
-    notifyReplyRejected(mailbox, user.email, ref.conversationId, `A reply to your notification came from ${from || 'an unknown address'}. Ansa only accepts replies from ${user.email}, the address on your profile.`)
+    notifyReplyRejected(mailbox, user.email, ref.conversationId, `A reply to your notification came from ${from || 'an unknown address'}. ${brandName()} only accepts replies from ${user.email}, the address on your profile.`)
     return null
   }
 
@@ -63,7 +64,7 @@ function teammateReply(mailbox: MailboxRow, mail: ParsedMail, ref: { conversatio
     const threadId = addReply(ref.conversationId, { bodyHtml, status: 'pending', attachmentIds }, { userId: user.id, via: 'email' })
     return { conversationId: ref.conversationId, threadId, created: false }
   } catch (err) {
-    notifyReplyRejected(mailbox, user.email, ref.conversationId, `Ansa could not send your reply: ${(err as Error).message}`)
+    notifyReplyRejected(mailbox, user.email, ref.conversationId, `${brandName()} could not send your reply: ${(err as Error).message}`)
     return null
   }
 }

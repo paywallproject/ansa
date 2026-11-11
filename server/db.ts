@@ -273,6 +273,17 @@ const migrations: string[] = [
   );
   CREATE INDEX app_deliveries_app ON app_deliveries(app_id, id);
   `,
+  `
+  CREATE TABLE mentions (
+    id INTEGER PRIMARY KEY,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX mentions_user ON mentions(user_id, conversation_id);
+  ALTER TABLE users ADD COLUMN notify_mentions INTEGER NOT NULL DEFAULT 1;
+  `,
 ]
 
 export function migrate() {

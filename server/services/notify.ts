@@ -4,10 +4,11 @@ import { config } from '../config.ts'
 import { escapeHtml, REPLY_MARKER } from '../mail/html.ts'
 import { sendMail, wrapEmailHtml, type MailboxRow } from '../mail/outbound.ts'
 import { getConversation, type ThreadView } from './conversations.ts'
+import { brandName, statusLabel } from './workspace.ts'
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 const MAX_ITEMS = 12
-const STATUS_COLOR: Record<string, string> = { active: '#2f8a4c', pending: '#b7791f', closed: '#6b7280', spam: '#b42318' }
+const STATUS_COLOR: Record<string, string> = { active: '#2f8a4c', waiting: '#4336c9', pending: '#b7791f', closed: '#6b7280', spam: '#b42318' }
 
 const when = (ts: number) => {
   const d = new Date(ts)
@@ -20,7 +21,7 @@ function eventText(thread: ThreadView, viewerId: number): string {
   const who = thread.author.name
   switch (e.kind) {
     case 'status':
-      return `${who} marked as ${String(e.to).replace(/^./, (c) => c.toUpperCase())}`
+      return `${who} marked as ${statusLabel(String(e.to))}`
     case 'assigned':
       return e.to ? `${who} assigned to ${e.to === viewerId ? 'you' : e.toName}` : `${who} removed the assignee`
     case 'snoozed':
@@ -71,8 +72,8 @@ export function notifyReplyRejected(mailbox: MailboxRow, to: string, conversatio
   sendMail(mailbox, {
     to: [to],
     subject: `Your reply was not sent (conversation #${conversationId})`,
-    html: wrapEmailHtml(`<p>${escapeHtml(reason)}</p><p>Nothing was sent to the customer. <a href="${config.appUrl}/c/${conversationId}">Open conversation #${conversationId}</a> to reply in Ansa.</p>`),
-    fromName: `${mailbox.name} (Ansa)`,
+    html: wrapEmailHtml(`<p>${escapeHtml(reason)}</p><p>Nothing was sent to the customer. <a href="${config.appUrl}/c/${conversationId}">Open conversation #${conversationId}</a> to reply in ${escapeHtml(brandName())}.</p>`),
+    fromName: `${mailbox.name} (${brandName()})`,
     headers: { 'X-Ansa-Notification': '1', 'Auto-Submitted': 'auto-generated' },
   }).catch((err) => console.error('[notify] could not send:', (err as Error).message))
 }
@@ -133,7 +134,7 @@ export function renderNotification(view: NotificationView): string {
         ${
           view.replyByEmail
             ? `Replying to this notification will email ${escapeHtml(c.customer.name || c.customer.email)} (<a href="mailto:${escapeHtml(c.customer.email)}" style="color:#3b5bdb; text-decoration:none;">${escapeHtml(c.customer.email)}</a>)`
-            : `Reply to ${escapeHtml(c.customer.name || c.customer.email)} in Ansa: <a href="${url}" style="color:#3b5bdb;">open conversation #${c.id}</a>`
+            : `Reply to ${escapeHtml(c.customer.name || c.customer.email)} in ${escapeHtml(brandName())}: <a href="${url}" style="color:#3b5bdb;">open conversation #${c.id}</a>`
         }
       </td></tr>
       <tr><td style="background:#ffffff; border:1px solid #dcdfe3;">
@@ -143,7 +144,7 @@ export function renderNotification(view: NotificationView): string {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;"><tr>
               <td style="font:20px/1.3 ${FONT}; color:#14161a;">${escapeHtml(c.subject)}</td>
               <td align="right" valign="top" style="white-space:nowrap; padding-left:12px;">
-                <span style="display:inline-block; background:${STATUS_COLOR[c.status] || '#6b7280'}; color:#ffffff; font:bold 11px ${FONT}; letter-spacing:0.3px; padding:4px 7px;">${c.status.toUpperCase()}</span>
+                <span style="display:inline-block; background:${STATUS_COLOR[c.status] || '#6b7280'}; color:#ffffff; font:bold 11px ${FONT}; letter-spacing:0.3px; padding:4px 7px;">${escapeHtml(statusLabel(c.status).toUpperCase())}</span>
                 <div style="font:12px ${FONT}; color:#8a8f98; padding-top:8px;">${assignee}</div>
               </td>
             </tr></table>
@@ -153,7 +154,7 @@ export function renderNotification(view: NotificationView): string {
         </table>
       </td></tr>
       <tr><td align="center" style="font:12px ${FONT}; color:#8a8f98; padding:18px 8px 4px;">
-        <a href="${view.appUrl}/settings/profile" style="color:#8a8f98;">Notification settings</a> · ${escapeHtml(c.mailboxName)} · Ansa
+        <a href="${view.appUrl}/settings/profile" style="color:#8a8f98;">Notification settings</a> · ${escapeHtml(c.mailboxName)} · ${escapeHtml(brandName())}
       </td></tr>
     </table>
   </td></tr></table>
@@ -161,7 +162,7 @@ export function renderNotification(view: NotificationView): string {
 }
 
 /** Emails to teammates. Failures are logged and never block the action that caused them. */
-function send(conversationId: number, userId: number, flag: 'notify_assigned' | 'notify_replies', lead: (ctx: { customer: string }) => { text: string; html: string }) {
+function send(conversationId: number, userId: number, flag: 'notify_assigned' | 'notify_replies' | 'notify_mentions', lead: (ctx: { customer: string }) => { text: string; html: string }) {
   if (config.mailDisabled) return
   const user = get<any>(`SELECT name, email, ${flag} AS wants FROM users WHERE id = ? AND disabled = 0`, userId)
   if (!user?.wants) return
@@ -180,7 +181,7 @@ function send(conversationId: number, userId: number, flag: 'notify_assigned' | 
     subject: `[${mailbox.name} #${conversation.id}] ${conversation.subject}`,
     html: renderNotification({ appUrl: config.appUrl, viewerId: userId, leadHtml, conversation, replyByEmail: !!mailbox.imap_enabled && !!mailbox.imap_host }),
     messageId: notificationMessageId(conversation.id, userId, mailbox.email),
-    fromName: `${mailbox.name} (Ansa)`,
+    fromName: `${mailbox.name} (${brandName()})`,
     headers: { 'X-Ansa-Notification': '1', 'Auto-Submitted': 'auto-generated' },
   }).catch((err) => console.error('[notify] could not send:', (err as Error).message))
 }
@@ -195,4 +196,9 @@ export function notifyAssigned(conversationId: number, userId: number, byUserId:
 export function notifyCustomerReply(conversationId: number) {
   const conv = get<{ assignee_id: number | null }>('SELECT assignee_id FROM conversations WHERE id = ?', conversationId)
   if (conv?.assignee_id) send(conversationId, conv.assignee_id, 'notify_replies', ({ customer }) => ({ text: `${customer} replied to conversation`, html: `${strong(customer)} replied to conversation` }))
+}
+
+export function notifyMentioned(conversationId: number, userId: number, byUserId: number | null) {
+  const by = (byUserId ? get<{ name: string }>('SELECT name FROM users WHERE id = ?', byUserId)?.name : null) || 'Someone'
+  send(conversationId, userId, 'notify_mentions', () => ({ text: `${by} mentioned you in conversation`, html: `${strong(by)} mentioned you in conversation` }))
 }

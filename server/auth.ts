@@ -13,6 +13,7 @@ export interface User {
   signature: string
   notifyAssigned: boolean
   notifyReplies: boolean
+  notifyMentions: boolean
   disabled: boolean
   createdAt: number
 }
@@ -29,6 +30,7 @@ export function serializeUser(row: any): User {
     signature: row.signature,
     notifyAssigned: !!row.notify_assigned,
     notifyReplies: !!row.notify_replies,
+    notifyMentions: row.notify_mentions === undefined ? true : !!row.notify_mentions,
     disabled: !!row.disabled,
     createdAt: row.created_at,
   }
