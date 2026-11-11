@@ -207,7 +207,7 @@ export const Composer = forwardRef<
           ))}
         </ul>
       )}
-      <div className="mx-auto max-w-[800px] md:px-14">
+      <div className="mx-auto max-w-[860px] md:px-14">
         {othersReplying.length > 0 && !isNote && (
           <div className="mb-2">
             <Banner kind="warn">

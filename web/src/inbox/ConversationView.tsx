@@ -664,7 +664,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
-        <ol className={cx('mx-auto flex max-w-[800px] flex-col gap-4 pt-5', composing ? 'pb-4' : 'pb-28')}>
+        <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-4 pt-5', composing ? 'pb-4' : 'pb-28')}>
           {conversation.threads.map((thread, index) => {
             const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
             return (
@@ -814,7 +814,8 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
-          'relative rounded-xl border px-5 md:px-11',
+          // Wide side margins inside the card keep lines short and give the text room.
+          'relative rounded-xl border px-5 md:px-12 lg:px-20',
           folded ? 'py-4' : 'pt-5 pb-6',
           isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
           thread.state === 'failed' && 'ring-1 ring-danger/50',
