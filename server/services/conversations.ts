@@ -508,11 +508,14 @@ function recordMentions(conversationId: number, threadId: number, text: string, 
   // Longest names first, so "@Ann Lee" is not also counted for a teammate called "Ann".
   const found = new Set<number>()
   let rest = lower
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   for (const user of [...users].sort((a, b) => b.name.length - a.name.length)) {
-    const needle = `@${user.name.toLowerCase()}`
-    if (user.name.trim() && rest.includes(needle)) {
+    if (!user.name.trim()) continue
+    // "@" must start a word and the name must end one: "team@riza.com" and "@Rizal" do not mention "Riza".
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}._%+-])@${escape(user.name.toLowerCase())}(?![\\p{L}\\p{N}_.-]*[\\p{L}\\p{N}_])`, 'gu')
+    if (pattern.test(rest)) {
       found.add(user.id)
-      rest = rest.split(needle).join(' ')
+      rest = rest.replace(pattern, '$1 ')
     }
   }
   found.delete(authorId ?? -1)

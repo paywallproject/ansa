@@ -417,7 +417,15 @@ api.post('/mailboxes/:id/sync', async (c) => {
 // Conversations
 // ---------------------------------------------------------------------------------------------
 
-const FOLDERS: Folder[] = ['unassigned', 'mine', 'assigned', 'snoozed', 'closed', 'spam', 'all', 'open']
+// Written as a record so the compiler fails when a folder is added to the type but not here.
+const FOLDERS = Object.keys({ unassigned: 1, mine: 1, mentioned: 1, assigned: 1, pending: 1, snoozed: 1, closed: 1, spam: 1, open: 1, all: 1 } satisfies Record<Folder, 1>) as Folder[]
+
+/** A folder name from the address bar. An unknown name is an error, not "show everything". */
+function knownFolder(value: string | undefined): Folder | undefined {
+  if (!value) return undefined
+  if (!FOLDERS.includes(value as Folder)) throw new AppError(`Unknown folder "${value.slice(0, 40)}".`, 400)
+  return value as Folder
+}
 
 api.get('/conversations', (c) => {
   const q = c.req.query()
@@ -425,7 +433,7 @@ api.get('/conversations', (c) => {
   return c.json(
     listConversations({
       mailboxId: q.mailbox ? int(q.mailbox) : undefined,
-      folder: FOLDERS.includes(q.folder as Folder) ? (q.folder as Folder) : undefined,
+      folder: knownFolder(q.folder),
       status: q.status as Status | undefined,
       assigneeId: assignee,
       customerId: q.customer ? int(q.customer) : undefined,

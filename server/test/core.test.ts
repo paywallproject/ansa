@@ -309,6 +309,12 @@ test('workspace features: mentions always work; four statuses are off until enab
     conversations.addNote(second, { bodyHtml: '<p>Hey <strong>@Ann Lee</strong> can you check? cc @nobody</p>' }, { userId: agentId, via: 'web' })
     assert.deepEqual(mentionedIn(other).sort(), [first, second].sort())
     assert.deepEqual(mentionedIn(shortName), [], '"@Ann Lee" does not also mention "Ann"')
+    const third = make()
+    conversations.addNote(third, { bodyHtml: '<p>Mail team@ann.example or ask @Annabel. Not a mention.</p>' }, { userId: agentId, via: 'web' })
+    assert.ok(!mentionedIn(shortName).includes(third), 'an email address or a longer name is not a mention')
+    conversations.addNote(third, { bodyHtml: '<p>Thanks @Ann, and (@ann lee).</p>' }, { userId: agentId, via: 'web' })
+    assert.ok(mentionedIn(shortName).includes(third) && mentionedIn(other).includes(third), 'a mention can end with punctuation')
+    conversations.updateConversation(third, { status: 'closed' }, { userId: agentId, via: 'web' })
     assert.deepEqual(mentionedIn(agentId), [], 'the author is not mentioned')
     assert.equal(conversations.folderCounts(other).find((c) => c.mailboxId === mailboxId)?.mentioned, 2)
 

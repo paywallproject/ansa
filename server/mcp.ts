@@ -118,7 +118,7 @@ function buildServer(user: User) {
         'Folders: unassigned, mine, assigned, snoozed, closed, spam, open (active + pending), all.',
       inputSchema: {
         mailbox_id: z.number().int().optional(),
-        folder: z.enum(['unassigned', 'mine', 'assigned', 'snoozed', 'closed', 'spam', 'open', 'all']).optional(),
+        folder: z.enum(['unassigned', 'mine', 'mentioned', 'assigned', 'pending', 'snoozed', 'closed', 'spam', 'open', 'all']).optional(),
         status: STATUS.optional(),
         assignee_id: z.number().int().optional().describe('Teammate id from list_team'),
         tag: z.string().optional(),
