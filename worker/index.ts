@@ -12,6 +12,7 @@ import { createApp, prepareData, startTimers } from '../server/app.ts'
 import { pruneSessions } from '../server/auth.ts'
 import { pollAllMailboxes } from '../server/mail/imap.ts'
 import { wakeSnoozed } from '../server/services/conversations.ts'
+import { importIsRunning, importStep } from '../server/services/import-helpscout.ts'
 
 interface Env {
   ANSA: DurableObjectNamespace
@@ -109,8 +110,16 @@ export class AnsaStore extends DurableObject<Env> {
     return out
   }
 
+  private lastPoll = 0
+
   /** The alarm is the only thing that wakes this object without a visitor, so keep one set while there is work. */
   private async scheduleAlarm() {
+    // An import runs as a chain of short alarms: each one may only make a few dozen requests.
+    if (importIsRunning()) {
+      const current = await this.ctx.storage.getAlarm()
+      if (current === null || current > Date.now() + 3000) await this.ctx.storage.setAlarm(Date.now() + 1000)
+      return
+    }
     const polling = !config.mailDisabled && get(`SELECT 1 FROM mailboxes WHERE imap_enabled = 1 AND imap_host != '' LIMIT 1`)
     const snoozed = get('SELECT 1 FROM conversations WHERE snoozed_until IS NOT NULL LIMIT 1')
     if (!polling && !snoozed) return
@@ -119,9 +128,14 @@ export class AnsaStore extends DurableObject<Env> {
 
   async alarm() {
     try {
-      wakeSnoozed()
-      pruneSessions()
-      await pollAllMailboxes()
+      await importStep()
+      // Mail is checked on its own schedule, however often the alarm fires.
+      if (Date.now() - this.lastPoll >= Math.max(10, config.imapPollSeconds) * 1000 - 500) {
+        this.lastPoll = Date.now()
+        wakeSnoozed()
+        pruneSessions()
+        await pollAllMailboxes()
+      }
     } catch (err) {
       console.error('[alarm]', err)
     } finally {

@@ -331,3 +331,92 @@ test('workspace features: mentions and four statuses are off until enabled', asy
   assert.equal(workspace.brandName(), 'Acme Desk')
   workspace.saveWorkspace({ brandName: '' })
 })
+
+test('Help Scout import: conversations, threads, tags, files; skips spam; safe to repeat', async () => {
+  const http = await import('node:http')
+  const hsImport = await import('../services/import-helpscout.ts')
+  const person = (id: number, type: string, first: string, last: string, email: string) => ({ id, type, first, last, email })
+  const jane = person(500, 'customer', 'Jane', 'Doe', 'jane@hs-import.test')
+  const tyler = person(900, 'user', 'Tyler', 'Channell', 'tyler@hs-import.test')
+  const thread = (id: number, type: string, by: object, body: string, at: string, extra: object = {}) => ({ id, type, status: 'active', state: 'published', body, createdBy: by, createdAt: at, ...extra })
+  const fixtures = [
+    {
+      id: 1001, number: 84966, threads: 3, status: 'closed', state: 'published', subject: 'New launch form', createdAt: '2026-11-07T01:16:00Z', closedAt: '2026-11-07T09:59:00Z', primaryCustomer: jane, assignee: tyler, tags: [{ tag: 'launch' }, { tag: 'vip' }], cc: ['boss@hs-import.test'],
+      _embedded: { threads: [
+        thread(3, 'message', tyler, '<p>This should be all set!</p><script>x()</script>', '2026-11-07T09:59:00Z', { status: 'closed', to: ['jane@hs-import.test'], _embedded: { attachments: [{ id: 77, filename: 'shot.txt', mimeType: 'text/plain', size: 5, state: 'valid' }] } }),
+        thread(1, 'customer', jane, 'Very handy guide. <b>Thank you!</b>', '2026-11-07T01:16:00Z'),
+        thread(2, 'note', tyler, 'Internal: check with design', '2026-11-07T05:00:00Z'),
+        thread(4, 'lineitem', tyler, '', '2026-11-07T10:00:00Z'),
+      ] },
+    },
+    { id: 1002, number: 84967, threads: 1, status: 'spam', state: 'published', subject: 'Buy now', createdAt: '2026-11-08T00:00:00Z', primaryCustomer: person(501, 'customer', 'Spam', 'Bot', 'spam@hs-import.test'), _embedded: { threads: [thread(9, 'customer', jane, 'spam', '2026-11-08T00:00:00Z')] } },
+    { id: 1003, number: 84968, threads: 2, status: 'active', state: 'published', subject: 'Question', createdAt: '2026-11-09T00:00:00Z', primaryCustomer: { id: 502, type: 'customer', first: 'No', last: 'Email' }, _embedded: { threads: [thread(10, 'customer', { id: 502, type: 'customer' }, 'First', '2026-11-09T00:00:00Z')] } },
+  ]
+  let tokens = 0
+  let throttled = false
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url!, 'http://x')
+    const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => res.writeHead(status, { 'Content-Type': 'application/json', ...headers }).end(JSON.stringify(data))
+    if (url.pathname === '/v2/oauth2/token') {
+      tokens++
+      let body = ''
+      req.on('data', (chunk) => (body += chunk))
+      req.on('end', () => (body.includes('client_secret=good') ? json({ access_token: 'tok', expires_in: 172800 }) : json({ error: 'invalid_client' }, 401)))
+      return
+    }
+    if (req.headers.authorization !== 'Bearer tok') return json({}, 401)
+    if (url.pathname === '/v2/mailboxes') return json({ _embedded: { mailboxes: [{ id: 13, name: 'PaywallProject', email: 'help@hs-import.test' }] }, page: { number: 1, size: 50, totalElements: 1, totalPages: 1 } })
+    if (url.pathname === '/v2/conversations') {
+      if (url.searchParams.get('embed') && !throttled) {
+        throttled = true
+        return json({}, 429, { 'X-RateLimit-Retry-After': '1' })
+      }
+      const page = Number(url.searchParams.get('page') || 1)
+      // Two per page, to exercise paging.
+      return json({ _embedded: { conversations: fixtures.slice((page - 1) * 2, page * 2) }, page: { number: page, size: 2, totalElements: 3, totalPages: 2 } })
+    }
+    if (url.pathname === '/v2/conversations/1003/threads') return json({ _embedded: { threads: [thread(10, 'customer', { id: 502, type: 'customer' }, 'First', '2026-11-09T00:00:00Z'), thread(11, 'customer', { id: 502, type: 'customer' }, 'Second, fetched separately', '2026-11-09T01:00:00Z')] }, page: { number: 1, size: 25, totalElements: 2, totalPages: 1 } })
+    if (url.pathname === '/v2/conversations/1001/attachments/77/data') return json({ data: Buffer.from('hello').toString('base64') })
+    json({}, 404)
+  })
+  await new Promise<void>((resolve) => server.listen(0, resolve))
+  process.env.HELPSCOUT_API = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  try {
+    await assert.rejects(() => hsImport.connectHelpScout('app', 'bad'), /did not accept/)
+    const inboxes = await hsImport.connectHelpScout('app', 'good')
+    assert.deepEqual(inboxes, [{ id: 13, name: 'PaywallProject', email: 'help@hs-import.test', conversations: 3 }])
+
+    await hsImport.startImport({ appId: 'app', appSecret: 'good', attachments: true, inboxes: [{ hsId: 13, name: 'PaywallProject', email: 'help@hs-import.test', mailboxId: null }] })
+    for (let i = 0; i < 100 && hsImport.importStatus().status === 'running'; i++) await new Promise((r) => setTimeout(r, 100))
+    const state = hsImport.importStatus()
+    assert.equal(state.status, 'done', state.message ?? '')
+    assert.deepEqual([state.imported, state.skipped, state.files], [2, 1, 1])
+    assert.ok(!('secretEnc' in state) && !JSON.stringify(state).includes('good'), 'credentials are not exposed')
+
+    const box = get<{ id: number }>(`SELECT id FROM mailboxes WHERE email = 'help@hs-import.test'`)!
+    const list = conversations.listConversations({ mailboxId: box.id, folder: 'all', sort: 'oldest' }).items
+    assert.deepEqual(list.map((c) => [c.subject, c.status]), [['New launch form', 'closed'], ['Question', 'active']])
+    const first = conversations.getConversation(list[0].id)
+    assert.deepEqual(first.threads.map((t) => [t.type, t.author.name]), [['customer', 'Jane Doe'], ['note', 'Tyler Channell'], ['reply', 'Tyler Channell']])
+    assert.ok(!first.threads[2].bodyHtml.includes('script'))
+    assert.equal(first.threads[2].event?.status, 'closed')
+    assert.equal(first.threads[2].attachments[0].filename, 'shot.txt')
+    assert.deepEqual(first.tags.map((t) => t.name).sort(), ['launch', 'vip'])
+    assert.equal(first.createdAt, Date.parse('2026-11-07T01:16:00Z'))
+    assert.equal(get<{ disabled: number }>(`SELECT disabled FROM users WHERE email = 'tyler@hs-import.test'`)?.disabled, 1, 'unknown Help Scout users become disabled teammates')
+    const second = conversations.getConversation(list[1].id)
+    assert.equal(second.threads.length, 2, 'cut-off thread lists are fetched in full')
+    assert.ok(second.waitingSince, 'an open conversation that ends with the customer is waiting')
+    assert.equal(conversations.listConversations({ q: 'handy guide' }).items[0]?.id, list[0].id, 'imported text is searchable')
+
+    // Running it again brings in nothing new.
+    await hsImport.startImport({ appId: 'app', appSecret: 'good', attachments: true, inboxes: [{ hsId: 13, name: 'PaywallProject', email: 'help@hs-import.test', mailboxId: box.id }] })
+    for (let i = 0; i < 100 && hsImport.importStatus().status === 'running'; i++) await new Promise((r) => setTimeout(r, 100))
+    assert.equal(hsImport.importStatus().imported, 0)
+    assert.equal(conversations.listConversations({ mailboxId: box.id, folder: 'all' }).total, 2)
+    assert.ok(tokens >= 3)
+  } finally {
+    delete process.env.HELPSCOUT_API
+    server.close()
+  }
+})

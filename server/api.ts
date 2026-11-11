@@ -46,6 +46,7 @@ import { createApp as createIntegration, deleteApp, getApp, listApps, listDelive
 import { APP_EVENTS } from './hooks.ts'
 import { brandName, getWorkspace, publicWorkspace, saveWorkspace } from './services/workspace.ts'
 import { blobs } from './blobs.ts'
+import { cancelImport, connectHelpScout, importStatus, resumeImport, startImport } from './services/import-helpscout.ts'
 import { publish } from './events.ts'
 
 export const api = new Hono<Env>()
@@ -771,6 +772,25 @@ api.delete('/workspace/logo', requireAdmin, (c) => {
   publish({ type: 'refresh', scope: 'workspace' })
   return c.json({ workspace: publicWorkspace() })
 })
+
+// Import from Help Scout. Admins only.
+api.get('/import/helpscout', requireAdmin, (c) => c.json({ import: importStatus() }))
+api.post('/import/helpscout/connect', requireAdmin, async (c) => {
+  const data = await body(c)
+  if (!str(data.appId, 200) || !str(data.appSecret, 200)) throw new AppError('Enter the App ID and the App Secret.')
+  return c.json({ inboxes: await connectHelpScout(str(data.appId, 200), str(data.appSecret, 200)) })
+})
+api.post('/import/helpscout/start', requireAdmin, async (c) => {
+  const data = await body(c)
+  const inboxes = (Array.isArray(data.inboxes) ? data.inboxes : [])
+    .filter((box: any) => int(box?.hsId) > 0)
+    .map((box: any) => ({ hsId: int(box.hsId), name: str(box.name, 100), email: str(box.email, 200), mailboxId: box.mailboxId ? int(box.mailboxId) : null }))
+  const state = await startImport({ appId: str(data.appId, 200), appSecret: str(data.appSecret, 200), attachments: data.attachments !== false, inboxes })
+  publish({ type: 'mailbox', id: 0 })
+  return c.json({ import: state })
+})
+api.post('/import/helpscout/cancel', requireAdmin, (c) => c.json({ import: cancelImport() }))
+api.post('/import/helpscout/resume', requireAdmin, (c) => c.json({ import: resumeImport() }))
 
 // Apps: sidebar content and webhooks. See docs/apps.md.
 api.get('/apps', requireAdmin, (c) => c.json({ apps: listApps(), events: APP_EVENTS }))

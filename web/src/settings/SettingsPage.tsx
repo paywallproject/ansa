@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, Building, KeyRound, Mail, Plus, Puzzle, Tag as TagIcon, Trash2, UserRound, Users, Workflow as WorkflowIcon } from 'lucide-react'
+import { Bookmark, Building, Download, KeyRound, Mail, Plus, Puzzle, Tag as TagIcon, Trash2, UserRound, Users, Workflow as WorkflowIcon } from 'lucide-react'
 import { api } from '../lib/api'
 import { plural } from '../lib/format'
 import { useDocumentTitle, useSession, useTags, useUsers } from '../lib/hooks'
@@ -13,6 +13,7 @@ import { SavedRepliesSettings, WorkflowsSettings } from './Automation'
 import { ApiSettings } from './ApiMcp'
 import { AppsSettings } from './Apps'
 import { WorkspaceSettings } from './Workspace'
+import { ImportSettings } from './Import'
 import { workspace } from '../lib/workspace'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
@@ -24,6 +25,7 @@ const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'workflows', label: 'Workflows', icon: <WorkflowIcon />, admin: true },
   { to: 'apps', label: 'Apps', icon: <Puzzle />, admin: true },
   { to: 'workspace', label: 'Workspace', icon: <Building />, admin: true },
+  { to: 'import', label: 'Import', icon: <Download />, admin: true },
   { to: 'api', label: 'API & MCP', icon: <KeyRound /> },
 ]
 
@@ -68,6 +70,7 @@ export function SettingsPage() {
             {admin && <Route path="workflows" element={<WorkflowsSettings />} />}
             {admin && <Route path="apps" element={<AppsSettings />} />}
             {admin && <Route path="workspace" element={<WorkspaceSettings />} />}
+            {admin && <Route path="import" element={<ImportSettings />} />}
             <Route path="api" element={<ApiSettings />} />
             <Route path="*" element={<Navigate to="profile" replace />} />
           </Routes>

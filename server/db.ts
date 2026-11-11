@@ -284,6 +284,15 @@ const migrations: string[] = [
   CREATE INDEX mentions_user ON mentions(user_id, conversation_id);
   ALTER TABLE users ADD COLUMN notify_mentions INTEGER NOT NULL DEFAULT 1;
   `,
+  `
+  CREATE TABLE import_map (
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+    external_number INTEGER,
+    PRIMARY KEY (source, external_id)
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export function migrate() {

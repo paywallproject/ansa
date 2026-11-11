@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server'
 import { config } from './config.ts'
 import { createApp, prepareData, startTimers } from './app.ts'
 import { startAllMailboxes, stopAllMailboxes } from './mail/imap.ts'
+import { kick } from './services/import-helpscout.ts'
 
 prepareData()
 const app = createApp()
@@ -56,6 +57,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
 
 startAllMailboxes()
 startTimers()
+kick() // continue an import that was running when the process stopped
 
 const shutdown = () => {
   console.log('Shutting down…')

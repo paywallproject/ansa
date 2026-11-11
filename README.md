@@ -25,6 +25,7 @@ Run it on a VPS as one container with one SQLite file, or on Cloudflare Workers 
 - **Mentions.** Type `@` in a note to mention a teammate. They get an email and a Mentioned folder. Off by default.
 - **White label.** Your own name and logo in the app, on the sign-in page and in notification emails.
 - **Four statuses.** Active, Waiting on me, Waiting on customer, Closed. Off by default.
+- **Import from Help Scout.** Conversations, notes, customers, tags and attachments, through Help Scout's API. See Settings → Import.
 - **Keyboard shortcuts, dark mode, mobile layout.**
 
 ## Install on a VPS
@@ -157,6 +158,21 @@ An app connects Ansa to your other tools. Create one in **Settings → Apps**.
 - **Actions.** Your app changes things through the REST API below.
 
 [Build an app](docs/apps.md) has the full guide, the request formats, and two working examples in [`examples/`](examples).
+
+## Import from Help Scout
+
+Open **Settings → Import**. Help Scout gives out conversations only through its API, so you create a private app there first.
+
+1. In Help Scout, open **Your Profile → My Apps** and press **Create My App**. Use any name, and `https://example.com` as the redirection URL.
+2. Paste the **App ID** and **App Secret** into Ansa and press **Connect**.
+3. Choose where each Help Scout inbox goes, then start the import.
+
+It runs in the background and can be stopped and resumed. Running it again adds only what is new. Nothing in Help Scout is changed.
+
+- **Imported:** conversations with their dates and status, customer messages, replies, notes, customers, tags, attachments.
+- **Not imported:** spam, drafts, activity lines, saved replies, workflows, custom fields, ratings.
+- **Speed:** about 20,000 conversations an hour. Help Scout allows 200 requests a minute.
+- **On Cloudflare:** a large import needs the Workers Paid plan. The free plan limits database writes per day; the import pauses when it hits the limit and you resume it the next day.
 
 ## REST API
 
