@@ -135,7 +135,7 @@ function ProfileSettings() {
             <h3 className="text-[13px] font-medium">Email me when</h3>
             <Switch checked={form.notifyAssigned} onChange={(v) => setForm({ ...form, notifyAssigned: v })} label="A teammate assigns me a conversation" />
             <Switch checked={form.notifyReplies} onChange={(v) => setForm({ ...form, notifyReplies: v })} label="A customer replies to my conversation" />
-            {workspace().mentions && <Switch checked={form.notifyMentions} onChange={(v) => setForm({ ...form, notifyMentions: v })} label="A teammate mentions me in a note" />}
+            <Switch checked={form.notifyMentions} onChange={(v) => setForm({ ...form, notifyMentions: v })} label="A teammate mentions me in a note" />
           </div>
           <div className="flex justify-end">
             <Button type="submit" variant="primary" loading={save.isPending}>

@@ -286,7 +286,7 @@ test('notification email shows the conversation newest first and escapes content
   assert.ok(out.indexOf('Internal note') < out.indexOf('First message'), 'newest first')
 })
 
-test('workspace features: mentions and four statuses are off until enabled', async () => {
+test('workspace features: mentions always work; four statuses are off until enabled', async () => {
   const workspace = await import('../services/workspace.ts')
   const other = run(`INSERT INTO users (name, email, password_hash, role, created_at) VALUES ('Ann Lee', 'ann@acme.test', 'x', 'agent', 1)`).id
   const shortName = run(`INSERT INTO users (name, email, password_hash, role, created_at) VALUES ('Ann', 'ann2@acme.test', 'x', 'agent', 1)`).id
@@ -294,10 +294,10 @@ test('workspace features: mentions and four statuses are off until enabled', asy
     conversations.createConversation({ mailboxId, customerEmail: 'wes@features.test', subject: 'Features', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' }).id
   const mentionedIn = (userId: number) => conversations.listConversations({ mailboxId, folder: 'mentioned', me: userId }).items.map((c) => c.id)
 
-  // Off: "@Ann Lee" is plain text, and a customer answer makes the conversation active.
+  // The folder setting is off, but the mention is still recorded. A customer answer makes the conversation active.
   const first = make()
   conversations.addNote(first, { bodyHtml: '<p>@Ann Lee please look</p>' }, { userId: agentId, via: 'web' })
-  assert.deepEqual(mentionedIn(other), [])
+  assert.deepEqual(mentionedIn(other), [first])
   conversations.addReply(first, { bodyHtml: '<p>On it</p>', status: 'pending', skipDelivery: true }, { userId: agentId, via: 'web' })
   conversations.addCustomerMessage(first, { customerId: get<{ customer_id: number }>('SELECT customer_id FROM conversations WHERE id = ?', first)!.customer_id, bodyHtml: '<p>Thanks</p>' })
   assert.equal(conversations.getSummary(first).status, 'active')
@@ -307,10 +307,10 @@ test('workspace features: mentions and four statuses are off until enabled', asy
     const second = make()
     assert.equal(conversations.getSummary(second).status, 'active', 'a new conversation starts active')
     conversations.addNote(second, { bodyHtml: '<p>Hey <strong>@Ann Lee</strong> can you check? cc @nobody</p>' }, { userId: agentId, via: 'web' })
-    assert.deepEqual(mentionedIn(other), [second])
+    assert.deepEqual(mentionedIn(other).sort(), [first, second].sort())
     assert.deepEqual(mentionedIn(shortName), [], '"@Ann Lee" does not also mention "Ann"')
     assert.deepEqual(mentionedIn(agentId), [], 'the author is not mentioned')
-    assert.equal(conversations.folderCounts(other).find((c) => c.mailboxId === mailboxId)?.mentioned, 1)
+    assert.equal(conversations.folderCounts(other).find((c) => c.mailboxId === mailboxId)?.mentioned, 2)
 
     conversations.addReply(second, { bodyHtml: '<p>Checking</p>', status: 'pending', skipDelivery: true }, { userId: agentId, via: 'web' })
     assert.equal(conversations.getSummary(second).status, 'pending')
@@ -321,7 +321,7 @@ test('workspace features: mentions and four statuses are off until enabled', asy
 
     // Closing the conversation takes it out of the Mentioned folder.
     conversations.updateConversation(second, { status: 'closed' }, { userId: agentId, via: 'web' })
-    assert.deepEqual(mentionedIn(other), [])
+    assert.deepEqual(mentionedIn(other), [first])
   } finally {
     workspace.saveWorkspace({ mentions: false, fourStatuses: false })
   }

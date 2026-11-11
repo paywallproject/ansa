@@ -489,10 +489,10 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
 
 /**
  * Find "@Full Name" in a note and remember who was mentioned. Returns the teammates to tell.
- * Does nothing unless the workspace turned mentions on.
+ * This always works. The workspace setting only decides if the Mentioned folder is shown.
  */
 function recordMentions(conversationId: number, threadId: number, text: string, authorId: number | null): number[] {
-  if (!getWorkspace().mentions || !text.includes('@')) return []
+  if (!text.includes('@')) return []
   const lower = text.toLowerCase()
   const users = all<{ id: number; name: string }>('SELECT id, name FROM users WHERE disabled = 0')
   // Longest names first, so "@Ann Lee" is not also counted for a teammate called "Ann".

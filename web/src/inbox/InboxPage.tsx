@@ -18,7 +18,7 @@ const PAGE = 40
 const EMPTY: Record<Folder, { title: string; body: string }> = {
   unassigned: { title: 'All caught up', body: 'New conversations that nobody owns yet show up here.' },
   mine: { title: 'Nothing on your plate', body: 'Conversations assigned to you show up here.' },
-  mentioned: { title: 'No mentions', body: 'Open conversations where a teammate wrote @ and your name in a note show up here.' },
+  mentioned: { title: 'No mentions', body: 'Open conversations where a teammate mentioned you in a note show up here.' },
   assigned: { title: 'Nothing assigned', body: 'Open conversations that have an owner show up here.' },
   snoozed: { title: 'Nothing snoozed', body: 'Snooze a conversation to hide it until you need it.' },
   closed: { title: 'No closed conversations', body: 'Conversations you close are kept here.' },

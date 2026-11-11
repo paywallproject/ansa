@@ -90,8 +90,8 @@ export function WorkspaceSettings() {
             checked={workspace.mentions}
             disabled={save.isPending}
             onChange={(mentions) => save.mutate({ mentions })}
-            label="Mentions"
-            description="Type @ in a note to mention a teammate. They get an email, and a Mentioned folder appears under Mine with the open conversations that mention them."
+            label="Mentioned folder"
+            description="Adds a Mentioned folder under Mine, with the open conversations where a teammate mentioned you. Mentions always work: type @ in a note, and the teammate gets an email."
           />
           <Switch
             checked={workspace.fourStatuses}

@@ -9,7 +9,7 @@ export interface WorkspaceSettings {
   brandName: string
   /** Storage key and type of the uploaded logo, or null for the built-in mark. */
   logo: { key: string; mime: string; version: number } | null
-  /** @mentions in notes, the Mentioned folder, and mention emails. */
+  /** Show the Mentioned folder under Mine. Mentions themselves (the @ picker and the email) always work. */
   mentions: boolean
   /** Four statuses: Active, Waiting on me, Waiting on customer, Closed. */
   fourStatuses: boolean

@@ -50,7 +50,7 @@ export const FOLDERS: { id: Folder; label: string; icon: typeof Inbox; countKey?
   { id: 'spam', label: 'Spam', icon: ShieldAlert },
 ]
 
-/** The Mentioned folder only exists when the workspace turned mentions on. */
+/** The Mentioned folder is shown only when the workspace turned it on. Mentions themselves always work. */
 export const visibleFolders = () => FOLDERS.filter((f) => f.id !== 'mentioned' || workspace().mentions)
 
 const folderItem = (active: boolean) =>

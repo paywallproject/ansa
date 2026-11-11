@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import { useLocalState, useSavedReplies, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
-import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
+import { STATUS_DOT, statusOptions } from '../lib/workspace'
 import { Avatar, Banner, Button, Input, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
 import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
 
@@ -96,7 +96,7 @@ export const Composer = forwardRef<
   const candidates: User[] = mention ? (teammates.data ?? []).filter((u) => !u.disabled && u.id !== me.id && u.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6) : []
   const trackMention = (ed: NonNullable<typeof editor>) => {
     const { $from, empty } = ed.state.selection
-    const match = empty && modeRef.current === 'note' && workspace().mentions ? /(?:^|\s)@([^\s@]*(?: [^\s@]*)?)$/.exec($from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')) : null
+    const match = empty && modeRef.current === 'note' ? /(?:^|\s)@([^\s@]*(?: [^\s@]*)?)$/.exec($from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')) : null
     if (!match) return setMention(null)
     const at = ed.view.coordsAtPos($from.pos)
     setMention({ from: $from.pos - match[1].length - 1, to: $from.pos, query: match[1], left: at.left, bottom: window.innerHeight - at.top + 6 })
@@ -128,7 +128,7 @@ export const Composer = forwardRef<
   const customerName = conversation.customer.name || conversation.customer.email
   const editor = useRichEditor({
     content: conversation.draft?.bodyHtml ?? '',
-    placeholder: mode === 'reply' ? `Reply to ${customerName}` : workspace().mentions ? 'Write a note for your team. Type @ to mention a teammate' : 'Write a note for your team. The customer will not see it',
+    placeholder: mode === 'reply' ? `Reply to ${customerName}` : 'Write a note for your team. Type @ to mention a teammate',
     onSubmit: () => submitRef.current(),
     onKeyDown: (event) => mentionKey(event),
     onCaret: (ed) => trackMention(ed),
