@@ -258,7 +258,8 @@ export const Composer = forwardRef<
             </div>
           )}
 
-          <div className="flex items-center gap-0.5 px-2 pt-1 pb-2">
+          {/* On a narrow screen the send controls drop to their own line instead of running off the edge. */}
+          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 px-2 pt-1 pb-2">
             <EditorToolbar editor={editor}>
               <span className="mx-1.5 h-4 w-px bg-line" aria-hidden />
               <AttachButton onFiles={uploads.add} />
@@ -300,59 +301,61 @@ export const Composer = forwardRef<
               </Popover>
             </EditorToolbar>
 
-            <button type="button" aria-label="Discard draft" title="Discard draft" onClick={discard} className={cx(tool, 'ml-auto')}>
-              <Trash2 className="size-4" aria-hidden />
-            </button>
-            {isNote ? (
-              <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<StickyNote className="size-3.5" aria-hidden />}>
-                Add note
-              </Button>
-            ) : (
-              <>
-                {/* The status this reply gives the conversation. It is shown on the message afterwards. */}
-                <Popover
-                  align="end"
-                  side="top"
-                  width={230}
-                  trigger={({ ref: triggerRef, ...props }) => (
-                    <button
-                      ref={triggerRef}
-                      type="button"
-                      {...props}
-                      aria-label={`Status after sending: ${STATUS_LABEL[sendStatus]}`}
-                      title="Status after sending"
-                      className="ml-1.5 flex h-8 shrink-0 items-center gap-2 rounded-full border border-line-strong bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
-                    >
-                      <span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
-                      {STATUS_LABEL[sendStatus]}
-                      <ChevronDown className="size-3.5 opacity-60" aria-hidden />
-                    </button>
-                  )}
-                >
-                  {(close) => (
-                    <>
-                      <MenuLabel>After sending</MenuLabel>
-                      {(statusOptions() as SendStatus[]).map((status) => (
-                        <MenuItem
-                          key={status}
-                          icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
-                          checked={sendStatus === status}
-                          onSelect={() => {
-                            setSendStatus(status)
-                            close()
-                          }}
-                        >
-                          {STATUS_LABEL[status]}
-                        </MenuItem>
-                      ))}
-                    </>
-                  )}
-                </Popover>
-                <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<Send className="size-3.5" aria-hidden />}>
-                  Send
+            <div className="ml-auto flex items-center">
+              <button type="button" aria-label="Discard draft" title="Discard draft" onClick={discard} className={tool}>
+                <Trash2 className="size-4" aria-hidden />
+              </button>
+              {isNote ? (
+                <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<StickyNote className="size-3.5" aria-hidden />}>
+                  Add note
                 </Button>
-              </>
-            )}
+              ) : (
+                <>
+                  {/* The status this reply gives the conversation. It is shown on the message afterwards. */}
+                  <Popover
+                    align="end"
+                    side="top"
+                    width={230}
+                    trigger={({ ref: triggerRef, ...props }) => (
+                      <button
+                        ref={triggerRef}
+                        type="button"
+                        {...props}
+                        aria-label={`Status after sending: ${STATUS_LABEL[sendStatus]}`}
+                        title="Status after sending"
+                        className="ml-1.5 flex h-8 shrink-0 items-center gap-2 rounded-full border border-line-strong bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
+                      >
+                        <span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
+                        {STATUS_LABEL[sendStatus]}
+                        <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                      </button>
+                    )}
+                  >
+                    {(close) => (
+                      <>
+                        <MenuLabel>After sending</MenuLabel>
+                        {(statusOptions() as SendStatus[]).map((status) => (
+                          <MenuItem
+                            key={status}
+                            icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
+                            checked={sendStatus === status}
+                            onSelect={() => {
+                              setSendStatus(status)
+                              close()
+                            }}
+                          >
+                            {STATUS_LABEL[status]}
+                          </MenuItem>
+                        ))}
+                      </>
+                    )}
+                  </Popover>
+                  <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<Send className="size-3.5" aria-hidden />}>
+                    Send
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

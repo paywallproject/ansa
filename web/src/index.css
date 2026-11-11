@@ -102,6 +102,8 @@
     height: 100%;
   }
   body {
+    /* Nothing may make the page itself scroll sideways; wide content scrolls inside its own box. */
+    overflow-x: clip;
     background: var(--canvas);
     color: var(--fg);
     font-family: var(--font-sans);
@@ -278,5 +280,16 @@
   .animate-fade,
   .animate-toast {
     animation: none;
+  }
+}
+
+/* iOS zooms the whole page in when you tap a field whose text is smaller than 16px, and it stays
+   zoomed, so the app hangs off the right edge. On touch screens every field uses 16px. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .ProseMirror {
+    font-size: 16px !important;
   }
 }

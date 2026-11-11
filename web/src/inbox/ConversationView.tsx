@@ -304,7 +304,7 @@ function Header({
       </div>
 
       {/* Properties */}
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
         {viewers.length > 0 && (
           <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-warn-soft py-0.5 pr-2.5 pl-1 text-xs font-medium text-warn" role="status">
             <span className="flex -space-x-1.5">
@@ -810,7 +810,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
     <li className="relative md:px-14">
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
-      <Avatar name={name} color={color} size={40} className={cx('absolute z-10 hidden ring-4 ring-surface md:inline-flex', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
+      <Avatar name={name} color={color} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
