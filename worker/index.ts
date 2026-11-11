@@ -15,7 +15,13 @@ import { wakeSnoozed } from '../server/services/conversations.ts'
 
 interface Env {
   ANSA: DurableObjectNamespace
+  /** Which upload of the code is running. The Worker and the Durable Object can briefly differ after a deploy. */
+  CF_VERSION_METADATA?: { id: string; timestamp: string }
 }
+
+/** When the running code was uploaded, as a number. 0 when unknown (local development). */
+const codeStamp = (env: Env) => Date.parse(env.CF_VERSION_METADATA?.timestamp || '') || 0
+const CODE_HEADER = 'x-ansa-code'
 
 const CHUNK = 1024 * 1024
 const toBuffer = (value: unknown) => (value instanceof Uint8Array ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) : value)
@@ -88,10 +94,19 @@ export class AnsaStore extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    // After a deploy, Cloudflare replaces this object only once no request is in flight. An open
+    // browser tab holds a live-update stream, so the old code could stay for hours. When the Worker
+    // in front says it runs newer code, restart now. Only on a read, which the Worker can repeat.
+    const mine = codeStamp(this.env)
+    const theirs = Number(request.headers.get(CODE_HEADER) || 0)
+    if (mine && theirs > mine && (request.method === 'GET' || request.method === 'HEAD')) this.ctx.abort('A newer version was deployed.')
+
     this.learnUrl(request)
     const response = await this.app.fetch(request)
     await this.scheduleAlarm()
-    return response
+    const out = new Response(response.body, response)
+    out.headers.set(CODE_HEADER, String(mine))
+    return out
   }
 
   /** The alarm is the only thing that wakes this object without a visitor, so keep one set while there is work. */
@@ -115,8 +130,39 @@ export class AnsaStore extends DurableObject<Env> {
   }
 }
 
+/** True once this Worker instance has seen the Durable Object answer with code at least as new as its own. */
+let objectIsCurrent = false
+
 export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return env.ANSA.get(env.ANSA.idFromName('main')).fetch(request)
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const mine = codeStamp(env)
+    const object = () => env.ANSA.get(env.ANSA.idFromName('main'))
+    const forward = () => {
+      const headers = new Headers(request.headers)
+      headers.set(CODE_HEADER, String(mine))
+      return object().fetch(new Request(request, { headers }))
+    }
+    const isCurrent = (response: Response | null) => !mine || Number(response?.headers.get(CODE_HEADER) || 0) >= mine
+
+    // Do not open a long-lived stream to an object that still runs old code: the stream is what keeps it old.
+    // The browser retries the stream every few seconds, and by then the object has restarted.
+    if (!objectIsCurrent && mine && new URL(request.url).pathname === '/api/events') {
+      const probe = await object()
+        .fetch(new Request(new URL('/healthz', request.url), { headers: { [CODE_HEADER]: String(mine) } }))
+        .catch(() => null)
+      if (isCurrent(probe)) objectIsCurrent = true
+      else return new Response('Updating. Try again in a moment.', { status: 503, headers: { 'Retry-After': '3' } })
+    }
+
+    const safe = request.method === 'GET' || request.method === 'HEAD'
+    try {
+      const response = await forward()
+      if (isCurrent(response)) objectIsCurrent = true
+      return response
+    } catch (err) {
+      // The object restarted to load new code. A read can be repeated at once.
+      if (!safe) throw err
+      return forward()
+    }
   },
 }

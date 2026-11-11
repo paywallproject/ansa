@@ -12,6 +12,8 @@ interface SqlCursor {
   one(): Record<string, unknown>
 }
 interface DurableObjectState {
+  /** Stop this object now. The next request starts a fresh one with the latest code. Always throws. */
+  abort(reason?: string): never
   storage: {
     sql: { exec(query: string, ...bindings: unknown[]): SqlCursor }
     kv: { get<T = unknown>(key: string): T | undefined; put(key: string, value: unknown): void }
