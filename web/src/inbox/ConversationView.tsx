@@ -800,8 +800,9 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
 
   return (
     <li className="relative md:px-14">
-      {/* The avatar sits outside the card: left for the customer, right for the team. */}
-      <Avatar name={name} color={color} size={40} className={cx('absolute top-4 hidden md:inline-flex', isCustomer ? 'left-0' : 'right-0')} />
+      {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
+          The ring is the page colour, so the card's border looks cut out around it. */}
+      <Avatar name={name} color={color} size={40} className={cx('absolute z-10 hidden ring-4 ring-surface md:inline-flex', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
