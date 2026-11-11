@@ -270,3 +270,18 @@ test('help desk notification emails keep only the newest message', () => {
   assert.equal(html.stripHelpdeskNotification('<p>Please reply above this line</p><p>Hello</p>'), null)
   assert.equal(html.stripHelpdeskNotification('<h3><strong>Jane</strong> replied</h3><p>Hello</p>'), null)
 })
+
+test('notification email shows the conversation newest first and escapes content', async () => {
+  const { renderNotification } = await import('../services/notify.ts')
+  const { id } = conversations.createConversation(
+    { mailboxId, customerEmail: 'nora@notify.test', customerName: 'Nora <i>N</i>', subject: 'Invoice <b>question</b>', bodyHtml: '<p>First message</p>', kind: 'customer' },
+    { userId: null, via: 'email' },
+  )
+  conversations.addNote(id, { bodyHtml: '<p>Internal note</p>' }, { userId: agentId, via: 'web' })
+  conversations.updateConversation(id, { assigneeId: agentId, status: 'pending' }, { userId: agentId, via: 'web' })
+  const out = renderNotification({ appUrl: 'https://ansa.test', viewerId: agentId, leadHtml: 'x', conversation: conversations.getConversation(id) })
+  assert.ok(out.includes('Invoice &lt;b&gt;question&lt;/b&gt;') && !out.includes('<b>question</b>'))
+  assert.ok(out.includes('PENDING') && out.includes('Assigned to you') && out.includes(`https://ansa.test/c/${id}`))
+  assert.ok(out.includes('assigned to you') && out.includes('marked as Pending') && out.includes('added a note') && out.includes('started the conversation'))
+  assert.ok(out.indexOf('Internal note') < out.indexOf('First message'), 'newest first')
+})
