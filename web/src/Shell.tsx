@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Command } from 'cmdk'
 import {
   AlarmClock,
   Archive,
   ChartNoAxesColumn,
-  ChevronsUpDown,
+  ChevronDown,
   Inbox,
   Keyboard,
   LogOut,
@@ -26,7 +26,7 @@ import {
 import { api, qs } from './lib/api'
 import { useDebounced, useHotkeys, useMailboxes, useSession, useTheme, type Theme } from './lib/hooks'
 import type { ConversationSummary, Customer, Folder, Mailbox } from './lib/types'
-import { Avatar, IconButton, Kbd, MenuDivider, MenuItem, MenuLabel, Modal, Popover, StatusBadge, cx } from './ui'
+import { Avatar, Kbd, MenuDivider, MenuItem, MenuLabel, Modal, Popover, StatusBadge, cx } from './ui'
 import { Logo } from './pages/Auth'
 import { NewConversation, type ComposePrefill } from './inbox/NewConversation'
 
@@ -47,16 +47,26 @@ export const FOLDERS: { id: Folder; label: string; icon: typeof Inbox; countKey?
   { id: 'spam', label: 'Spam', icon: ShieldAlert },
 ]
 
-const navItem = (active: boolean) =>
+const folderItem = (active: boolean) =>
   cx(
-    'group flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors [&>svg]:size-4 [&>svg]:shrink-0',
-    active ? 'bg-accent-soft text-accent-fg' : 'text-fg-2 hover:bg-hover hover:text-fg [&>svg]:text-fg-3',
+    'group flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors [&>svg]:size-4 [&>svg]:shrink-0',
+    active ? 'bg-surface text-accent-fg shadow-card' : 'text-fg-2 hover:bg-hover hover:text-fg [&>svg]:text-fg-3',
   )
 
-function Sidebar({ mailboxes, onNavigate }: { mailboxes: Mailbox[]; onNavigate?: () => void }) {
+const topLink = (active: boolean) =>
+  cx(
+    'flex h-8 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium transition-colors focus-visible:outline-white',
+    active ? 'bg-white/15 text-white' : 'text-white/75 hover:bg-white/10 hover:text-white',
+  )
+const topIcon =
+  'flex size-8 shrink-0 items-center justify-center rounded-md text-white/75 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-white disabled:opacity-40 [&>svg]:size-[18px]'
+
+/** The dark bar across the top: product areas on the left, tools and the account menu on the right. */
+function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?: Mailbox; onMenu?: () => void }) {
   const { user, refresh } = useSession()
   const shell = useShell()
   const navigate = useNavigate()
+  const location = useLocation()
   const [theme, setTheme] = useTheme()
   const themes: { id: Theme; label: string; icon: ReactNode }[] = [
     { id: 'light', label: 'Light', icon: <Sun /> },
@@ -67,118 +77,121 @@ function Sidebar({ mailboxes, onNavigate }: { mailboxes: Mailbox[]; onNavigate?:
     await api.post('/logout')
     refresh()
   }
+  const inInbox = location.pathname.startsWith('/m/') || location.pathname.startsWith('/search')
 
   return (
-    <div className="flex h-full w-60 flex-col bg-canvas">
-      <div className="flex h-14 shrink-0 items-center gap-2.5 px-4">
-        <Logo size={26} />
-        <span className="text-[15px] font-semibold tracking-tight">Ansa</span>
-      </div>
-
-      <div className="flex flex-col gap-1.5 px-3">
-        <button
-          type="button"
-          onClick={shell.openPalette}
-          className="flex h-8 items-center gap-2 rounded-lg border border-line-strong bg-surface px-2.5 text-[13px] text-fg-3 shadow-card transition-colors hover:text-fg"
-        >
-          <Search className="size-4" aria-hidden />
-          <span className="flex-1 text-left">Search</span>
-          <Kbd>⌘K</Kbd>
+    <header className="flex h-12 shrink-0 items-center gap-1 bg-nav px-2 md:px-3">
+      {onMenu && (
+        <button type="button" aria-label="Open folders" onClick={onMenu} className={cx(topIcon, 'md:hidden')}>
+          <MenuIcon />
         </button>
-        <button
-          type="button"
-          onClick={() => shell.compose()}
-          disabled={mailboxes.length === 0}
-          className="flex h-8 items-center gap-2 rounded-lg px-2.5 text-[13px] font-medium text-fg-2 transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
-        >
-          <SquarePen className="size-4 text-fg-3" aria-hidden />
-          New conversation
-        </button>
-      </div>
+      )}
+      <NavLink to="/" aria-label="Ansa home" className="mr-1 flex h-8 items-center gap-2 rounded-md px-1.5 focus-visible:outline-white">
+        <Logo size={22} />
+        <span className="hidden text-[15px] font-semibold tracking-tight text-white sm:block">Ansa</span>
+      </NavLink>
 
-      <nav className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3" aria-label="Mailboxes">
-        {mailboxes.map((mailbox) => (
-          <div key={mailbox.id} className="mb-4">
-            <div className="mb-1 flex h-7 items-center gap-2 px-2.5">
-              <span className="size-2 shrink-0 rounded-full" style={{ background: mailbox.color }} aria-hidden />
-              <span className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide text-fg-3">{mailbox.name}</span>
-              {mailbox.syncStatus === 'error' && (
-                <NavLink to={`/settings/mailboxes/${mailbox.id}`} onClick={onNavigate} title={`Cannot fetch mail: ${mailbox.syncError ?? 'unknown error'}`} aria-label="Mailbox connection problem">
-                  <TriangleAlert className="size-3.5 text-warn" />
-                </NavLink>
-              )}
-            </div>
-            <ul className="flex flex-col gap-px">
-              {FOLDERS.map((folder) => {
-                const count = folder.countKey ? mailbox.counts[folder.countKey] : 0
-                const showCount = count > 0 && folder.id !== 'spam'
-                return (
-                  <li key={folder.id}>
-                    <NavLink to={`/m/${mailbox.id}/${folder.id}`} onClick={onNavigate} className={({ isActive }) => navItem(isActive)}>
-                      <folder.icon aria-hidden />
-                      <span className="flex-1">{folder.label}</span>
-                      {showCount && <span className="text-xs font-semibold tabular-nums">{count}</span>}
-                    </NavLink>
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        ))}
-      </nav>
-
-      <div className="flex shrink-0 flex-col gap-px border-t border-line px-3 py-2">
-        <NavLink to="/customers" onClick={onNavigate} className={({ isActive }) => navItem(isActive)}>
-          <UsersRound aria-hidden />
-          Customers
-        </NavLink>
-        <NavLink to="/reports" onClick={onNavigate} className={({ isActive }) => navItem(isActive)}>
-          <ChartNoAxesColumn aria-hidden />
-          Reports
-        </NavLink>
-        <NavLink to="/settings" onClick={onNavigate} className={({ isActive }) => navItem(isActive)}>
-          <Settings aria-hidden />
-          Settings
-        </NavLink>
-      </div>
-
-      <div className="shrink-0 border-t border-line p-2">
+      <nav className="flex min-w-0 items-center gap-0.5" aria-label="Main">
         <Popover
-          side="top"
-          width={224}
+          width={256}
           trigger={({ ref, ...props }) => (
-            <button ref={ref} type="button" {...props} className="flex w-full items-center gap-2.5 rounded-lg p-1.5 text-left transition-colors hover:bg-hover">
-              <Avatar name={user.name} color={user.color} size={28} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium">{user.name}</span>
-                <span className="block truncate text-xs text-fg-3">{user.email}</span>
-              </span>
-              <ChevronsUpDown className="size-3.5 text-fg-3" aria-hidden />
+            <button ref={ref} type="button" {...props} className={topLink(inInbox)}>
+              Inboxes
+              <ChevronDown className="size-3.5 opacity-70" aria-hidden />
             </button>
           )}
         >
-          {(close) => (
+          {(close) =>
+            mailboxes.length === 0 ? (
+              <p className="px-2.5 py-2 text-[13px] text-fg-3">No mailboxes yet.</p>
+            ) : (
+              <>
+                {mailboxes.map((m) => (
+                  <MenuItem
+                    key={m.id}
+                    checked={m.id === current?.id}
+                    icon={<span className="size-2 rounded-full" style={{ background: m.color }} />}
+                    hint={m.counts.unassigned > 0 ? <span className="text-xs font-semibold tabular-nums">{m.counts.unassigned}</span> : undefined}
+                    onSelect={() => {
+                      close()
+                      navigate(`/m/${m.id}/unassigned`)
+                    }}
+                  >
+                    {m.name}
+                  </MenuItem>
+                ))}
+                {user.role === 'admin' && (
+                  <>
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<Settings />}
+                      onSelect={() => {
+                        close()
+                        navigate('/settings/mailboxes')
+                      }}
+                    >
+                      Manage mailboxes
+                    </MenuItem>
+                  </>
+                )}
+              </>
+            )
+          }
+        </Popover>
+        <NavLink to="/reports" className={({ isActive }) => cx(topLink(isActive), 'hidden sm:flex')}>
+          Reports
+        </NavLink>
+        <NavLink to="/customers" className={({ isActive }) => cx(topLink(isActive), 'hidden sm:flex')}>
+          Customers
+        </NavLink>
+      </nav>
+
+      <span className="flex-1" />
+
+      <button type="button" aria-label="New conversation" title="New conversation (C)" onClick={() => shell.compose()} disabled={mailboxes.length === 0} className={cx(topIcon, 'md:hidden')}>
+        <SquarePen />
+      </button>
+      <button type="button" aria-label="Search" title="Search (⌘K)" onClick={shell.openPalette} className={topIcon}>
+        <Search />
+      </button>
+      <button type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={shell.openShortcuts} className={cx(topIcon, 'hidden sm:flex')}>
+        <Keyboard />
+      </button>
+      <NavLink to="/settings" aria-label="Settings" title="Settings" className={({ isActive }) => cx(topIcon, isActive && 'bg-white/15 text-white')}>
+        <Settings />
+      </NavLink>
+      <Popover
+        align="end"
+        width={232}
+        trigger={({ ref, ...props }) => (
+          <button ref={ref} type="button" {...props} aria-label="Account menu" className="ml-1 flex size-8 shrink-0 items-center justify-center rounded-full focus-visible:outline-white">
+            <Avatar name={user.name} color={user.color} size={28} />
+          </button>
+        )}
+      >
+        {(close) => {
+          const go = (path: string) => {
+            close()
+            navigate(path)
+          }
+          return (
             <>
-              <MenuItem
-                icon={<UserRound />}
-                onSelect={() => {
-                  close()
-                  onNavigate?.()
-                  navigate('/settings/profile')
-                }}
-              >
+              <div className="px-2.5 pt-1.5 pb-2">
+                <p className="truncate text-[13px] font-medium">{user.name}</p>
+                <p className="truncate text-xs text-fg-3">{user.email}</p>
+              </div>
+              <MenuDivider />
+              <MenuItem icon={<UserRound />} onSelect={() => go('/settings/profile')}>
                 Your profile
               </MenuItem>
-              <MenuItem
-                icon={<Keyboard />}
-                hint={<Kbd>?</Kbd>}
-                onSelect={() => {
-                  close()
-                  shell.openShortcuts()
-                }}
-              >
-                Keyboard shortcuts
-              </MenuItem>
+              <div className="sm:hidden">
+                <MenuItem icon={<ChartNoAxesColumn />} onSelect={() => go('/reports')}>
+                  Reports
+                </MenuItem>
+                <MenuItem icon={<UsersRound />} onSelect={() => go('/customers')}>
+                  Customers
+                </MenuItem>
+              </div>
               <MenuDivider />
               <MenuLabel>Theme</MenuLabel>
               {themes.map((t) => (
@@ -191,8 +204,55 @@ function Sidebar({ mailboxes, onNavigate }: { mailboxes: Mailbox[]; onNavigate?:
                 Sign out
               </MenuItem>
             </>
-          )}
-        </Popover>
+          )
+        }}
+      </Popover>
+    </header>
+  )
+}
+
+/** Folders of the mailbox that is open. Shown beside the conversation list. */
+function FolderSidebar({ mailbox, onNavigate }: { mailbox: Mailbox; onNavigate?: () => void }) {
+  const shell = useShell()
+  return (
+    <div className="flex h-full w-[212px] flex-col bg-canvas">
+      <div className="flex h-14 shrink-0 items-center gap-2 px-4">
+        <h2 className="min-w-0 flex-1 truncate text-[17px] font-semibold tracking-tight">{mailbox.name}</h2>
+        {mailbox.syncStatus === 'error' && (
+          <NavLink to={`/settings/mailboxes/${mailbox.id}`} onClick={onNavigate} title={`Cannot fetch mail: ${mailbox.syncError ?? 'unknown error'}`} aria-label="Mailbox connection problem">
+            <TriangleAlert className="size-4 text-warn" />
+          </NavLink>
+        )}
+      </div>
+      <nav className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3" aria-label={`${mailbox.name} folders`}>
+        <ul className="flex flex-col gap-px">
+          {FOLDERS.map((folder) => {
+            const count = folder.countKey ? mailbox.counts[folder.countKey] : 0
+            const showCount = count > 0 && folder.id !== 'spam'
+            return (
+              <li key={folder.id}>
+                <NavLink to={`/m/${mailbox.id}/${folder.id}`} onClick={onNavigate} className={({ isActive }) => folderItem(isActive)}>
+                  <folder.icon aria-hidden />
+                  <span className="flex-1">{folder.label}</span>
+                  {showCount && <span className="text-xs font-semibold tabular-nums">{count}</span>}
+                </NavLink>
+              </li>
+            )
+          })}
+        </ul>
+      </nav>
+      <div className="shrink-0 p-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            onNavigate?.()
+            shell.compose({ mailboxId: mailbox.id })
+          }}
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-line-strong bg-surface text-[13px] font-medium text-fg-2 shadow-card transition-colors hover:text-fg"
+        >
+          <SquarePen className="size-4" aria-hidden />
+          New conversation
+        </button>
       </div>
     </div>
   )
@@ -207,6 +267,8 @@ export function Shell() {
   const [drawer, setDrawer] = useState(false)
   const location = useLocation()
   useEffect(() => setDrawer(false), [location.pathname])
+  const match = useMatch('/m/:mailboxId/*')
+  const current = list.find((m) => m.id === Number(match?.params.mailboxId))
 
   const actions = useMemo<ShellActions>(
     () => ({ compose: (prefill) => setCompose(prefill ?? {}), openPalette: () => setPalette(true), openShortcuts: () => setShortcuts(true) }),
@@ -225,39 +287,29 @@ export function Shell() {
     c: (e) => {
       if (list.length === 0) return
       e.preventDefault()
-      setCompose({})
+      setCompose(current ? { mailboxId: current.id } : {})
     },
     '?': () => setShortcuts(true),
   })
 
   return (
     <ShellContext.Provider value={actions}>
-      <div className="flex h-full">
-        <aside className="hidden shrink-0 border-r border-line md:block">
-          <Sidebar mailboxes={list} />
-        </aside>
-        {drawer && (
-          <div className="animate-fade fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
-            <aside className="h-full w-60 border-r border-line shadow-pop" onClick={(e) => e.stopPropagation()}>
-              <Sidebar mailboxes={list} onNavigate={() => setDrawer(false)} />
+      <div className="flex h-full flex-col">
+        <TopBar mailboxes={list} current={current} onMenu={current ? () => setDrawer(true) : undefined} />
+        <div className="flex min-h-0 flex-1">
+          {current && (
+            <aside className="hidden shrink-0 border-r border-line md:block">
+              <FolderSidebar mailbox={current} />
             </aside>
-          </div>
-        )}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 md:hidden">
-            <IconButton label="Open menu" onClick={() => setDrawer(true)}>
-              <MenuIcon className="size-5" />
-            </IconButton>
-            <Logo size={22} />
-            <span className="flex-1 text-sm font-semibold">Ansa</span>
-            <IconButton label="Search" onClick={() => setPalette(true)}>
-              <Search className="size-4.5" />
-            </IconButton>
-            <IconButton label="New conversation" onClick={() => setCompose({})} disabled={list.length === 0}>
-              <SquarePen className="size-4.5" />
-            </IconButton>
-          </header>
-          <main className="min-h-0 flex-1 bg-surface">
+          )}
+          {current && drawer && (
+            <div className="animate-fade fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
+              <aside className="h-full w-[212px] border-r border-line shadow-pop" onClick={(e) => e.stopPropagation()}>
+                <FolderSidebar mailbox={current} onNavigate={() => setDrawer(false)} />
+              </aside>
+            </div>
+          )}
+          <main className="min-h-0 min-w-0 flex-1 bg-surface">
             <Outlet />
           </main>
         </div>

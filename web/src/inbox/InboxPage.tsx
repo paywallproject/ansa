@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, CircleCheck, Inbox, MessagesSquare, Paperclip, Search, ShieldAlert, Trash2, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Check, CircleCheck, Inbox, Paperclip, Search, ShieldAlert, Trash2, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime } from '../lib/format'
 import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession } from '../lib/hooks'
@@ -107,202 +107,197 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     })
   const needsMail = !search && mailbox && !mailbox.imapEnabled && total === 0 && folder === 'unassigned'
 
+  if (selectedId) {
+    return <ConversationView key={selectedId} id={selectedId} onBack={() => open(null)} onDone={advance} />
+  }
+
+  const openFolder = !search && ['unassigned', 'mine', 'assigned'].includes(folder)
+  const allChecked = items.length > 0 && items.every((c) => checked.has(c.id))
+  const toggleAll = () => setChecked(allChecked ? new Set() : new Set(items.map((c) => c.id)))
+
   return (
-    <div className="flex h-full">
-      <section className={cx('flex w-full shrink-0 flex-col border-line lg:w-[360px] lg:border-r 2xl:w-[400px]', selectedId && 'hidden lg:flex')} aria-label="Conversations">
-        {checked.size > 0 ? (
-          <div className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-accent-soft px-3">
-            <IconButton label="Clear selection" size="sm" onClick={() => setChecked(new Set())}>
-              <X className="size-4" />
-            </IconButton>
-            <span className="flex-1 text-[13px] font-semibold text-accent-fg">{checked.size} selected</span>
-            <IconButton label="Close selected" onClick={() => bulk.mutate({ patch: { status: 'closed' } })} disabled={bulk.isPending}>
-              <CircleCheck className="size-4" />
-            </IconButton>
-            <IconButton label="Assign selected to me" onClick={() => bulk.mutate({ patch: { assigneeId: user.id } })} disabled={bulk.isPending}>
-              <UserRoundCheck className="size-4" />
-            </IconButton>
-            <IconButton label="Mark selected as spam" onClick={() => bulk.mutate({ patch: { status: 'spam' } })} disabled={bulk.isPending}>
-              <ShieldAlert className="size-4" />
-            </IconButton>
-            <IconButton label="Delete selected" onClick={() => void bulkDelete()} disabled={bulk.isPending}>
-              <Trash2 className="size-4" />
-            </IconButton>
+    <section className="flex h-full flex-col" aria-label="Conversations">
+      {checked.size > 0 ? (
+        <div className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-accent-soft px-3 md:px-4">
+          <IconButton label="Clear selection" size="sm" onClick={() => setChecked(new Set())}>
+            <X className="size-4" />
+          </IconButton>
+          <span className="flex-1 text-[13px] font-semibold text-accent-fg">{checked.size} selected</span>
+          <Button size="sm" icon={<CircleCheck />} onClick={() => bulk.mutate({ patch: { status: 'closed' } })} disabled={bulk.isPending}>
+            <span className="hidden sm:inline">Close</span>
+          </Button>
+          <Button size="sm" icon={<UserRoundCheck />} onClick={() => bulk.mutate({ patch: { assigneeId: user.id } })} disabled={bulk.isPending}>
+            <span className="hidden sm:inline">Assign to me</span>
+          </Button>
+          <Button size="sm" icon={<ShieldAlert />} onClick={() => bulk.mutate({ patch: { status: 'spam' } })} disabled={bulk.isPending}>
+            <span className="hidden sm:inline">Spam</span>
+          </Button>
+          <Button size="sm" icon={<Trash2 />} onClick={() => void bulkDelete()} disabled={bulk.isPending}>
+            <span className="hidden sm:inline">Delete</span>
+          </Button>
+        </div>
+      ) : (
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-4 md:px-5">
+          {search ? (
+            <div className="relative max-w-xl flex-1">
+              <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-fg-3" aria-hidden />
+              <Input autoFocus aria-label="Search conversations" placeholder="Search conversations" className="h-9 pl-8" value={draftQuery} onChange={(e) => setDraftQuery(e.target.value)} />
+            </div>
+          ) : (
+            <h1 className="min-w-0 truncate text-[15px] font-semibold">{folderInfo?.label ?? 'All conversations'}</h1>
+          )}
+          <span className="flex-1" />
+          <Popover
+            align="end"
+            trigger={({ ref, ...props }) => (
+              <IconButton ref={ref} {...props} label={`Sort: ${SORTS[sort]}`} size="sm">
+                <ArrowUpDown className="size-4" />
+              </IconButton>
+            )}
+          >
+            {(close) =>
+              (Object.keys(SORTS) as Sort[]).map((s) => (
+                <MenuItem
+                  key={s}
+                  checked={sort === s}
+                  onSelect={() => {
+                    setSort(s)
+                    close()
+                  }}
+                >
+                  {SORTS[s]}
+                </MenuItem>
+              ))
+            }
+          </Popover>
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {list.isPending && list.fetchStatus !== 'idle' ? (
+          <div className="flex justify-center py-10">
+            <Spinner />
           </div>
+        ) : list.isError ? (
+          <EmptyState title="Could not load conversations" body={(list.error as Error).message} action={<Button onClick={() => void list.refetch()}>Try again</Button>} />
+        ) : search && !q.trim() ? (
+          <EmptyState icon={<Search />} title="Search every conversation" body="Find words in subjects, messages and notes, or a customer by name or email." />
+        ) : items.length === 0 ? (
+          search ? (
+            <EmptyState icon={<Search />} title="No results" body={`Nothing matches “${q}”. Check the spelling or try fewer words.`} />
+          ) : needsMail ? (
+            <EmptyState
+              icon={<Inbox />}
+              title="This mailbox is not receiving email yet"
+              body={user.role === 'admin' ? 'Connect it to your email account to start receiving conversations.' : 'Ask an admin to connect it to your email account.'}
+              action={
+                user.role === 'admin' ? (
+                  <Link to={`/settings/mailboxes/${mailbox.id}`}>
+                    <Button variant="primary">Connect email</Button>
+                  </Link>
+                ) : undefined
+              }
+            />
+          ) : (
+            <EmptyState icon={folderInfo ? <folderInfo.icon /> : <Inbox />} title={EMPTY[folder]?.title ?? 'Nothing here'} body={EMPTY[folder]?.body} />
+          )
         ) : (
-          <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-4">
-            {search ? (
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-fg-3" aria-hidden />
-                <Input autoFocus aria-label="Search conversations" placeholder="Search conversations" className="h-9 pl-8" value={draftQuery} onChange={(e) => setDraftQuery(e.target.value)} />
+          <>
+            <div className="sticky top-0 z-20 hidden h-10 items-center border-b border-line bg-surface text-xs text-fg-3 md:flex">
+              <div className="flex w-12 shrink-0 justify-center">
+                <CheckBox checked={allChecked} label="Select all conversations" onClick={toggleAll} />
+              </div>
+              <div className={cx(COLS, 'flex-1 pr-5')}>
+                <span>Customer</span>
+                <span>Conversation</span>
+                <span />
+                <span>Number</span>
+                <span>{openFolder ? 'Waiting' : 'Last updated'}</span>
+              </div>
+            </div>
+            <ul>
+              {items.map((c) => (
+                <Row key={c.id} conversation={c} to={`${base}/${c.id}${suffix}`} checked={checked.has(c.id)} onCheck={() => toggle(c.id)} showMailbox={search} folder={search ? null : folder} />
+              ))}
+            </ul>
+            {list.hasNextPage ? (
+              <div className="flex justify-center p-4">
+                <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                  Show more
+                </Button>
               </div>
             ) : (
-              <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold">
-                {folderInfo?.label ?? 'All conversations'}
-                {total > 0 && <span className="ml-2 text-[13px] font-normal text-fg-3 tabular-nums">{total.toLocaleString()}</span>}
-              </h1>
+              <p className="px-4 py-4 text-[13px] text-fg-3 md:px-5">
+                <span className="font-semibold text-fg-2 tabular-nums">{total.toLocaleString()}</span> {total === 1 ? 'conversation' : 'conversations'}
+              </p>
             )}
-            <Popover
-              align="end"
-              trigger={({ ref, ...props }) => (
-                <IconButton ref={ref} {...props} label={`Sort: ${SORTS[sort]}`} size="sm">
-                  <ArrowUpDown className="size-4" />
-                </IconButton>
-              )}
-            >
-              {(close) =>
-                (Object.keys(SORTS) as Sort[]).map((s) => (
-                  <MenuItem
-                    key={s}
-                    checked={sort === s}
-                    onSelect={() => {
-                      setSort(s)
-                      close()
-                    }}
-                  >
-                    {SORTS[s]}
-                  </MenuItem>
-                ))
-              }
-            </Popover>
-          </div>
+          </>
         )}
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {list.isPending && list.fetchStatus !== 'idle' ? (
-            <div className="flex justify-center py-10">
-              <Spinner />
-            </div>
-          ) : list.isError ? (
-            <EmptyState title="Could not load conversations" body={(list.error as Error).message} action={<Button onClick={() => void list.refetch()}>Try again</Button>} />
-          ) : search && !q.trim() ? (
-            <EmptyState icon={<Search />} title="Search every conversation" body="Find words in subjects, messages and notes, or a customer by name or email." />
-          ) : items.length === 0 ? (
-            search ? (
-              <EmptyState icon={<Search />} title="No results" body={`Nothing matches “${q}”. Check the spelling or try fewer words.`} />
-            ) : needsMail ? (
-              <EmptyState
-                icon={<Inbox />}
-                title="This mailbox is not receiving email yet"
-                body={user.role === 'admin' ? 'Connect it to your email account to start receiving conversations.' : 'Ask an admin to connect it to your email account.'}
-                action={
-                  user.role === 'admin' ? (
-                    <Link to={`/settings/mailboxes/${mailbox.id}`}>
-                      <Button variant="primary">Connect email</Button>
-                    </Link>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <EmptyState icon={folderInfo ? <folderInfo.icon /> : <Inbox />} title={EMPTY[folder]?.title ?? 'Nothing here'} body={EMPTY[folder]?.body} />
-            )
-          ) : (
-            <>
-              <ul>
-                {items.map((c) => (
-                  <Row key={c.id} conversation={c} to={`${base}/${c.id}${suffix}`} selected={c.id === selectedId} checked={checked.has(c.id)} anyChecked={checked.size > 0} onCheck={() => toggle(c.id)} showMailbox={search} folder={search ? null : folder} />
-                ))}
-              </ul>
-              {list.hasNextPage && (
-                <div className="flex justify-center p-3">
-                  <Button loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
-                    Show more
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </section>
-
-      <section className={cx('min-w-0 flex-1', !selectedId && 'hidden lg:block')} aria-label="Conversation">
-        {selectedId ? (
-          <ConversationView key={selectedId} id={selectedId} onBack={() => open(null)} onDone={advance} />
-        ) : (
-          <EmptyState icon={<MessagesSquare />} title={items.length ? 'Pick a conversation' : 'Nothing to read'} body={items.length ? 'Choose one from the list, or press J to open the first.' : undefined} />
-        )}
-      </section>
-    </div>
+      </div>
+    </section>
   )
 }
 
-function Row({
-  conversation: c,
-  to,
-  selected,
-  checked,
-  anyChecked,
-  onCheck,
-  showMailbox,
-  folder,
-}: {
-  conversation: ConversationSummary
-  to: string
-  selected: boolean
-  checked: boolean
-  anyChecked: boolean
-  onCheck: () => void
-  showMailbox: boolean
-  folder: Folder | null
-}) {
-  const ref = useRef<HTMLLIElement>(null)
-  useEffect(() => {
-    if (selected) ref.current?.scrollIntoView({ block: 'nearest' })
-  }, [selected])
+/** Column template shared by the header and every row, from the md breakpoint up. */
+const COLS = 'md:grid md:grid-cols-[minmax(110px,190px)_minmax(0,1fr)_auto_64px_92px] md:items-center md:gap-x-5'
+
+function CheckBox({ checked, label, onClick }: { checked: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={onClick}
+      className={cx('flex size-4 items-center justify-center rounded border transition-colors', checked ? 'border-accent bg-accent text-white' : 'border-line-strong bg-surface hover:border-fg-3')}
+    >
+      {checked && <Check className="size-3" strokeWidth={3} aria-hidden />}
+    </button>
+  )
+}
+
+function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { conversation: ConversationSummary; to: string; checked: boolean; onCheck: () => void; showMailbox: boolean; folder: Folder | null }) {
   const waiting = c.status === 'active' && !!c.waitingSince
+  const openFolder = folder === 'unassigned' || folder === 'mine' || folder === 'assigned'
   const showStatus = folder === null || folder === 'all' || (c.status === 'pending' && folder !== 'closed') || folder === 'snoozed'
   const showAssignee = c.assignee && folder !== 'mine'
-  const hasMeta = showStatus || c.tags.length > 0 || showAssignee || c.hasAttachments || c.threadCount > 1 || showMailbox
+  const when = openFolder && c.waitingSince ? c.waitingSince : c.updatedAt
 
   return (
-    <li ref={ref} className={cx('group relative border-b border-line', selected ? 'bg-accent-soft' : checked ? 'bg-sunken' : 'hover:bg-sunken')}>
-      <div className="absolute top-3.5 left-3 z-10 flex size-5 items-center justify-center">
-        <span className={cx('size-2 rounded-full', waiting ? 'bg-accent' : 'bg-transparent', (anyChecked || checked) && 'hidden', 'group-hover:hidden group-focus-within:hidden')} aria-hidden />
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={checked}
-          aria-label={`Select conversation: ${c.subject}`}
-          onClick={onCheck}
-          className={cx(
-            'absolute inset-0 m-auto size-4 items-center justify-center rounded border transition-colors',
-            checked ? 'flex border-accent bg-accent text-white' : 'border-line-strong bg-surface',
-            anyChecked || checked ? 'flex' : 'hidden group-hover:flex group-focus-within:flex',
-          )}
-        >
-          {checked && <Check className="size-3" strokeWidth={3} aria-hidden />}
-        </button>
+    <li className={cx('group flex border-b border-line transition-shadow hover:shadow-[inset_2px_0_0_var(--accent)]', checked ? 'bg-accent-soft' : 'hover:bg-sunken')}>
+      <div className="flex w-10 shrink-0 justify-center pt-3.5 md:w-12 md:items-center md:pt-0">
+        <CheckBox checked={checked} label={`Select conversation: ${c.subject}`} onClick={onCheck} />
       </div>
-      <Link to={to} aria-current={selected ? 'page' : undefined} className="block py-3 pr-4 pl-10 outline-offset-[-2px]">
-        <div className="flex items-baseline gap-2">
-          <span className={cx('min-w-0 flex-1 truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg-2')}>{c.customer.name || c.customer.email}</span>
-          <time className={cx('shrink-0 text-xs tabular-nums', waiting ? 'font-medium text-accent-fg' : 'text-fg-3')} dateTime={new Date(c.updatedAt).toISOString()}>
-            {shortTime(c.updatedAt)}
-          </time>
-        </div>
-        <p className={cx('mt-0.5 truncate text-sm', waiting ? 'font-semibold text-fg' : 'text-fg')}>{c.subject}</p>
-        <p className="mt-0.5 truncate text-[13px] text-fg-3">{c.preview || 'No message text'}</p>
-        {hasMeta && (
-          <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
+      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2.5 pr-4 outline-offset-[-2px] md:pr-5')}>
+        <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg-2')}>{c.customer.name || c.customer.email}</span>
+        <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
-            {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2">{c.mailboxName}</span>}
+            {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
             {c.tags.slice(0, 3).map((t) => (
-              <span key={t.id} className="inline-flex h-5 min-w-0 items-center gap-1 rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2">
+              <span key={t.id} className="hidden h-5 shrink-0 items-center gap-1 rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover sm:inline-flex">
                 <span className="size-1.5 shrink-0 rounded-full" style={{ background: t.color }} aria-hidden />
-                <span className="truncate">{t.name}</span>
+                {t.name}
               </span>
             ))}
-            {c.tags.length > 3 && <span className="text-xs text-fg-3">+{c.tags.length - 3}</span>}
-            <span className="flex-1" />
-            {c.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-fg-3" aria-label="Has attachments" />}
-            {c.threadCount > 1 && (
-              <span className="shrink-0 text-xs text-fg-3 tabular-nums" title={plural(c.threadCount, 'message')}>
-                {c.threadCount}
-              </span>
-            )}
-            {showAssignee && <Avatar name={c.assignee!.name} color={c.assignee!.color} size={18} />}
-          </div>
-        )}
+            {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 sm:inline">+{c.tags.length - 3}</span>}
+          </span>
+          <span className="mt-0.5 block truncate text-[13px] text-fg-3">{c.preview || 'No message text'}</span>
+        </span>
+        <span className="hidden items-center justify-end gap-2 md:flex">
+          {c.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-fg-3" aria-label="Has attachments" />}
+          {showAssignee && <Avatar name={c.assignee!.name} color={c.assignee!.color} size={20} />}
+          {c.threadCount > 1 && (
+            <span className="flex h-5 min-w-6 shrink-0 items-center justify-center rounded border border-line-strong px-1 text-xs font-medium text-fg-2 tabular-nums" title={plural(c.threadCount, 'message')}>
+              {c.threadCount}
+            </span>
+          )}
+        </span>
+        <span className="hidden text-[13px] font-medium text-fg-2 tabular-nums md:block">{c.id}</span>
+        <time className={cx('col-start-2 row-start-1 shrink-0 text-xs tabular-nums md:col-start-auto md:row-start-auto md:text-[13px]', waiting ? 'font-semibold text-fg' : 'text-fg-3')} dateTime={new Date(when).toISOString()}>
+          {shortTime(when)}
+        </time>
       </Link>
     </li>
   )

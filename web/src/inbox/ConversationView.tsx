@@ -224,7 +224,7 @@ function Header({
   return (
     <header className="shrink-0 border-b border-line px-4 pt-3 pb-3 md:px-6">
       <div className="flex items-start gap-2">
-        <IconButton label="Back to the list" onClick={onBack} className="-ml-1.5 lg:hidden">
+        <IconButton label="Back to the list" onClick={onBack} className="-ml-1.5">
           <ArrowLeft className="size-4.5" />
         </IconButton>
         <div className="min-w-0 flex-1">
