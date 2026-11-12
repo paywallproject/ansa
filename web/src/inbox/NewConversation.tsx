@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Mail, StickyNote } from 'lucide-react'
+import { Clock, Mail, StickyNote } from 'lucide-react'
+import { SendLaterDialog } from './SendLater'
 import { api, qs } from '../lib/api'
 import { canSee } from '../lib/access'
 import { useDebounced, useSession, useUsers } from '../lib/hooks'
@@ -39,9 +40,11 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
   const chooseAssignee = kind === 'reply' && mailbox?.assignAfterReply === 'choose'
   const [assigneeId, setAssigneeId] = useState<number | null>(me.id)
 
+  const [later, setLater] = useState(false)
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (sendAt?: number) =>
       api.post<{ conversation: Conversation }>('/conversations', {
+        ...(sendAt ? { sendAt } : {}),
         mailboxId,
         customerEmail: email.trim(),
         customerName: name.trim(),
@@ -60,11 +63,22 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
     },
     onError: (err: Error) => setError(err.message),
   })
-  const submit = () => {
-    if (create.isPending || uploads.busy) return
+  /** Check what can be checked here, so Send later does not open for an email that cannot go out. */
+  const ready = () => {
+    if (create.isPending || uploads.busy) return false
     setError(null)
-    if (!editorHtml(editor)) return setError(kind === 'reply' ? 'Write your message before sending.' : 'Write the note before saving.')
-    create.mutate()
+    if (!editorHtml(editor)) {
+      setError(kind === 'reply' ? 'Write your message before sending.' : 'Write the note before saving.')
+      return false
+    }
+    if (!subject.trim()) {
+      setError('Add a subject.')
+      return false
+    }
+    return true
+  }
+  const submit = () => {
+    if (ready()) create.mutate(undefined)
   }
   const editor = useRichEditor({ placeholder: kind === 'reply' ? 'Write your message' : 'What happened? For example, notes from a phone call', onSubmit: submit })
   const exact = suggestions.data?.some((c) => c.emails.some((e) => e.toLowerCase() === email.trim().toLowerCase()))
@@ -78,9 +92,23 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
+          {kind === 'reply' && (
+            <Button icon={<Clock />} disabled={create.isPending || uploads.busy} onClick={() => ready() && setLater(true)}>
+              Send later
+            </Button>
+          )}
           <Button variant="primary" loading={create.isPending} disabled={uploads.busy} onClick={submit}>
             {kind === 'reply' ? 'Send email' : 'Save conversation'}
           </Button>
+          <SendLaterDialog
+            open={later}
+            condition={false}
+            onClose={() => setLater(false)}
+            onPick={(sendAt) => {
+              setLater(false)
+              create.mutate(sendAt)
+            }}
+          />
         </>
       }
     >
