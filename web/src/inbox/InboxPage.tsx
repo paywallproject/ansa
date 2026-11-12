@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, ChevronDown, Inbox, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Check, ChevronDown, Clock, Inbox, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
 import { canSee } from '../lib/access'
@@ -297,8 +297,17 @@ export function InboxPage({ search = false }: { search?: boolean }) {
               </div>
             </div>
             <ul>
-              {items.map((c) => (
-                <Row key={c.id} conversation={c} to={`${base}/${c.id}${suffix}`} checked={checked.has(c.id)} onCheck={() => toggle(c.id)} showMailbox={search} folder={search ? null : folder} />
+              {items.map((c, index) => (
+                <Fragment key={c.id}>
+                  {/* Pending conversations sort last. A divider marks where "our turn" ends and "their turn" begins. */}
+                  {c.status === 'pending' && index > 0 && items[index - 1].status !== 'pending' && (
+                    <li className="flex items-center gap-2 border-b border-line bg-sunken px-4 py-1.5 text-xs font-medium text-fg-3 md:px-5" role="separator">
+                      <Clock className="size-3.5" aria-hidden />
+                      {STATUS_LABEL.pending === 'Pending' ? 'Pending · waiting on the customer' : STATUS_LABEL.pending}
+                    </li>
+                  )}
+                  <Row conversation={c} to={`${base}/${c.id}${suffix}`} checked={checked.has(c.id)} onCheck={() => toggle(c.id)} showMailbox={search} folder={search ? null : folder} />
+                </Fragment>
               ))}
             </ul>
             {list.hasNextPage ? (
@@ -340,6 +349,8 @@ function CheckBox({ checked, mixed, label, onClick }: { checked: boolean; mixed?
 
 function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { conversation: ConversationSummary; to: string; checked: boolean; onCheck: () => void; showMailbox: boolean; folder: Folder | null }) {
   const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
+  // Waiting on the customer: shown quieter, so the conversations that need us stand out.
+  const pending = c.status === 'pending'
   const openFolder = folder === 'unassigned' || folder === 'mine' || folder === 'assigned' || folder === 'mentioned'
   const showStatus = folder === null || folder === 'all' || ((c.status === 'pending' || (c.status === 'waiting' && workspace().fourStatuses)) && folder !== 'closed' && folder !== 'pending') || folder === 'snoozed'
   const showAssignee = c.assignee && folder !== 'mine'
@@ -351,11 +362,11 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
         <CheckBox checked={checked} label={`Select conversation: ${c.subject}`} onClick={onCheck} />
       </div>
       <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2.5 pr-4 outline-offset-[-2px] md:pr-5')}>
-        <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
+        <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
-            <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
+            <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
             {c.tags.slice(0, 3).map((t) => (
@@ -366,7 +377,7 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
             ))}
             {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 sm:inline">+{c.tags.length - 3}</span>}
           </span>
-          <span className="mt-0.5 block truncate text-[13px] text-fg-3">{c.preview || 'No message text'}</span>
+          <span className={cx('mt-0.5 block truncate text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
         </span>
         <span className="hidden items-center justify-end gap-2 md:flex">
           {c.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-fg-3" aria-label="Has attachments" />}
@@ -377,7 +388,7 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
             </span>
           )}
         </span>
-        <span className="hidden text-[13px] font-medium text-fg-2 tabular-nums md:block">{c.id}</span>
+        <span className={cx('hidden text-[13px] tabular-nums md:block', pending ? 'text-fg-3' : 'font-medium text-fg-2')}>{c.id}</span>
         <time className={cx('col-start-2 row-start-1 shrink-0 text-xs tabular-nums md:col-start-auto md:row-start-auto md:text-[13px]', waiting ? 'font-semibold text-fg' : 'text-fg-3')} dateTime={new Date(when).toISOString()}>
           {shortTime(when)}
         </time>
