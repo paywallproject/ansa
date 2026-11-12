@@ -409,3 +409,22 @@ test('MCP draft_reply: writes the teammate\'s own draft, sends nothing, and get_
   const billingConv = conversations.createConversation({ mailboxId: billing, customerEmail: 'x@example.com', subject: 'B', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' })
   assert.equal((await tool('draft_reply', { id: billingConv.id, body: 'nope' })).isError, true)
 })
+
+test('a note can be deleted by its author or an admin, and only a note', async () => {
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'notes@example.com', subject: 'Notes', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const byAgent = conversations.addNote(conv.id, { bodyHtml: '<p>Agent note</p>' }, { userId: agentId, via: 'web' })
+  const byAdmin = conversations.addNote(conv.id, { bodyHtml: '<p>Admin note</p>' }, { userId: adminId, via: 'web' })
+  const customerThread = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'customer'`, conv.id)!.id
+  const count = () => get<{ thread_count: number }>('SELECT thread_count FROM conversations WHERE id = ?', conv.id)!.thread_count
+
+  // Not someone else's note, unless you are an admin; never a customer message.
+  assert.equal((await call(agentToken, 'DELETE', `/threads/${byAdmin}`)).status, 403)
+  assert.equal((await call(adminToken, 'DELETE', `/threads/${customerThread}`)).status, 400)
+
+  const before = count()
+  assert.equal((await call(agentToken, 'DELETE', `/threads/${byAgent}`)).status, 200)
+  assert.equal(get('SELECT 1 FROM threads WHERE id = ?', byAgent), undefined)
+  assert.equal(count(), before - 1)
+  assert.equal((await call(adminToken, 'DELETE', `/threads/${byAdmin}`)).status, 200)
+  assert.equal(count(), before - 2)
+})

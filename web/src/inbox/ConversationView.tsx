@@ -971,7 +971,22 @@ function OriginalDialog({ thread, onClose }: { thread: Thread; onClose: () => vo
 
 function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean; onToggle: () => void }) {
   const client = useQueryClient()
-  const { toast } = useFeedback()
+  const { toast, confirm } = useFeedback()
+  const { user: me } = useSession()
+  // A note can be deleted by its author or an admin.
+  const canDelete = thread.type === 'note' && (me.role === 'admin' || (thread.author.kind === 'user' && thread.author.id === me.id))
+  const deleteNote = async () => {
+    const ok = await confirm({ title: 'Delete this note?', body: 'It is removed for the whole team, with its attachments. You cannot undo this.', confirmLabel: 'Delete note', danger: true })
+    if (!ok) return
+    try {
+      await api.del(`/threads/${thread.id}`)
+      void client.invalidateQueries({ queryKey: ['conversation'] })
+      void client.invalidateQueries({ queryKey: ['conversations'] })
+      toast('Note deleted')
+    } catch (err) {
+      toast((err as Error).message, { kind: 'error' })
+    }
+  }
   const [showQuoted, setShowQuoted] = useState(false)
   const quoted = useQuery({ queryKey: ['thread-full', thread.id], queryFn: () => api.get<{ html: string }>(`/threads/${thread.id}/full`).then((r) => r.html), enabled: showQuoted, staleTime: Infinity })
   const retry = useMutation({
@@ -1077,7 +1092,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
             <time className={cx('shrink-0 text-[13px] tabular-nums md:text-xs', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
               {timeOnly.format(thread.createdAt)}
             </time>
-            {isCustomer && thread.via === 'email' && (
+            {((isCustomer && thread.via === 'email') || canDelete) && (
               <Popover
                 align="end"
                 width={200}
@@ -1087,17 +1102,30 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                   </button>
                 )}
               >
-                {(close) => (
-                  <MenuItem
-                    icon={<FileCode />}
-                    onSelect={() => {
-                      close()
-                      setOriginal(true)
-                    }}
-                  >
-                    Show original
-                  </MenuItem>
-                )}
+                {(close) =>
+                  canDelete ? (
+                    <MenuItem
+                      icon={<Trash2 />}
+                      danger
+                      onSelect={() => {
+                        close()
+                        void deleteNote()
+                      }}
+                    >
+                      Delete note
+                    </MenuItem>
+                  ) : (
+                    <MenuItem
+                      icon={<FileCode />}
+                      onSelect={() => {
+                        close()
+                        setOriginal(true)
+                      }}
+                    >
+                      Show original
+                    </MenuItem>
+                  )
+                }
               </Popover>
             )}
           </div>

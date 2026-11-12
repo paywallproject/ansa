@@ -988,6 +988,31 @@ export function mergeConversations(sourceId: number, targetId: number, actor: Ac
   return getSummary(targetId)
 }
 
+/**
+ * Delete an internal note. Its author or an admin may; customers never saw it, so nothing else changes.
+ * Returns the storage keys of its attachments, for the caller to remove once the rows are gone.
+ */
+export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): string[] {
+  const t = get<{ conversation_id: number; type: string; user_id: number | null }>('SELECT conversation_id, type, user_id FROM threads WHERE id = ?', threadId)
+  if (!t) throw new AppError('Note not found.', 404)
+  if (t.type !== 'note') throw new AppError('Only notes can be deleted. Messages to and from the customer stay.')
+  if (!isAdmin && t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note, or an admin, can delete it.', 403)
+  const files = all<{ storage_key: string }>('SELECT storage_key FROM attachments WHERE thread_id = ?', threadId).map((f) => f.storage_key)
+  const mailboxId = tx(() => {
+    run('DELETE FROM threads WHERE id = ?', threadId) // mentions and attachments go with it
+    run(
+      `UPDATE conversations SET thread_count = MAX(0, thread_count - 1),
+         has_attachments = EXISTS (SELECT 1 FROM attachments a JOIN threads th ON th.id = a.thread_id WHERE th.conversation_id = ?1)
+       WHERE id = ?1`,
+      t.conversation_id,
+    )
+    reindex(t.conversation_id)
+    return get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)!.mailbox_id
+  })
+  touch(t.conversation_id, mailboxId, 'updated', actor)
+  return files
+}
+
 /** Retry a reply that failed to send. */
 export function retryDelivery(threadId: number) {
   const t = get<any>(`SELECT id, conversation_id FROM threads WHERE id = ? AND type = 'reply' AND state = 'failed'`, threadId)
