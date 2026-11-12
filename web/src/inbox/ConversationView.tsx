@@ -758,7 +758,17 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
   const [folded, setFolded] = useState<Set<number>>(() => new Set())
   useLayoutEffect(() => {
     const el = scroller.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    // Writing a reply: the end, so the newest message sits just above the composer.
+    const messages = el.querySelectorAll<HTMLElement>('[data-message]')
+    const newest = messages[messages.length - 1]
+    if (composing || !newest) {
+      el.scrollTop = el.scrollHeight
+      return
+    }
+    // Reading: the start of the newest message, as Help Scout does, not its signature at the bottom. A short
+    // message cannot scroll that far, so it still ends up at the bottom as before.
+    el.scrollTop = newest.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12
   }, [conversation.id, lastId, composing])
 
   return (
@@ -1035,7 +1045,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const how = isNote ? 'Note' : scheduled ? 'Not sent yet' : sentStatus ? (STATUS_LABEL[sentStatus] ?? '') : ''
 
   return (
-    <li className="relative md:px-14">
+    <li className="relative md:px-14" data-message>
       {original && <OriginalDialog thread={thread} onClose={() => setOriginal(false)} />}
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
