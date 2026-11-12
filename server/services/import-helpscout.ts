@@ -11,7 +11,7 @@ import { all, get, run, tx, now, getSetting, setSetting } from '../db.ts'
 import { decrypt, encrypt, hashPassword, randomToken } from '../crypto.ts'
 import { config } from '../config.ts'
 import { publish } from '../events.ts'
-import { cleanHtml, htmlToText, previewOf } from '../mail/html.ts'
+import { cleanHtml, fitStored, htmlToText, previewOf } from '../mail/html.ts'
 import { USER_COLORS } from '../auth.ts'
 import { storeAttachment } from './attachments.ts'
 import { ensureTag, reindex } from './conversations.ts'
@@ -289,7 +289,21 @@ export async function importStep(): Promise<boolean> {
             finishedPage = false
             break
           }
-          const result = await importConversation(session, conversation, inbox.mailboxId, state.attachments)
+          let result: Awaited<ReturnType<typeof importConversation>>
+          try {
+            result = await importConversation(session, conversation, inbox.mailboxId, state.attachments)
+          } catch (err) {
+            // One conversation that cannot be stored (too large for the database) must not stop the import for
+            // good: Resume would only fail on it again. It is skipped and counted; anything else still pauses.
+            if (!(err instanceof SlowDown) && /TOOBIG|too big|string or blob/i.test((err as Error).message || '')) {
+              console.error(`[import] skipped Help Scout conversation ${conversation.id}:`, (err as Error).message)
+              run('INSERT OR IGNORE INTO import_map (source, external_id, conversation_id, external_number) VALUES (?, ?, NULL, ?)', 'helpscout', String(conversation.id), conversation.number ?? null)
+              tally.skipped++
+              stored++
+              continue
+            }
+            throw err
+          }
           stored++
           tally.imported += result.imported ? 1 : 0
           tally.skipped += result.imported ? 0 : 1
@@ -425,8 +439,8 @@ async function importConversation(session: Session, c: HsConversation, mailboxId
       const at = ts(t.createdAt) || lastAt
       const fromCustomer = t.createdBy?.type === 'customer' || t.type === 'customer'
       const type = t.type === 'note' || t.type === 'phone' || t.type === 'forwardparent' || t.type === 'forwardchild' ? (fromCustomer && t.type !== 'note' ? 'customer' : 'note') : fromCustomer ? 'customer' : 'reply'
-      const html = cleanHtml(t.body ?? '')
-      const text = htmlToText(html)
+      const html = fitStored(cleanHtml(t.body ?? ''))
+      const text = fitStored(htmlToText(html))
       const userId = type === 'customer' ? null : teammateFor(t.createdBy)
       const thread = run(
         `INSERT INTO threads (conversation_id, type, user_id, customer_id, body_html, body_text, from_addr, to_addrs, cc, bcc, state, event, via, created_at)

@@ -538,3 +538,14 @@ test('after sending: each mailbox decides who the conversation is assigned to', 
   const created = conversations.createConversation({ mailboxId: box, customerEmail: 'assign@acme.test', subject: 'Out', bodyHtml: '<p>Hello</p>', kind: 'reply', assigneeId: other, skipDelivery: true }, actor)
   assert.equal(conversations.getConversation(created.id).assignee?.id, other)
 })
+
+test('a message too large for one database value is fitted: embedded pictures go first, then the rest is cut', () => {
+  const picture = `<img src="data:image/png;base64,${'A'.repeat(1_200_000)}">`
+  const fitted = html.fitStored(`<p>Hello</p>${picture}<p>Bye</p>`)
+  assert.ok(fitted.length < html.MAX_STORED_CHARS)
+  assert.match(fitted, /Hello.*image removed: too large to keep.*Bye/s)
+  const long = html.fitStored(`<p>${'x'.repeat(1_500_000)}</p>`)
+  assert.ok(long.length < html.MAX_STORED_CHARS + 200)
+  assert.match(long, /too long to keep/)
+  assert.equal(html.fitStored('<p>small</p>'), '<p>small</p>')
+})

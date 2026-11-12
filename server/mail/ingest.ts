@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { blobs } from '../blobs.ts'
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
 import { get, run, getSetting, setSetting } from '../db.ts'
-import { cleanHtml, fillTemplate, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
+import { cleanHtml, fitStored, fillTemplate, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
 import type { MailboxRow } from './outbound.ts'
 import { addCustomerMessage, addReply, createConversation } from '../services/conversations.ts'
 import { findOrCreateCustomer, isEmail, normEmail } from '../services/customers.ts'
@@ -145,8 +145,9 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
     if (head) stripped = textToHtml(head)
   }
   if (!htmlToText(full).trim() && mail.attachments.length === 0) full = '<p>(empty message)</p>'
-  let bodyHtml = stripped ?? full
-  let bodyFullHtml = stripped ? full : null
+  // Within what one database value can hold: pasted-in pictures can make an email larger than that.
+  let bodyHtml = fitStored(stripped ?? full)
+  let bodyFullHtml = stripped ? fitStored(full) : null
 
   const customer = findOrCreateCustomer(from, sender.name)
   const to = addresses(mail.to)
