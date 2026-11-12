@@ -8,6 +8,9 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, credentials: 'same-origin', headers: { 'X-Requested-With': 'ansa' } }
+  // A request that never answers (the server restarting mid-request, a stalled network) must not leave the app
+  // waiting forever: give up, so the caller can retry or say so. Uploads get longer.
+  if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) init.signal = AbortSignal.timeout(body instanceof FormData ? 120_000 : 30_000)
   if (body instanceof FormData) init.body = body
   else if (body !== undefined) {
     init.headers = { ...init.headers, 'Content-Type': 'application/json' }
