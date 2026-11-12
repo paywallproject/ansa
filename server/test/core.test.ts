@@ -582,3 +582,16 @@ test('a new conversation folds quoted history, but a forward keeps it in view', 
   assert.match(forward.body_html, /Older text/)
   assert.equal(forward.body_full_html, null)
 })
+
+test('signatures are marked so the app can fold them: Gmail, Help Scout, Outlook, plain text', () => {
+  const gmail = html.cleanHtml('<div>Thanks!</div><div class="gmail_signature" data-smartmail="x"><b>Tim Noyes</b><br>Technical Director</div>')
+  assert.match(gmail, /<div class="ansa-signature"><b>Tim Noyes<\/b>/)
+  assert.match(html.cleanHtml('<div class="helpscout-signature">- Tim</div>'), /class="ansa-signature"/)
+  assert.match(html.cleanHtml('<div id="Signature"><p>Jane Doe</p></div>'), /<div class="ansa-signature">/)
+  // Other classes are still dropped.
+  assert.equal(html.cleanHtml('<div class="gmail_quote">quoted</div>'), '<div>quoted</div>')
+  const text = html.textToHtmlWithSignature('Hello there\n\nThanks\n-- \nTim Noyes\n781-214-8084')
+  assert.match(text, /Hello there/)
+  assert.match(text, /<div class="ansa-signature">.*Tim Noyes/s)
+  assert.doesNotMatch(html.textToHtmlWithSignature('No signature here'), /ansa-signature/)
+})
