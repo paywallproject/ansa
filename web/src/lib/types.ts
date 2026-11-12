@@ -124,7 +124,8 @@ export interface Thread {
   to: string[]
   cc: string[]
   bcc: string[]
-  state: 'sent' | 'sending' | 'failed'
+  state: 'sent' | 'sending' | 'failed' | 'scheduled'
+  sendAt: number | null
   error: string | null
   event: Record<string, any> | null
   via: string

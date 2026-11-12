@@ -241,6 +241,11 @@
   outline: none;
   min-height: inherit;
 }
+/* While writing, Enter starts a new line and an empty line is one line tall, as in a mail program.
+   The message is saved as plain lines too (see lineHtml), so it lands the way it looks here. */
+.ProseMirror.prose-mail p + p {
+  margin-top: 0;
+}
 .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--fg-3);

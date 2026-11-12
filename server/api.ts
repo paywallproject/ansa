@@ -31,6 +31,8 @@ import {
   listConversations,
   mergeConversations,
   retryDelivery,
+  sendScheduledNow,
+  cancelScheduled,
   saveDraft,
   updateConversation,
   type Actor,
@@ -548,6 +550,8 @@ api.post('/conversations/:id/reply', async (c) => {
       bcc: data.bcc,
       status: data.status,
       attachmentIds: Array.isArray(data.attachmentIds) ? data.attachmentIds.map(int) : undefined,
+      sendAt: Number.isFinite(Number(data.sendAt)) && Number(data.sendAt) > 0 ? Number(data.sendAt) : undefined,
+      ifNoReply: data.ifNoReply === true,
     },
     actorOf(c),
   )
@@ -591,6 +595,16 @@ api.get('/threads/:id/full', (c) => c.json({ html: getQuotedHtml(idParam(c.req.p
 
 api.post('/threads/:id/retry', (c) => {
   retryDelivery(idParam(c.req.param('id')))
+  return c.json({ ok: true })
+})
+
+// Send later: send a scheduled reply now, or take it back as a draft.
+api.post('/threads/:id/send-now', (c) => {
+  sendScheduledNow(idParam(c.req.param('id')), actorOf(c))
+  return c.json({ ok: true })
+})
+api.delete('/threads/:id/scheduled', (c) => {
+  cancelScheduled(idParam(c.req.param('id')), actorOf(c))
   return c.json({ ok: true })
 })
 

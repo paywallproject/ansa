@@ -2,7 +2,7 @@ import { all, allNamed, get, run, tx, now, parseJson } from '../db.ts'
 import { publish } from '../events.ts'
 import { emitAppEvent, type AppEvent } from '../hooks.ts'
 import { cleanHtml, htmlToText, previewOf } from '../mail/html.ts'
-import { newMessageId, queueDelivery, type MailboxRow } from '../mail/outbound.ts'
+import { deliverThread, newMessageId, queueDelivery, type MailboxRow } from '../mail/outbound.ts'
 import { config } from '../config.ts'
 import { AppError, findOrCreateCustomer, getCustomer, isEmail, normEmail } from './customers.ts'
 import { notifyAssigned, notifyCustomerReply, notifyMentioned } from './notify.ts'
@@ -211,7 +211,9 @@ function serializeThread(t: any, attachments: any[]) {
     to: parseJson<string[]>(t.to_addrs, []),
     cc: parseJson<string[]>(t.cc, []),
     bcc: parseJson<string[]>(t.bcc, []),
-    state: t.state as 'sent' | 'sending' | 'failed',
+    state: t.state as 'sent' | 'sending' | 'failed' | 'scheduled',
+    /** When a scheduled reply goes out. Null once it is sent, or while it is held back. */
+    sendAt: (t.send_at as number | null) ?? null,
     error: t.error as string | null,
     event: parseJson<Record<string, any> | null>(t.event, null),
     via: t.via as string,
@@ -364,6 +366,7 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
       at,
       conversationId,
     )
+    holdScheduled(conversationId)
     reindex(conversationId)
     return id
   })
@@ -384,7 +387,38 @@ export interface ReplyInput {
   createdAt?: number
   /** Skip SMTP delivery (imports and demo data). */
   skipDelivery?: boolean
+  /** Send later: hold the reply until this time. */
+  sendAt?: number
+  /** With sendAt: do not send if the customer writes first. */
+  ifNoReply?: boolean
 }
+
+/** What a sent reply does to its conversation: status, assignee and the timers reports use. */
+function markReplied(conversationId: number, r: { status: Status; assignee: number | null; cc: string[]; text: string; at: number; closedBy: number | null }) {
+  run(
+    `UPDATE conversations SET status = ?, assignee_id = ?, snoozed_until = NULL, cc = ?, preview = ?, thread_count = thread_count + 1,
+       last_agent_at = ?, first_reply_at = COALESCE(first_reply_at, ?), waiting_since = NULL, updated_at = ?,
+       closed_at = CASE WHEN ? = 'closed' THEN ? ELSE NULL END, closed_by = CASE WHEN ? = 'closed' THEN ? ELSE NULL END
+     WHERE id = ?`,
+    r.status,
+    r.assignee,
+    JSON.stringify(r.cc),
+    previewOf(r.text),
+    r.at,
+    r.at,
+    r.at,
+    r.status,
+    r.at,
+    r.status,
+    r.closedBy,
+    conversationId,
+  )
+}
+
+/** The newest message that really went out or came in: what the next reply answers. */
+const lastMailOf = (conversationId: number) =>
+  get<any>(`SELECT message_id, refs FROM threads WHERE conversation_id = ? AND message_id IS NOT NULL AND state != 'scheduled' ORDER BY id DESC LIMIT 1`, conversationId)
+const refsAfter = (last: any) => (last ? [...String(last.refs || '').split(/\s+/).filter(Boolean), last.message_id].slice(-20).join(' ') : null)
 
 /** A reply from an agent to the customer. Sends the email in the background. */
 export function addReply(conversationId: number, input: ReplyInput, actor: Actor): number {
@@ -392,6 +426,9 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
   const text = htmlToText(bodyHtml)
   if (!text.trim() && !input.attachmentIds?.length) throw new AppError('Write a reply before sending.')
   const at = input.createdAt ?? now()
+  // A time that has passed, or is seconds away, means "send now".
+  const sendAt = input.sendAt && input.sendAt > now() + 30_000 && actor.via !== 'auto' ? input.sendAt : null
+  if (sendAt && sendAt > now() + 366 * 86_400_000) throw new AppError('Choose a time within the next year.')
   let mailboxId = 0
   const threadId = tx(() => {
     const conv = get<any>('SELECT c.*, cu.email AS customer_email FROM conversations c JOIN customers cu ON cu.id = c.customer_id WHERE c.id = ?', conversationId)
@@ -401,13 +438,13 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     const to = cleanList(input.to)
     if (to.length === 0) to.push(conv.customer_email)
     const cc = input.cc ? cleanList(input.cc) : parseJson<string[]>(conv.cc, [])
-    const last = get<any>('SELECT message_id, refs FROM threads WHERE conversation_id = ? AND message_id IS NOT NULL ORDER BY id DESC LIMIT 1', conversationId)
-    const refs = last ? [...String(last.refs || '').split(/\s+/).filter(Boolean), last.message_id].slice(-20).join(' ') : null
+    const last = lastMailOf(conversationId)
+    const refs = refsAfter(last)
     const status: Status = input.status && STATUSES.includes(input.status) ? input.status : 'closed'
     const assignee = conv.assignee_id ?? actor.userId
     const { id } = run(
-      `INSERT INTO threads (conversation_id, type, user_id, body_html, body_text, from_addr, to_addrs, cc, bcc, message_id, in_reply_to, refs, state, event, via, created_at)
-       VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO threads (conversation_id, type, user_id, body_html, body_text, from_addr, to_addrs, cc, bcc, message_id, in_reply_to, refs, state, event, via, created_at, send_at)
+       VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       conversationId,
       actor.userId,
       bodyHtml,
@@ -419,44 +456,130 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       newMessageId(mailbox.email),
       last?.message_id ?? null,
       refs,
-      input.skipDelivery || config.mailDisabled ? 'sent' : 'sending',
-      JSON.stringify({ status }),
+      sendAt ? 'scheduled' : input.skipDelivery || config.mailDisabled ? 'sent' : 'sending',
+      JSON.stringify(sendAt ? { status, ifNoReply: !!input.ifNoReply } : { status }),
       actor.via,
       at,
+      sendAt,
     )
     attach(id, conversationId, input.attachmentIds)
+    if (sendAt) {
+      // Nothing went to the customer yet, so the status and the timers stay as they are until it does.
+      run('UPDATE conversations SET thread_count = thread_count + 1, assignee_id = ?, updated_at = ? WHERE id = ?', assignee, at, conversationId)
+      if (actor.userId) run('DELETE FROM drafts WHERE conversation_id = ? AND user_id = ?', conversationId, actor.userId)
+      reindex(conversationId)
+      return id
+    }
     if (actor.via === 'auto') {
       // An automatic acknowledgement is not a real answer: leave status, assignee and timers alone.
       run('UPDATE conversations SET thread_count = thread_count + 1 WHERE id = ?', conversationId)
       return id
     }
-    run(
-      `UPDATE conversations SET status = ?, assignee_id = ?, snoozed_until = NULL, cc = ?, preview = ?, thread_count = thread_count + 1,
-         last_agent_at = ?, first_reply_at = COALESCE(first_reply_at, ?), waiting_since = NULL, updated_at = ?,
-         closed_at = CASE WHEN ? = 'closed' THEN ? ELSE NULL END, closed_by = CASE WHEN ? = 'closed' THEN ? ELSE NULL END
-       WHERE id = ?`,
-      status,
-      assignee,
-      JSON.stringify(cc),
-      previewOf(text),
-      at,
-      at,
-      at,
-      status,
-      at,
-      status,
-      actor.userId,
-      conversationId,
-    )
+    markReplied(conversationId, { status, assignee, cc, text, at, closedBy: actor.userId })
     if (actor.userId) run('DELETE FROM drafts WHERE conversation_id = ? AND user_id = ?', conversationId, actor.userId)
     reindex(conversationId)
     return id
   })
+  if (sendAt) {
+    touch(conversationId, mailboxId, 'updated', actor)
+    return threadId
+  }
   touch(conversationId, mailboxId, 'reply', actor)
   announceAgentThread('conversation.agent_replied', conversationId, threadId, input.createdAt !== undefined)
   if (!input.skipDelivery && !config.mailDisabled) queueDelivery(threadId)
   return threadId
 }
+
+const scheduledThread = (threadId: number) => {
+  const t = get<any>(`SELECT * FROM threads WHERE id = ? AND type = 'reply' AND state = 'scheduled'`, threadId)
+  if (!t) throw new AppError('That reply is not waiting to be sent.')
+  return t
+}
+
+/**
+ * Release a scheduled reply: from now on it is an ordinary reply, written at this moment.
+ * The caller delivers it. Returns false when mail is off and there is nothing to deliver.
+ */
+function releaseScheduled(threadId: number, actor: Actor): boolean {
+  let mailboxId = 0
+  let conversationId = 0
+  tx(() => {
+    const t = scheduledThread(threadId)
+    const conv = get<any>('SELECT * FROM conversations WHERE id = ?', t.conversation_id)
+    conversationId = conv.id
+    mailboxId = conv.mailbox_id
+    const at = now()
+    const event = parseJson<{ status?: Status }>(t.event, {})
+    const status: Status = event.status && STATUSES.includes(event.status) ? event.status : 'closed'
+    // Answer the newest message, which may have arrived after this reply was written.
+    const last = lastMailOf(conv.id)
+    run(
+      `UPDATE threads SET state = ?, send_at = NULL, created_at = ?, in_reply_to = ?, refs = ?, event = ? WHERE id = ?`,
+      config.mailDisabled ? 'sent' : 'sending',
+      at,
+      last?.message_id ?? null,
+      refsAfter(last),
+      JSON.stringify({ status }),
+      threadId,
+    )
+    // The thread was counted when it was scheduled.
+    run('UPDATE conversations SET thread_count = thread_count - 1 WHERE id = ?', conv.id)
+    markReplied(conv.id, { status, assignee: conv.assignee_id ?? t.user_id, cc: parseJson<string[]>(t.cc, []), text: t.body_text, at, closedBy: t.user_id })
+    reindex(conv.id)
+  })
+  touch(conversationId, mailboxId, 'reply', actor)
+  announceAgentThread('conversation.agent_replied', conversationId, threadId, false)
+  return !config.mailDisabled
+}
+
+/** Send a scheduled reply now, without waiting for its time. */
+export function sendScheduledNow(threadId: number, actor: Actor) {
+  if (releaseScheduled(threadId, actor)) queueDelivery(threadId)
+}
+
+/** Take a scheduled reply back. Its text returns to the writer as a draft; its attachments are removed. */
+export function cancelScheduled(threadId: number, actor: Actor) {
+  const t = scheduledThread(threadId)
+  const conv = get<any>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)
+  tx(() => {
+    if (t.user_id) {
+      run(
+        `INSERT INTO drafts (conversation_id, user_id, kind, body_html, updated_at) VALUES (?, ?, 'reply', ?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`,
+        t.conversation_id,
+        t.user_id,
+        t.body_html,
+        now(),
+      )
+    }
+    run('DELETE FROM threads WHERE id = ?', threadId)
+    run('UPDATE conversations SET thread_count = MAX(0, thread_count - 1), updated_at = ? WHERE id = ?', now(), t.conversation_id)
+    reindex(t.conversation_id)
+  })
+  touch(t.conversation_id, conv.mailbox_id, 'updated', actor)
+}
+
+/** The customer wrote: hold back replies that were to go out only if they stayed quiet. */
+function holdScheduled(conversationId: number) {
+  for (const t of all<any>(`SELECT id, event FROM threads WHERE conversation_id = ? AND state = 'scheduled' AND send_at IS NOT NULL`, conversationId)) {
+    const event = parseJson<Record<string, unknown>>(t.event, {})
+    if (event.ifNoReply) run('UPDATE threads SET send_at = NULL, event = ? WHERE id = ?', JSON.stringify({ ...event, held: true }), t.id)
+  }
+}
+
+/** Send every scheduled reply whose time has come. Runs on a timer, and waits for the deliveries. */
+export async function dispatchScheduled() {
+  const due = all<{ id: number }>(`SELECT id FROM threads WHERE state = 'scheduled' AND send_at IS NOT NULL AND send_at <= ? ORDER BY send_at LIMIT 20`, now())
+  for (const { id } of due) {
+    try {
+      if (releaseScheduled(id, { userId: null, via: 'system' })) await deliverThread(id)
+    } catch (err) {
+      console.error(`[send later] thread ${id}:`, (err as Error).message)
+    }
+  }
+}
+
+/** When the next scheduled reply is due, for platforms that must set an alarm. */
+export const nextScheduledAt = () => get<{ at: number | null }>(`SELECT MIN(send_at) AS at FROM threads WHERE state = 'scheduled' AND send_at IS NOT NULL`)?.at ?? null
 
 export interface NoteInput {
   bodyHtml: string

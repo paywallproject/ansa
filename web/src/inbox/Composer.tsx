@@ -1,13 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, ChevronDown, Send, StickyNote, Trash2, X } from 'lucide-react'
+import { Bookmark, ChevronDown, Clock, Send, StickyNote, Trash2, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { useLocalState, useSavedReplies, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
 import { STATUS_DOT, statusOptions } from '../lib/workspace'
 import { Avatar, Banner, Button, Input, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
-import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
+import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, paragraphHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
+import { SendLaterDialog, whenLabel } from './SendLater'
 
 export interface ComposerHandle {
   focus: (mode: 'reply' | 'note') => void
@@ -58,23 +59,25 @@ export const Composer = forwardRef<
     if (conversation.draft?.bodyHtml) onOpenChange(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [later, setLater] = useState(false)
   const send = useMutation({
-    mutationFn: (status: SendStatus) => {
-      const bodyHtml = editorHtml(editor)
+    mutationFn: ({ status, sendAt, ifNoReply }: { status: SendStatus; sendAt?: number; ifNoReply?: boolean }) => {
+      const bodyHtml = lineHtml(editorHtml(editor))
       clearTimeout(draftTimer.current)
       return mode === 'reply'
-        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids })
+        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply })
         : api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
     },
-    onSuccess: (data, status) => {
+    onSuccess: (data, { status, sendAt }) => {
       client.setQueryData(['conversation', conversation.id], (old: any) => (old ? { ...old, conversation: data.conversation } : old))
       void client.invalidateQueries({ queryKey: ['conversations'] })
       void client.invalidateQueries({ queryKey: ['mailboxes'] })
       editor?.commands.clearContent()
       uploads.clear()
       onTyping(false)
-      toast(mode === 'reply' ? 'Reply sent' : 'Note added')
-      onSent(mode === 'reply' ? status : null)
+      toast(mode === 'note' ? 'Note added' : sendAt ? `Reply scheduled for ${whenLabel(sendAt)}` : 'Reply sent')
+      // A scheduled reply changes nothing yet, so the conversation stays open in front of you.
+      onSent(mode === 'reply' && !sendAt ? status : null)
     },
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
@@ -82,8 +85,9 @@ export const Composer = forwardRef<
   const submit = () => {
     if (send.isPending || uploads.busy) return
     if (!editorHtml(editor) && uploads.ids.length === 0) return
-    send.mutate(sendStatus)
+    send.mutate({ status: sendStatus })
   }
+  const hasContent = () => !!editorHtml(editor) || uploads.ids.length > 0
   const submitRef = useRef(submit)
   submitRef.current = submit
 
@@ -127,7 +131,7 @@ export const Composer = forwardRef<
 
   const customerName = conversation.customer.name || conversation.customer.email
   const editor = useRichEditor({
-    content: conversation.draft?.bodyHtml ?? '',
+    content: paragraphHtml(conversation.draft?.bodyHtml ?? ''),
     placeholder: mode === 'reply' ? `Reply to ${customerName}` : 'Write a note for your team. Type @ to mention a teammate',
     onSubmit: () => submitRef.current(),
     onKeyDown: (event) => mentionKey(event),
@@ -141,6 +145,18 @@ export const Composer = forwardRef<
     },
   })
   useEffect(() => () => clearTimeout(draftTimer.current), [])
+
+  // A draft that appears while the editor is empty came from a scheduled reply someone took back: show it.
+  const draftHtml = conversation.draft?.bodyHtml ?? ''
+  const hadDraft = useRef(!!draftHtml)
+  useEffect(() => {
+    if (draftHtml && !hadDraft.current && editor?.isEmpty) {
+      setMode('reply')
+      editor.commands.setContent(paragraphHtml(draftHtml))
+      onOpenChange(true)
+    }
+    hadDraft.current = !!draftHtml
+  }, [draftHtml, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, () => ({
     focus: (next) => {
@@ -350,9 +366,27 @@ export const Composer = forwardRef<
                       </>
                     )}
                   </Popover>
-                  <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<Send className="size-3.5" aria-hidden />}>
+                  <button
+                    type="button"
+                    aria-label="Send later"
+                    title="Send later"
+                    disabled={send.isPending || uploads.busy}
+                    onClick={() => (hasContent() ? setLater(true) : toast('Write a reply first.', { kind: 'error' }))}
+                    className={cx(tool, 'ml-1 disabled:opacity-50')}
+                  >
+                    <Clock className="size-4" aria-hidden />
+                  </button>
+                  <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1" icon={<Send className="size-3.5" aria-hidden />}>
                     Send
                   </Button>
+                  <SendLaterDialog
+                    open={later}
+                    onClose={() => setLater(false)}
+                    onPick={(sendAt, ifNoReply) => {
+                      setLater(false)
+                      send.mutate({ status: sendStatus, sendAt, ifNoReply })
+                    }}
+                  />
                 </>
               )}
             </div>

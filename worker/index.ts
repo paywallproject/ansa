@@ -11,7 +11,7 @@ import { initBlobs } from '../server/blobs.ts'
 import { createApp, prepareData, startTimers } from '../server/app.ts'
 import { pruneSessions } from '../server/auth.ts'
 import { pollAllMailboxes } from '../server/mail/imap.ts'
-import { wakeSnoozed } from '../server/services/conversations.ts'
+import { dispatchScheduled, nextScheduledAt, wakeSnoozed } from '../server/services/conversations.ts'
 import { importIsRunning, importStep } from '../server/services/import-helpscout.ts'
 
 interface Env {
@@ -120,6 +120,13 @@ export class AnsaStore extends DurableObject<Env> {
       if (current === null || current > Date.now() + 3000) await this.ctx.storage.setAlarm(Date.now() + 1000)
       return
     }
+    // A scheduled reply goes out on time, not at the next mail check.
+    const due = nextScheduledAt()
+    if (due !== null) {
+      const at = Math.max(Date.now() + 1000, due)
+      const current = await this.ctx.storage.getAlarm()
+      if (current === null || current > at) await this.ctx.storage.setAlarm(at)
+    }
     const polling = !config.mailDisabled && get(`SELECT 1 FROM mailboxes WHERE imap_enabled = 1 AND imap_host != '' LIMIT 1`)
     const snoozed = get('SELECT 1 FROM conversations WHERE snoozed_until IS NOT NULL LIMIT 1')
     if (!polling && !snoozed) return
@@ -129,6 +136,7 @@ export class AnsaStore extends DurableObject<Env> {
   async alarm() {
     try {
       await importStep()
+      await dispatchScheduled()
       // Mail is checked on its own schedule, however often the alarm fires.
       if (Date.now() - this.lastPoll >= Math.max(10, config.imapPollSeconds) * 1000 - 500) {
         this.lastPoll = Date.now()

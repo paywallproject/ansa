@@ -6,7 +6,7 @@ import { api, qs } from '../lib/api'
 import { useDebounced } from '../lib/hooks'
 import type { Conversation, Customer, Mailbox } from '../lib/types'
 import { Banner, Button, Field, Input, Modal, Select, cx } from '../ui'
-import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
+import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
 
 export interface ComposePrefill {
   mailboxId?: number
@@ -40,7 +40,7 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
         customerEmail: email.trim(),
         customerName: name.trim(),
         subject: subject.trim(),
-        bodyHtml: editorHtml(editor),
+        bodyHtml: lineHtml(editorHtml(editor)),
         kind,
         status: kind === 'reply' ? 'pending' : 'active',
         attachmentIds: uploads.ids,

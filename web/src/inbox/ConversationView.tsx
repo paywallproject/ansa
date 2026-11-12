@@ -23,6 +23,7 @@ import {
   Trash2,
   UserRound,
   X,
+  Clock,
 } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { fileSize, fullTime, messageTime, STATUS_LABEL } from '../lib/format'
@@ -32,6 +33,7 @@ import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Mo
 import { Composer, type ComposerHandle } from './Composer'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { LightboxProvider, isImageType, useLightbox, type LightboxImage } from './Lightbox'
+import { whenLabel } from './SendLater'
 import { CustomerPanel } from './CustomerPanel'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
@@ -783,6 +785,16 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
     onSuccess: () => void client.invalidateQueries({ queryKey: ['conversation'] }),
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
+  const scheduled = thread.state === 'scheduled'
+  const act = useMutation({
+    mutationFn: (what: 'send' | 'cancel') => (what === 'send' ? api.post(`/threads/${thread.id}/send-now`) : api.del(`/threads/${thread.id}/scheduled`)),
+    onSuccess: (_data, what) => {
+      void client.invalidateQueries({ queryKey: ['conversation'] })
+      void client.invalidateQueries({ queryKey: ['conversations'] })
+      toast(what === 'send' ? 'Reply sent' : 'Taken back. The text is in your draft.')
+    },
+    onError: (err: Error) => toast(err.message, { kind: 'error' }),
+  })
   const lightbox = useLightbox()
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
@@ -804,7 +816,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   // What the message did to the conversation at that moment: a customer message makes it active,
   // a reply sets the status the teammate chose when sending. An auto reply changes nothing.
   const sentStatus = isCustomer ? 'active' : thread.type === 'reply' && thread.via !== 'auto' ? (thread.event?.status as string | undefined) : undefined
-  const how = isNote ? 'Note' : sentStatus ? (STATUS_LABEL[sentStatus] ?? '') : ''
+  const how = isNote ? 'Note' : scheduled ? 'Not sent yet' : sentStatus ? (STATUS_LABEL[sentStatus] ?? '') : ''
 
   return (
     <li className="relative md:px-14">
@@ -818,6 +830,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
           'relative rounded-xl border px-5 md:px-12 lg:px-20',
           folded ? 'py-4' : 'pt-5 pb-6',
           isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
+          scheduled && 'border-dashed border-line-strong',
           thread.state === 'failed' && 'ring-1 ring-danger/50',
         )}
       >
@@ -830,6 +843,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
               <span className="truncate text-sm font-semibold">{name}</span>
             </button>
             {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
+            {scheduled && <span className="shrink-0 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-fg">{thread.sendAt ? 'Scheduled' : 'On hold'}</span>}
             <time className={cx('shrink-0 text-xs tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
               {timeOnly.format(thread.createdAt)}
             </time>
@@ -860,6 +874,29 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         </header>
         {!folded && (
           <div className={cx('mt-4 border-t pt-5', isNote ? 'border-note-line' : 'border-line')}>
+            {scheduled && (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-accent-fg">
+                <Clock className="size-4 shrink-0" aria-hidden />
+                <p className="min-w-40 flex-1">
+                  {thread.sendAt ? (
+                    <>
+                      <span className="font-medium">Sends {whenLabel(thread.sendAt)}</span>
+                      {thread.event?.ifNoReply ? ', unless the customer writes first.' : '.'} Then the conversation becomes {(STATUS_LABEL[thread.event?.status as string] ?? 'closed').toLowerCase()}.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium">Not sent.</span> The customer wrote before it was due.
+                    </>
+                  )}
+                </p>
+                <Button size="sm" loading={act.isPending && act.variables === 'send'} disabled={act.isPending} onClick={() => act.mutate('send')}>
+                  Send now
+                </Button>
+                <Button size="sm" disabled={act.isPending} onClick={() => act.mutate('cancel')}>
+                  {thread.sendAt ? 'Cancel' : 'Back to draft'}
+                </Button>
+              </div>
+            )}
             {thread.state === 'failed' && (
               <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-[13px] text-danger">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />

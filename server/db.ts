@@ -293,6 +293,11 @@ const migrations: string[] = [
     PRIMARY KEY (source, external_id)
   ) WITHOUT ROWID;
   `,
+  `
+  -- Send later: a reply with state 'scheduled' waits here until send_at.
+  ALTER TABLE threads ADD COLUMN send_at INTEGER;
+  CREATE INDEX threads_send_at ON threads(send_at) WHERE send_at IS NOT NULL;
+  `,
 ]
 
 export function migrate() {

@@ -5,7 +5,7 @@ import { userFromBearer, pruneSessions } from './auth.ts'
 import { prunePresence } from './events.ts'
 import { handleMcp } from './mcp.ts'
 import { migrate, run } from './db.ts'
-import { wakeSnoozed } from './services/conversations.ts'
+import { dispatchScheduled, wakeSnoozed } from './services/conversations.ts'
 
 export const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
@@ -67,5 +67,6 @@ export function startTimers() {
   }
   every(15_000, prunePresence)
   every(30_000, wakeSnoozed)
+  every(10_000, () => void dispatchScheduled().catch((err) => console.error('[send later]', err)))
   every(3_600_000, pruneSessions)
 }

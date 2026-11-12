@@ -38,12 +38,12 @@ function totals(from: number, to: number, mailboxId?: number) {
       to,
     ),
     repliesSent: count(
-      `SELECT COUNT(*) AS n FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.type = 'reply' AND t.via != 'auto' AND t.created_at >= ? AND t.created_at < ? ${mb}`,
+      `SELECT COUNT(*) AS n FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.type = 'reply' AND t.state != 'scheduled' AND t.via != 'auto' AND t.created_at >= ? AND t.created_at < ? ${mb}`,
       from,
       to,
     ),
     customersHelped: count(
-      `SELECT COUNT(DISTINCT c.customer_id) AS n FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.type = 'reply' AND t.via != 'auto' AND t.created_at >= ? AND t.created_at < ? ${mb}`,
+      `SELECT COUNT(DISTINCT c.customer_id) AS n FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.type = 'reply' AND t.state != 'scheduled' AND t.via != 'auto' AND t.created_at >= ? AND t.created_at < ? ${mb}`,
       from,
       to,
     ),
@@ -85,7 +85,7 @@ export function buildReport(opts: ReportOptions) {
     busiest[(local.getUTCDay() + 6) % 7][local.getUTCHours()]++
   }
   for (const { ts } of all<{ ts: number }>(
-    `SELECT t.created_at AS ts FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.type = 'reply' AND t.via != 'auto' AND t.created_at >= ? AND t.created_at < ? ${mb}`,
+    `SELECT t.created_at AS ts FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.type = 'reply' AND t.state != 'scheduled' AND t.via != 'auto' AND t.created_at >= ? AND t.created_at < ? ${mb}`,
     ...p(from, to),
   ))
     bump(ts, 'repliesSent')
@@ -100,9 +100,9 @@ export function buildReport(opts: ReportOptions) {
 
   const team = all<any>(
     `SELECT u.id, u.name, u.color,
-       (SELECT COUNT(*) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.created_at >= ?1 AND t.created_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS replies,
+       (SELECT COUNT(*) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.state != 'scheduled' AND t.created_at >= ?1 AND t.created_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS replies,
        (SELECT COUNT(*) FROM conversations c WHERE c.closed_by = u.id AND c.status = 'closed' AND c.closed_at >= ?1 AND c.closed_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS closed,
-       (SELECT COUNT(DISTINCT c.customer_id) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.created_at >= ?1 AND t.created_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS customers
+       (SELECT COUNT(DISTINCT c.customer_id) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.state != 'scheduled' AND t.created_at >= ?1 AND t.created_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS customers
      FROM users u WHERE u.disabled = 0 ORDER BY replies DESC, u.name`,
     ...p(from, to),
   ).map((u) => ({ id: u.id as number, name: u.name as string, color: u.color as string, replies: u.replies as number, closed: u.closed as number, customers: u.customers as number }))

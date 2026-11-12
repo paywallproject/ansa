@@ -54,6 +54,24 @@ export function useRichEditor(options: {
 
 export const editorHtml = (editor: Editor | null) => (!editor || editor.isEmpty ? '' : editor.getHTML())
 
+/**
+ * Turn the editor's paragraphs into plain lines for sending. Mail programs put a gap around every
+ * paragraph and collapse an empty one, so a message would land with other spacing than it was written with.
+ * A line (<div>) has no gap, and an empty line keeps its height.
+ */
+export const lineHtml = (html: string) =>
+  html
+    .replace(/<p><\/p>/g, '<div><br></div>')
+    .replace(/<p>/g, '<div>')
+    .replace(/<\/p>/g, '</div>')
+
+/** The reverse of lineHtml, for putting a saved message back into the editor. */
+export const paragraphHtml = (html: string) =>
+  html
+    .replace(/<div><br\s*\/?><\/div>/g, '<p></p>')
+    .replace(/<div>/g, '<p>')
+    .replace(/<\/div>/g, '</p>')
+
 function LinkButton({ editor }: { editor: Editor }) {
   const [url, setUrl] = useState('')
   const active = useEditorState({ editor, selector: ({ editor: e }) => e.isActive('link') })

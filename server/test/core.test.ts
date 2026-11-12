@@ -454,3 +454,51 @@ test('merging customers moves conversations and addresses to one profile', async
   // The primary address can be switched.
   assert.equal(customers.updateCustomer(target.id, { emails: ['sam@home.test', 'sam@work.test'] }).email, 'sam@home.test')
 })
+
+test('send later: a scheduled reply waits, goes out when due, and holds back if the customer writes first', async () => {
+  const actor = { userId: agentId, via: 'web' as const }
+  const open = (email: string) => conversations.createConversation({ mailboxId, customerEmail: email, subject: 'Later', bodyHtml: '<p>Help</p>', kind: 'customer' }, { userId: null, via: 'email' }).id
+  const soon = Date.now() + 3_600_000
+
+  // Scheduled: nothing changes for the customer or the status yet.
+  const a = open('later-a@acme.test')
+  const ta = conversations.addReply(a, { bodyHtml: '<div>See you tomorrow</div>', status: 'closed', sendAt: soon }, actor)
+  let conv = conversations.getConversation(a)
+  let thread = conv.threads.find((t) => t.id === ta)!
+  assert.deepEqual([thread.state, thread.sendAt, conv.status, conv.assignee?.id], ['scheduled', soon, 'active', agentId])
+  assert.ok(conv.waitingSince, 'the customer is still waiting')
+  await conversations.dispatchScheduled()
+  assert.equal(conversations.getConversation(a).threads.find((t) => t.id === ta)!.state, 'scheduled', 'not due yet')
+
+  // Due: it becomes an ordinary reply and applies its status.
+  run('UPDATE threads SET send_at = ? WHERE id = ?', Date.now() - 1000, ta)
+  await conversations.dispatchScheduled()
+  conv = conversations.getConversation(a)
+  thread = conv.threads.find((t) => t.id === ta)!
+  assert.deepEqual([thread.state, thread.sendAt, conv.status, conv.waitingSince, conv.threadCount], ['sent', null, 'closed', null, 2])
+
+  // "If no reply": the customer writes first, so it is held, and can still be sent by hand.
+  const b = open('later-b@acme.test')
+  const tb = conversations.addReply(b, { bodyHtml: '<div>Any news?</div>', status: 'pending', sendAt: soon, ifNoReply: true }, actor)
+  const customerId = conversations.getConversation(b).customer.id
+  conversations.addCustomerMessage(b, { customerId, bodyHtml: '<p>Fixed it myself</p>' })
+  thread = conversations.getConversation(b).threads.find((t) => t.id === tb)!
+  assert.deepEqual([thread.state, thread.sendAt, thread.event?.held], ['scheduled', null, true])
+  run('UPDATE threads SET created_at = created_at - 5000 WHERE id = ?', tb)
+  await conversations.dispatchScheduled()
+  assert.equal(conversations.getConversation(b).threads.find((t) => t.id === tb)!.state, 'scheduled', 'a held reply never sends by itself')
+  conversations.sendScheduledNow(tb, actor)
+  conv = conversations.getConversation(b)
+  assert.deepEqual([conv.threads.at(-1)!.id, conv.threads.at(-1)!.state, conv.status], [tb, 'sent', 'pending'])
+
+  // "Always": a customer message does not stop it. Cancelling returns the text as a draft.
+  const c = open('later-c@acme.test')
+  const tc = conversations.addReply(c, { bodyHtml: '<div>Reminder</div>', sendAt: soon }, actor)
+  conversations.addCustomerMessage(c, { customerId: conversations.getConversation(c).customer.id, bodyHtml: '<p>Hello?</p>' })
+  assert.equal(conversations.getConversation(c).threads.find((t) => t.id === tc)!.sendAt, soon)
+  conversations.cancelScheduled(tc, actor)
+  conv = conversations.getConversation(c, { userId: agentId })
+  assert.ok(!conv.threads.some((t) => t.id === tc))
+  assert.deepEqual([conv.draft?.bodyHtml, conv.threadCount], ['<div>Reminder</div>', 2])
+  assert.throws(() => conversations.sendScheduledNow(tc, actor), /not waiting/)
+})
