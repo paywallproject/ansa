@@ -704,9 +704,10 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
+      {/* On a phone, messages are cards on a light grey background, as in Help Scout's app. */}
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-3 md:bg-transparent md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
-        <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-4 pt-5', composing ? 'pb-4' : 'pb-28')}>
+        <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-28')}>
           {conversation.threads.map((thread, index) => {
             const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
             return (
@@ -780,7 +781,7 @@ function eventText(thread: Thread): ReactNode {
 
 function EventLine({ thread }: { thread: Thread }) {
   return (
-    <li className="py-0.5 text-center text-xs text-fg-3">
+    <li className="py-1 text-center text-[13px] text-fg-3 md:py-0.5 md:text-xs">
       {eventText(thread)} · <time title={fullTime(thread.createdAt)}>{timeOnly.format(thread.createdAt)}</time>
     </li>
   )
@@ -964,8 +965,8 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
           // Wide side margins inside the card keep lines short and give the text room.
-          'relative rounded-xl border px-5 md:px-12 lg:px-20',
-          folded ? 'py-4' : 'pt-5 pb-6',
+          'relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-12 md:shadow-none lg:px-20',
+          folded ? 'py-4' : 'pt-4 pb-5 md:pt-5 md:pb-6',
           isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
           scheduled && 'border-dashed border-line-strong',
           thread.state === 'failed' && 'ring-1 ring-danger/50',
@@ -974,14 +975,14 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         {/* A bar down the left edge marks what the team wrote. */}
         {!isCustomer && <span className={cx('absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
         <header>
-          <div className="flex items-center gap-2.5">
-            <Avatar name={name} color={color} src={photo} size={24} className="md:hidden" />
+          <div className="flex items-center gap-3 md:gap-2.5">
+            <Avatar name={name} color={color} src={photo} size={36} className="md:hidden" />
             <button type="button" onClick={onToggle} aria-expanded={!folded} className="flex min-w-0 flex-1 items-baseline rounded text-left">
-              <span className="truncate text-sm font-semibold">{name}</span>
+              <span className="truncate text-[17px] font-semibold md:text-sm">{name}</span>
             </button>
             {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
             {scheduled && <span className="shrink-0 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-fg">{thread.sendAt ? 'Scheduled' : 'On hold'}</span>}
-            <time className={cx('shrink-0 text-xs tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
+            <time className={cx('shrink-0 text-[13px] tabular-nums md:text-xs', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
               {timeOnly.format(thread.createdAt)}
             </time>
             {isCustomer && thread.via === 'email' && (
@@ -1033,7 +1034,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
           )}
         </header>
         {!folded && (
-          <div className={cx('mt-4 border-t pt-5', isNote ? 'border-note-line' : 'border-line')}>
+          <div className={cx('mt-3 md:mt-4 md:border-t md:pt-5', isNote ? 'border-note-line' : 'border-line')}>
             {scheduled && (
               <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-accent-fg">
                 <Clock className="size-4 shrink-0" aria-hidden />

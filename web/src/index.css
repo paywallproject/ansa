@@ -144,7 +144,8 @@
 /* Easier to read on a phone. */
 @media (max-width: 767px) {
   .prose-mail {
-    font-size: 15px;
+    font-size: 16px;
+    line-height: 1.6;
   }
 }
 .prose-mail > :first-child {
