@@ -220,3 +220,15 @@ test('HTTP: the status endpoint is readable from any website', async () => {
   assert.equal(((await missing.json()) as { available: boolean }).available, false)
   run(`UPDATE mailboxes SET chat_settings = '{}' WHERE id = ?`, mailboxId)
 })
+
+test('conversation events say they are live chat, so browsers can notify about chats', () => {
+  const seen: any[] = []
+  const stop = events.subscribe((e) => void seen.push(e))
+  try {
+    const { conversationId } = chat.startChat(chat.chatMailbox(key), { name: 'Nia', email: 'nia@example.com', message: 'Hello?' })
+    const created = seen.find((e) => e.type === 'conversation' && e.id === conversationId && e.reason === 'created')
+    assert.equal(created?.source, 'chat')
+  } finally {
+    stop()
+  }
+})

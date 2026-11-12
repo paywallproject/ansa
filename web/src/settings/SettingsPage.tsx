@@ -18,6 +18,7 @@ import { workspace } from '../lib/workspace'
 import { PhotoPicker } from './PhotoPicker'
 import { allZones, browserZone, validZone } from '../lib/timezone'
 import { badgeEnabled, badgeSupported, runningAsApp, setBadgeEnabled } from '../lib/badge'
+import { notifyEnabled, notifySupported, setNotifyEnabled } from '../lib/notify'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -188,7 +189,7 @@ function ProfileSettings() {
             <Switch checked={form.notifyMentions} onChange={(v) => setForm({ ...form, notifyMentions: v })} label="A teammate mentions me in a note" />
           </div>
           {/* Only an installed app has an icon to put a count on; in a browser tab the switch would do nothing. */}
-          {runningAsApp() && <AppBadgeSwitch />}
+          {(notifySupported() || runningAsApp()) && <DeviceSettings />}
           <div className="flex justify-end">
             <Button type="submit" variant="primary" loading={save.isPending}>
               Save changes
@@ -227,13 +228,40 @@ function ProfileSettings() {
 }
 
 /** The red count on the app icon, for this device. Saved at once, apart from the form above. */
+/** Settings kept in this browser: chat notifications everywhere, the icon count in the installed app. Saved at once. */
+function DeviceSettings() {
+  const { toast } = useFeedback()
+  const [notify, setNotify] = useState(notifyEnabled)
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="flex flex-col gap-3">
+      <h3 className="text-[13px] font-medium">On this device</h3>
+      {notifySupported() && (
+        <Switch
+          checked={notify}
+          disabled={busy}
+          onChange={async (next) => {
+            setBusy(true)
+            const result = await setNotifyEnabled(next)
+            setBusy(false)
+            if (result.ok) setNotify(next)
+            else toast(result.message ?? 'Could not change that.', { kind: 'error' })
+          }}
+          label="Notify me about live chats"
+          description="A banner when a chat starts, and when a visitor writes in a chat that is unassigned or yours. Saved at once, for this browser. It works while the app is open, in a background tab too."
+        />
+      )}
+      {runningAsApp() && <AppBadgeSwitch />}
+    </div>
+  )
+}
+
 function AppBadgeSwitch() {
   const { toast } = useFeedback()
   const [on, setOn] = useState(badgeEnabled)
   const [busy, setBusy] = useState(false)
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="text-[13px] font-medium">On this device</h3>
       <Switch
         checked={on}
         disabled={busy}

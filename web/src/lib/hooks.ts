@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { brand, type Workspace } from './workspace'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import { notifyEnabled, showNotification } from './notify'
 import type { Mailbox, SavedReply, Tag, User, Viewer } from './types'
 
 export interface Session {
@@ -26,7 +27,23 @@ export const useSavedReplies = () =>
 /** Keep lists and open conversations fresh from the server's event stream. */
 export function useLiveEvents() {
   const client = useQueryClient()
+  const { user } = useSession()
+  const meId = user.id
   useEffect(() => {
+    /** A banner for a new live chat, or a visitor writing in one that is unassigned or yours. */
+    const notifyChat = async (event: { id: number; reason: string }) => {
+      if (!notifyEnabled()) return
+      // Already looking at this chat: no banner needed.
+      if (document.visibilityState === 'visible' && new RegExp(`/${event.id}(?:$|[/?#])`).test(location.pathname)) return
+      try {
+        const { conversation: c } = await api.get<{ conversation: { customer: { name: string; email: string }; preview: string; assignee: { id: number } | null } }>(`/conversations/${event.id}`)
+        if (c.assignee && c.assignee.id !== meId) return
+        const who = c.customer.name || c.customer.email
+        void showNotification(event.reason === 'created' ? `New live chat · ${who}` : who, c.preview || 'New message', `/c/${event.id}`, `chat-${event.id}`)
+      } catch {
+        /* gone or not visible to us */
+      }
+    }
     let source: EventSource | null = null
     let retry: ReturnType<typeof setTimeout> | undefined
     let closed = false
@@ -66,7 +83,10 @@ export function useLiveEvents() {
         if (event.type === 'conversation') {
           refreshLists()
           void client.invalidateQueries({ queryKey: ['conversation', event.id] })
-          if (event.reason === 'created' || event.reason === 'customer_reply') window.dispatchEvent(new CustomEvent('ansa:incoming', { detail: event }))
+          if (event.reason === 'created' || event.reason === 'customer_reply') {
+            window.dispatchEvent(new CustomEvent('ansa:incoming', { detail: event }))
+            if (event.source === 'chat') void notifyChat(event)
+          }
         } else if (event.type === 'presence') {
           client.setQueryData(['presence', event.conversationId], event.viewers as Viewer[])
         } else if (event.type === 'mailbox') {
@@ -101,7 +121,10 @@ export function useLiveEvents() {
     // A hidden tab gives its connection back. Browsers allow only six per site over plain HTTP,
     // so many open tabs would otherwise starve each other. Reconnecting refreshes everything.
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') disconnect()
+      // With chat notifications on, this device keeps listening in the background, or it would hear nothing.
+      if (document.visibilityState === 'hidden') {
+        if (!notifyEnabled()) disconnect()
+      }
       else {
         connect()
         void client.invalidateQueries({ queryKey: ['conversation'] })
@@ -120,7 +143,7 @@ export function useLiveEvents() {
       clearTimeout(retry)
       clearTimeout(pending)
     }
-  }, [client])
+  }, [client, meId])
 }
 
 /**
