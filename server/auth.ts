@@ -23,6 +23,8 @@ export interface User {
   /** 'all': every mailbox (always so for admins). 'some': only the mailboxes in mailboxIds. */
   mailboxAccess: 'all' | 'some'
   mailboxIds: number[]
+  /** IANA time zone such as America/New_York. Empty: not chosen yet (the browser's is used). */
+  timezone: string
   createdAt: number
 }
 
@@ -43,6 +45,7 @@ export function serializeUser(row: any): User {
     avatarUrl: avatarUrl(row.id, row.avatar_version),
     chatStatus: row.chat_status === 'away' ? 'away' : 'online',
     ...mailboxAccessOf(row),
+    timezone: row.timezone ?? '',
     createdAt: row.created_at,
   }
 }

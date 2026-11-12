@@ -193,3 +193,12 @@ test('pending conversations sink below the ones waiting on us, whatever the sort
     assert.equal(ids[ids.length - 1], newer, sort)
   }
 })
+
+test('each teammate keeps a time zone, and only a real one', async () => {
+  assert.equal((await call(agentToken, 'GET', '/me')).data.user.timezone, '')
+  assert.equal((await call(agentToken, 'PATCH', '/me', { timezone: 'America/Chicago' })).data.user.timezone, 'America/Chicago')
+  const bad = await call(agentToken, 'PATCH', '/me', { timezone: 'Moon/Base' })
+  assert.equal(bad.status, 400)
+  assert.match(bad.data.error, /not a time zone/)
+  assert.equal((await call(agentToken, 'GET', '/me')).data.user.timezone, 'America/Chicago')
+})

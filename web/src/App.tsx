@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './lib/api'
-import { SessionContext, useHeartbeat, useLiveEvents, useMailboxes, useSession } from './lib/hooks'
+import { SessionContext, useHeartbeat, useInitialTimezone, useLiveEvents, useMailboxes, useSession } from './lib/hooks'
 import type { Conversation, User } from './lib/types'
 import { Spinner } from './ui'
 import { applyWorkspace, brand, workspace, type Workspace } from './lib/workspace'
@@ -60,6 +60,7 @@ export function App() {
 function Authed() {
   useLiveEvents()
   useHeartbeat()
+  useInitialTimezone()
   return (
     <Routes>
       <Route element={<Shell />}>

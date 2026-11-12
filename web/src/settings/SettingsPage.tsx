@@ -16,6 +16,7 @@ import { WorkspaceSettings } from './Workspace'
 import { ImportSettings } from './Import'
 import { workspace } from '../lib/workspace'
 import { PhotoPicker } from './PhotoPicker'
+import { allZones, browserZone, validZone } from '../lib/timezone'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -89,7 +90,17 @@ function ProfileSettings() {
   const { user, refresh } = useSession()
   const client = useQueryClient()
   const { toast } = useFeedback()
-  const [form, setForm] = useState({ name: user.name, email: user.email, signature: user.signature, notifyAssigned: user.notifyAssigned, notifyReplies: user.notifyReplies, notifyMentions: user.notifyMentions })
+  const [form, setForm] = useState({
+    name: user.name,
+    email: user.email,
+    signature: user.signature,
+    notifyAssigned: user.notifyAssigned,
+    notifyReplies: user.notifyReplies,
+    notifyMentions: user.notifyMentions,
+    timezone: user.timezone || browserZone(),
+  })
+  const zones = allZones()
+  const here = browserZone()
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '' })
   const [error, setError] = useState<string | null>(null)
   const [passwordError, setPasswordError] = useState<string | null>(null)
@@ -141,6 +152,31 @@ function ProfileSettings() {
               {(id) => <Input id={id} type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />}
             </Field>
           </div>
+          <Field
+            label="Time zone"
+            hint={
+              <>
+                Send later suggests and shows times in this zone.{' '}
+                {form.timezone !== here && (
+                  <button type="button" className="underline hover:text-fg" onClick={() => setForm({ ...form, timezone: here })}>
+                    Use this browser's ({here.replace(/_/g, ' ')})
+                  </button>
+                )}
+              </>
+            }
+            error={form.timezone && !validZone(form.timezone) ? 'Pick a time zone from the list, such as America/New_York.' : null}
+          >
+            {(id) => (
+              <>
+                <Input id={id} list={`${id}-zones`} value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} placeholder="America/New_York" className="max-w-sm" />
+                <datalist id={`${id}-zones`}>
+                  {zones.map((zone) => (
+                    <option key={zone} value={zone} />
+                  ))}
+                </datalist>
+              </>
+            )}
+          </Field>
           <Field label="Personal signature" hint="Added under your replies. Leave it empty to use the mailbox signature.">
             {(id) => <RichField id={id} value={form.signature} onChange={(signature) => setForm((f) => ({ ...f, signature }))} placeholder={`${user.name.split(' ')[0]}, Customer Support`} minHeight={72} />}
           </Field>

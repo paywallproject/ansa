@@ -121,6 +121,21 @@ export function useHeartbeat() {
   }, [])
 }
 
+/** The first time someone opens the app, their time zone starts as this browser's. They can change it on Profile. */
+export function useInitialTimezone() {
+  const { user, refresh } = useSession()
+  useEffect(() => {
+    if (user.timezone) return
+    let zone = 'UTC'
+    try {
+      zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    } catch {
+      /* keep UTC */
+    }
+    void api.patch('/me', { timezone: zone }).then(refresh, () => {})
+  }, [user.timezone]) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 const isTyping = (target: EventTarget | null) => {
   const el = target as HTMLElement | null
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
