@@ -126,6 +126,8 @@ export interface Customer {
 
 export interface ConversationSummary {
   id: number
+  /** You have an unsent draft here. */
+  hasDraft?: boolean
   mailboxId: number
   mailboxName: string
   subject: string

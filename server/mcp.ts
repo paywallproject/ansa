@@ -24,6 +24,9 @@ import { assertConversation, assertMailbox, canSeeMailbox, scopeOf } from './ser
 
 const iso = (ts: number | null | undefined) => (ts ? new Date(ts).toISOString() : null)
 const toHtml = (body: string) => (/<(p|br|div|ul|ol|strong|em|a)\b[^>]*>/i.test(body) ? body : textToHtml(body))
+// The reply box writes a blank line as an empty paragraph (paragraphs there have no gap between them),
+// so a draft needs one between its paragraphs to look the way it will be sent.
+const toDraftHtml = (body: string) => toHtml(body).replace(/<\/p>\s*<p(?=[\s>])/gi, '</p><p></p><p')
 
 const brief = (c: ConversationSummary) => ({
   id: c.id,
@@ -214,7 +217,7 @@ function buildServer(user: User) {
     },
     safe((a) => {
       const id = mine(a.id)
-      saveDraft(id, user.id, a.kind ?? 'reply', toHtml(a.body))
+      saveDraft(id, user.id, a.kind ?? 'reply', toDraftHtml(a.body))
       // An open conversation shows the draft at once (its reply box picks up a draft that appears while empty).
       const c = getConversation(id)
       publish({ type: 'conversation', id, mailboxId: c.mailboxId, reason: 'draft', actorId: user.id })

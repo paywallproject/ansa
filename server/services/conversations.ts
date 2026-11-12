@@ -177,7 +177,13 @@ export function listConversations(opts: ListOptions) {
   const rows = allNamed(`${BASE_SELECT} ${whereSql} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params)
   const total = (allNamed(`SELECT COUNT(*) AS n FROM conversations c ${whereSql}`, params)[0]?.n as number) ?? 0
   const tags = tagsFor(rows.map((r) => r.id))
-  return { items: rows.map((r) => serialize(r, tags.get(r.id))), total, limit, offset }
+  // Conversations where the viewer has an unsent draft (from the reply box or MCP draft_reply).
+  const drafted = new Set<number>()
+  if (opts.me && rows.length) {
+    const ids = rows.map((r) => Number(r.id))
+    for (const d of all<{ conversation_id: number }>(`SELECT conversation_id FROM drafts WHERE user_id = ? AND conversation_id IN (${ids.map(() => '?').join(',')})`, opts.me, ...ids)) drafted.add(d.conversation_id)
+  }
+  return { items: rows.map((r) => ({ ...serialize(r, tags.get(r.id)), hasDraft: drafted.has(Number(r.id)) })), total, limit, offset }
 }
 
 export function folderCounts(userId: number) {

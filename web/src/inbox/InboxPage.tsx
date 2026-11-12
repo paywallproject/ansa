@@ -517,6 +517,7 @@ function Row({
             {viewers.length > 0 && <ViewersBadge viewers={viewers} />}
             <span className={cx('truncate text-[15px] leading-snug md:text-sm md:leading-[1.35]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
+            {c.hasDraft && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-amber-50 px-1.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">Draft</span>}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
             {c.tags.slice(0, 3).map((t) => (
               <span key={t.id} className="hidden h-5 shrink-0 items-center gap-1 rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover md:inline-flex">
