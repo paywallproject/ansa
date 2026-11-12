@@ -26,7 +26,7 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { api, qs } from './lib/api'
-import { useDebounced, useHotkeys, useMailboxes, useSession, useTheme, type Theme } from './lib/hooks'
+import { useDebounced, useHotkeys, useMailboxes, useSession, useTheme, useTitleCount, type Theme } from './lib/hooks'
 import type { ConversationSummary, Customer, Folder, Mailbox } from './lib/types'
 import { Avatar, Kbd, MenuDivider, MenuItem, MenuLabel, Modal, Popover, StatusBadge, cx } from './ui'
 import { Logo } from './pages/Auth'
@@ -350,6 +350,8 @@ export function Shell() {
   useEffect(() => {
     if (current) rememberMailbox(current.id)
   }, [current?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The tab title starts with what waits in Unassigned: this mailbox's, or every mailbox's away from one.
+  useTitleCount(current ? current.counts.unassigned : list.reduce((sum, m) => sum + m.counts.unassigned, 0))
 
   const actions = useMemo<ShellActions>(
     () => ({ compose: (prefill) => setCompose(prefill ?? {}), openPalette: () => setPalette(true), openShortcuts: () => setShortcuts(true) }),
