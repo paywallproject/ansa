@@ -18,7 +18,7 @@ import { workspace } from '../lib/workspace'
 import { PhotoPicker } from './PhotoPicker'
 import { allZones, browserZone, validZone } from '../lib/timezone'
 import { badgeEnabled, badgeSupported, runningAsApp, setBadgeEnabled } from '../lib/badge'
-import { notifyEnabled, notifySupported, setNotifyEnabled } from '../lib/notify'
+import { notifyEnabled, notifySupported, setNotifyEnabled, showNotification } from '../lib/notify'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -250,6 +250,20 @@ function DeviceSettings() {
           label="Notify me about live chats"
           description="A banner when a chat starts, and when a visitor writes in a chat that is unassigned or yours. Saved at once, for this browser. It works while the app is open, in a background tab too."
         />
+      )}
+      {notifySupported() && notify && (
+        <div className="ml-12 flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            onClick={async () => {
+              const shown = await showNotification('Live chat notifications are on', 'This is how a new chat will look.', '/settings/profile', 'ansa-test', true)
+              if (!shown) toast('The browser would not show it. Check that notifications are allowed for this site.', { kind: 'error' })
+            }}
+          >
+            Send a test notification
+          </Button>
+          <p className="min-w-56 flex-1 text-xs text-fg-3">Nothing appears? On a Mac, check System Settings → Notifications → your browser, and that Focus or Do Not Disturb is off.</p>
+        </div>
       )}
       {runningAsApp() && <AppBadgeSwitch />}
     </div>
