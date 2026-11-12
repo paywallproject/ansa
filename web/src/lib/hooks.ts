@@ -142,8 +142,15 @@ const isTyping = (target: EventTarget | null) => {
 }
 
 /**
- * Global keyboard shortcuts. Keys: "j", "?", "mod+k", "mod+enter", "escape".
- * Plain keys are ignored while the user types in a field or a dialog is open.
+ * The first key of a two-key shortcut such as "s c", while we wait for the second. Shared by every useHotkeys,
+ * so the second key goes to the sequence and not to a one-key shortcut elsewhere ("c" is New conversation).
+ */
+let sequenceStart: { key: string; at: number } | null = null
+const SEQUENCE_MS = 1500
+
+/**
+ * Global keyboard shortcuts. Keys: "j", "?", "mod+k", "mod+enter", "escape", and sequences such as "s c"
+ * (press S, then C). Plain keys are ignored while the user types in a field or a dialog is open.
  */
 export function useHotkeys(bindings: Record<string, (event: KeyboardEvent) => void>, enabled = true) {
   const ref = useRef(bindings)
@@ -155,9 +162,34 @@ export function useHotkeys(bindings: Record<string, (event: KeyboardEvent) => vo
       const mod = e.metaKey || e.ctrlKey
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase()
       const combo = `${mod ? 'mod+' : ''}${key}`
+      const blocked = !mod && key !== 'escape' && (isTyping(e.target) || e.altKey || !!document.querySelector('[role=dialog]'))
+
+      // The second key of a sequence. Whatever it is, it does nothing else.
+      const started = sequenceStart
+      if (started && !mod && Date.now() - started.at < SEQUENCE_MS) {
+        const handler = blocked ? undefined : ref.current[`${started.key} ${key}`]
+        if (handler) {
+          sequenceStart = null
+          e.preventDefault()
+          handler(e)
+        } else {
+          // Another shortcut set may own it; once this key press is over, the sequence ends either way.
+          setTimeout(() => {
+            if (sequenceStart === started) sequenceStart = null
+          }, 0)
+        }
+        return
+      }
+
+      // The first key of a sequence: wait for the second.
+      if (!mod && !blocked && Object.keys(ref.current).some((k) => k.startsWith(`${key} `))) {
+        sequenceStart = { key, at: Date.now() }
+        e.preventDefault()
+        return
+      }
+
       const handler = ref.current[combo]
-      if (!handler) return
-      if (!mod && key !== 'escape' && (isTyping(e.target) || e.altKey || document.querySelector('[role=dialog]'))) return
+      if (!handler || blocked) return
       handler(e)
     }
     document.addEventListener('keydown', onKey)
