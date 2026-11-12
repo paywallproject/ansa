@@ -25,6 +25,7 @@ import {
   X,
   Clock,
   FileCode,
+  MailOpen,
   MessageCircle,
 } from 'lucide-react'
 import { api, qs } from '../lib/api'
@@ -816,6 +817,12 @@ function trimBlankEdges(html: string): string {
   return template.innerHTML
 }
 
+/** "Nov 11 @ 8:38pm", in the teammate's time zone. */
+function viewedLabel(ts: number, zone: string) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(ts).map((x) => [x.type, x.value]))
+  return `${p.month} ${p.day} @ ${p.hour}:${p.minute}${String(p.dayPeriod).toLowerCase()}`
+}
+
 /** The email as it arrived: the sender's plain-text version, and the raw source with every header. */
 function OriginalDialog({ thread, onClose }: { thread: Thread; onClose: () => void }) {
   const [tab, setTab] = useState<'text' | 'source'>('text')
@@ -933,6 +940,14 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   if (thread.type === 'reply' && thread.to.length > 0) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
   if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
   if (isNote) meta.push(<>Only your team sees this</>)
+  if (thread.type === 'reply' && thread.openedAt) {
+    meta.push(
+      <span className="inline-flex items-center gap-1" title={thread.openCount > 1 ? `Viewed ${thread.openCount} times` : undefined}>
+        <MailOpen className="size-3.5" aria-hidden />
+        Customer viewed on {viewedLabel(thread.openedAt, zone)}
+      </span>,
+    )
+  }
   const channel =
     thread.type === 'reply'
       ? thread.via === 'auto'

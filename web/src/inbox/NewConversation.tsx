@@ -51,7 +51,8 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
         subject: subject.trim(),
         bodyHtml: lineHtml(editorHtml(editor)),
         kind,
-        status: kind === 'reply' ? 'pending' : 'active',
+        // Sent: nothing more to do until the customer answers, which reopens it.
+        status: kind === 'reply' ? 'closed' : 'active',
         attachmentIds: uploads.ids,
         ...(chooseAssignee ? { assigneeId } : {}),
       }),

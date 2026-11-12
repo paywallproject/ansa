@@ -54,6 +54,7 @@ import { cancelImport, connectHelpScout, importStatus, resumeImport, startImport
 import { publish } from './events.ts'
 import { assertConversation, assertMailbox, assertThread, canSeeMailbox, scopeOf } from './services/access.ts'
 import { validTimezone } from './services/chat.ts'
+import { PIXEL, recordOpen, threadFromToken } from './services/opens.ts'
 import { chatOnline, chatSettingsOf, cleanChatSettings, ensureChatKey, type ChatMailbox } from './services/chat.ts'
 
 export const api = new Hono<Env>()
@@ -139,6 +140,13 @@ api.get('/avatars/:id', (c) => {
   return new Response(data as Uint8Array<ArrayBuffer>, {
     headers: { 'Content-Type': row.avatar_mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'cross-origin' },
   })
+})
+
+// Open tracking: the invisible image in a reply. Public, since the customer's mail app loads it.
+api.get('/o/:token', (c) => {
+  const threadId = threadFromToken(c.req.param('token'))
+  if (threadId) recordOpen(threadId)
+  return new Response(PIXEL as Uint8Array<ArrayBuffer>, { headers: { 'Content-Type': 'image/gif', 'Cache-Control': 'no-store, no-cache, must-revalidate, private', 'Cross-Origin-Resource-Policy': 'cross-origin' } })
 })
 
 api.post('/setup', async (c) => {
@@ -1005,6 +1013,7 @@ api.patch('/workspace', requireAdmin, async (c) => {
   const patch: Parameters<typeof saveWorkspace>[0] = {}
   if (typeof data.brandName === 'string') patch.brandName = str(data.brandName, 40)
   if (typeof data.mentions === 'boolean') patch.mentions = data.mentions
+  if (typeof data.trackOpens === 'boolean') patch.trackOpens = data.trackOpens
   if (typeof data.fourStatuses === 'boolean') {
     patch.fourStatuses = data.fourStatuses
     // Turning the extra status off folds its conversations back into "active", so none is left without a name.

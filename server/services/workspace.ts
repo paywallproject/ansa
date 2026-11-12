@@ -13,9 +13,11 @@ export interface WorkspaceSettings {
   mentions: boolean
   /** Four statuses: Active, Waiting on me, Waiting on customer, Closed. */
   fourStatuses: boolean
+  /** Add an invisible image to replies to see when the customer views them. On by default, as in Help Scout. */
+  trackOpens: boolean
 }
 
-const DEFAULTS: WorkspaceSettings = { brandName: '', logo: null, mentions: false, fourStatuses: false }
+const DEFAULTS: WorkspaceSettings = { brandName: '', logo: null, mentions: false, fourStatuses: false, trackOpens: true }
 const KEY = 'workspace'
 
 export const getWorkspace = (): WorkspaceSettings => ({ ...DEFAULTS, ...getSetting<Partial<WorkspaceSettings>>(KEY, {}) })
@@ -37,6 +39,7 @@ export function publicWorkspace() {
     logoUrl: w.logo ? `/api/brand/logo?v=${w.logo.version}` : null,
     mentions: w.mentions,
     fourStatuses: w.fourStatuses,
+    trackOpens: w.trackOpens,
   }
 }
 

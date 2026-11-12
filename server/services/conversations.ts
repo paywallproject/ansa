@@ -229,6 +229,9 @@ function serializeThread(t: any, attachments: any[]) {
     via: t.via as string,
     /** The email as it arrived is kept: "Show original" can show it. */
     hasOriginal: !!t.raw_key,
+    /** Open tracking: when the customer first viewed this reply, and how many times. */
+    openedAt: (t.opened_at as number | null) ?? null,
+    openCount: (t.open_count as number) ?? 0,
     createdAt: t.created_at as number,
     attachments: attachments.map((a) => ({
       id: a.id as number,
@@ -784,7 +787,8 @@ export function createConversation(input: CreateInput, actor: Actor): { id: numb
           bodyHtml: input.bodyHtml,
           cc,
           bcc: input.bcc,
-          status: input.status ?? 'pending',
+          // A new email needs nothing more from us until the customer answers, which reopens it.
+          status: input.status ?? 'closed',
           attachmentIds: input.attachmentIds,
           createdAt: input.createdAt,
           skipDelivery: input.skipDelivery,

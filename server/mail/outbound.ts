@@ -8,6 +8,7 @@ import { config } from '../config.ts'
 import { decrypt } from '../crypto.ts'
 import { publish } from '../events.ts'
 import { escapeHtml, htmlToText } from './html.ts'
+import { openPixel } from '../services/opens.ts'
 
 export interface SmtpSettings {
   host: string
@@ -228,6 +229,9 @@ export async function deliverThread(threadId: number): Promise<void> {
       const who = escapeHtml(previous.customer_name ? `${previous.customer_name} <${previous.customer_email}>` : previous.from_addr || '')
       html += `<br><div class="gmail_quote"><div style="color: #57606a;">On ${when}, ${who} wrote:</div><blockquote class="gmail_quote" style="margin: 8px 0 0; padding-left: 12px; border-left: 2px solid #d0d7de; color: #57606a;">${quoted}</blockquote></div>`
     }
+
+    // Open tracking: after everything else, so the image is the very last thing in the message.
+    if (thread.via !== 'auto') html += openPixel(threadId)
 
     const attachments = all<any>('SELECT * FROM attachments WHERE thread_id = ?', threadId).flatMap((a) => {
       const content = blobs.get(a.storage_key)
