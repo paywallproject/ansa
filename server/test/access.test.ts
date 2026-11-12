@@ -276,7 +276,8 @@ test('a new email can be sent later: it waits as pending, then goes out like any
   }
   const sent = conversations.getConversation(conv.id)
   assert.equal(sent.threads[0].state, 'sent')
-  assert.equal(sent.status, 'pending')
+  // Once it has gone out, a new email needs nothing more from us: it is closed until the customer answers.
+  assert.equal(sent.status, 'closed')
 })
 
 test('the conversation list can see who is viewing what, in mailboxes you can see', async () => {
@@ -296,4 +297,41 @@ test('the conversation list can see who is viewing what, in mailboxes you can se
 
   await call(adminToken, 'DELETE', `/conversations/${salesConv}/presence`)
   assert.ok(!(await call(adminToken, 'GET', '/presence')).data.presence.some((p: any) => p.conversationId === salesConv))
+})
+
+test('a new email is closed once sent', async () => {
+  const res = await call(adminToken, 'POST', '/conversations', { mailboxId: sales, customerEmail: 'now@example.com', subject: 'Hello', bodyHtml: '<p>Hi</p>', kind: 'reply' })
+  assert.equal(res.data.conversation.status, 'closed')
+})
+
+test('open tracking: a signed image marks a reply viewed, once enough time has passed', async () => {
+  const opens = await import('../services/opens.ts')
+  const { saveWorkspace } = await import('../services/workspace.ts')
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'open@example.com', subject: 'Track me', bodyHtml: '<p>Hi</p>', kind: 'reply' }, { userId: adminId, via: 'web' })
+  const token = opens.openToken(conv.threadId)
+  assert.match(opens.openPixel(conv.threadId), new RegExp(`/api/o/${token}\\.gif`))
+
+  // Right after sending, a load is a mail scanner, not a person.
+  let res = await app.request(`/api/o/${token}.gif`)
+  assert.equal(res.headers.get('content-type'), 'image/gif')
+  assert.equal(get('SELECT opened_at FROM threads WHERE id = ?', conv.threadId).opened_at, null)
+
+  const realNow = Date.now
+  Date.now = () => realNow() + 60_000
+  try {
+    await app.request(`/api/o/${token}.gif`)
+    await app.request(`/api/o/${token}.gif`)
+    // A forged token for the same reply changes nothing, and still answers with an image.
+    res = await app.request(`/api/o/${conv.threadId}.AAAAAAAAAAAAAAAAAAAAAA.gif`)
+    assert.equal(res.status, 200)
+  } finally {
+    Date.now = realNow
+  }
+  const thread = conversations.getConversation(conv.id).threads.find((t) => t.id === conv.threadId)!
+  assert.ok(thread.openedAt)
+  assert.equal(thread.openCount, 2)
+
+  saveWorkspace({ trackOpens: false })
+  assert.equal(opens.openPixel(conv.threadId), '')
+  saveWorkspace({ trackOpens: true })
 })

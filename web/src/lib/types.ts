@@ -178,6 +178,9 @@ export interface Thread {
   via: string
   /** The email as it arrived is kept, for "Show original". */
   hasOriginal: boolean
+  /** Open tracking: when the customer first viewed this reply, and how many times. */
+  openedAt: number | null
+  openCount: number
   createdAt: number
   attachments: Attachment[]
 }

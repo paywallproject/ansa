@@ -11,10 +11,12 @@ export interface Workspace {
   logoUrl: string | null
   mentions: boolean
   fourStatuses: boolean
+  /** Replies carry an invisible image that shows when the customer viewed them. */
+  trackOpens: boolean
 }
 
 const DEFAULT_NAME = 'Ansa'
-let current: Workspace = { brandName: '', logoUrl: null, mentions: false, fourStatuses: false }
+let current: Workspace = { brandName: '', logoUrl: null, mentions: false, fourStatuses: false, trackOpens: true }
 let defaultIcon: string | null = null
 let defaultTouchIcon: string | null = null
 

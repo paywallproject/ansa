@@ -346,6 +346,11 @@ const migrations: string[] = [
   -- The email as it arrived (RFC 822 source), kept in blob storage for "Show original". NULL for older mail.
   ALTER TABLE threads ADD COLUMN raw_key TEXT;
   `,
+  `
+  -- Open tracking: when the customer's mail app first showed a reply, and how often since.
+  ALTER TABLE threads ADD COLUMN opened_at INTEGER;
+  ALTER TABLE threads ADD COLUMN open_count INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export function migrate() {

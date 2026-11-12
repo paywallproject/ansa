@@ -84,7 +84,7 @@ export function WorkspaceSettings() {
 
       <Card className="p-5">
         <h2 className="text-[15px] font-semibold">Features</h2>
-        <p className="mt-0.5 text-[13px] text-fg-3">Both are off until you turn them on.</p>
+        <p className="mt-0.5 text-[13px] text-fg-3">Optional ways of working for the whole team.</p>
         <div className="mt-4 flex flex-col gap-5">
           <Switch
             checked={workspace.mentions}
@@ -99,6 +99,13 @@ export function WorkspaceSettings() {
             onChange={(fourStatuses) => save.mutate({ fourStatuses })}
             label="Four statuses"
             description="Active, Waiting on me, Waiting on customer, Closed. Without this: Active, Pending, Closed."
+          />
+          <Switch
+            checked={workspace.trackOpens}
+            disabled={save.isPending}
+            onChange={(trackOpens) => save.mutate({ trackOpens })}
+            label="Show when customers view replies"
+            description="Each reply carries a tiny invisible image. When the customer's mail app loads it, the reply shows when they viewed it. Some mail apps load images on their own (Apple Mail's privacy protection does), so a view is a good sign, not proof."
           />
           {workspace.fourStatuses ? (
             <Banner>
