@@ -30,6 +30,7 @@ import { useDebounced, useHotkeys, useMailboxes, useSession, useTheme, type Them
 import type { ConversationSummary, Customer, Folder, Mailbox } from './lib/types'
 import { Avatar, Kbd, MenuDivider, MenuItem, MenuLabel, Modal, Popover, StatusBadge, cx } from './ui'
 import { Logo } from './pages/Auth'
+import { rememberMailbox } from './lib/lastMailbox'
 import { brand, workspace } from './lib/workspace'
 import { NewConversation, type ComposePrefill } from './inbox/NewConversation'
 
@@ -307,6 +308,10 @@ export function Shell() {
   useEffect(() => setDrawer(false), [location.pathname])
   const match = useMatch('/m/:mailboxId/*')
   const current = list.find((m) => m.id === Number(match?.params.mailboxId))
+  // Remembered so the logo and the home page come back to this mailbox.
+  useEffect(() => {
+    if (current) rememberMailbox(current.id)
+  }, [current?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const actions = useMemo<ShellActions>(
     () => ({ compose: (prefill) => setCompose(prefill ?? {}), openPalette: () => setPalette(true), openShortcuts: () => setShortcuts(true) }),

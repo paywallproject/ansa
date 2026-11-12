@@ -1,3 +1,4 @@
+import { lastMailbox } from './lib/lastMailbox'
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -86,7 +87,8 @@ function Home() {
   if (mailboxes.isPending) return <Splash />
   const list = mailboxes.data ?? []
   if (list.length === 0) return <Welcome />
-  const first = list[0]
+  // Home (and the logo) open the mailbox you were last in, not always the first one.
+  const first = list.find((m) => m.id === lastMailbox()) ?? list[0]
   return <Navigate to={`/m/${first.id}/${first.counts.unassigned === 0 && first.counts.mine > 0 && user ? 'mine' : 'unassigned'}`} replace />
 }
 
