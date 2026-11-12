@@ -253,10 +253,11 @@ function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?
 }
 
 /** Folders of the mailbox that is open. Shown beside the conversation list. */
-function FolderSidebar({ mailbox, onNavigate }: { mailbox: Mailbox; onNavigate?: () => void }) {
+function FolderSidebar({ mailbox, onNavigate, drawer = false }: { mailbox: Mailbox; onNavigate?: () => void; drawer?: boolean }) {
   const shell = useShell()
+  const others = (useMailboxes().data ?? []).filter((m) => m.id !== mailbox.id)
   return (
-    <div className="flex h-full w-[212px] flex-col bg-canvas">
+    <div className={cx('flex h-full flex-col bg-canvas', drawer ? 'w-full' : 'w-[212px]')}>
       <div className="flex h-14 shrink-0 items-center gap-2 px-4">
         <h2 className="min-w-0 flex-1 truncate text-[17px] font-semibold tracking-tight">{mailbox.name}</h2>
         {mailbox.syncStatus === 'error' && (
@@ -281,6 +282,41 @@ function FolderSidebar({ mailbox, onNavigate }: { mailbox: Mailbox; onNavigate?:
             )
           })}
         </ul>
+        {/* In the phone drawer: switch mailbox, and the pages the top bar has no room for. */}
+        {drawer && others.length > 0 && (
+          <>
+            <h3 className="mt-5 mb-1 px-3 text-xs font-semibold tracking-wide text-fg-3 uppercase">Mailboxes</h3>
+            <ul className="flex flex-col gap-px">
+              {others.map((m) => (
+                <li key={m.id}>
+                  <NavLink to={`/m/${m.id}/unassigned`} onClick={onNavigate} className={() => folderItem(false)}>
+                    <span className="mx-1.5 size-2.5 shrink-0 rounded-full" style={{ background: m.color }} aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                    {m.counts.unassigned > 0 && <span className="text-xs font-semibold tabular-nums">{m.counts.unassigned}</span>}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {drawer && (
+          <ul className="mt-5 flex flex-col gap-px border-t border-line pt-3">
+            {(
+              [
+                ['/customers', 'Customers', UsersRound],
+                ['/reports', 'Reports', ChartNoAxesColumn],
+                ['/settings', 'Settings', Settings],
+              ] as const
+            ).map(([to, label, Icon]) => (
+              <li key={to}>
+                <NavLink to={to} onClick={onNavigate} className={({ isActive }) => folderItem(isActive)}>
+                  <Icon aria-hidden />
+                  <span className="flex-1">{label}</span>
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        )}
       </nav>
       <div className="shrink-0 p-1.5">
         <button
@@ -349,9 +385,11 @@ export function Shell() {
             </aside>
           )}
           {current && drawer && (
-            <div className="safe-pad animate-fade fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
-              <aside className="h-full w-[212px] border-r border-line shadow-pop" onClick={(e) => e.stopPropagation()}>
-                <FolderSidebar mailbox={current} onNavigate={() => setDrawer(false)} />
+            // The backdrop and the drawer reach every edge of the screen, the home bar included; the drawer's
+            // own padding keeps its contents clear of the clock and the home bar.
+            <div className="animate-fade fixed inset-x-0 top-0 z-30 h-[100lvh] bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
+              <aside className="safe-pad-y flex h-full w-[84vw] max-w-[320px] flex-col bg-canvas shadow-pop" onClick={(e) => e.stopPropagation()}>
+                <FolderSidebar mailbox={current} drawer onNavigate={() => setDrawer(false)} />
               </aside>
             </div>
           )}

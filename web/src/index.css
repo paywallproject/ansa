@@ -327,4 +327,12 @@
   .safe-shift {
     margin-top: env(safe-area-inset-top);
   }
+  .safe-pad-y {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* The strip behind the home bar shows the page background: match the white of the lists. */
+  body {
+    background: var(--surface);
+  }
 }
