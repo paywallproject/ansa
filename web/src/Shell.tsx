@@ -252,6 +252,91 @@ function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?
   )
 }
 
+/**
+ * The phone drawer, as in Help Scout's app: search, your inboxes, the other pages, and you at the bottom.
+ * Folders are switched from the title above the conversation list instead.
+ */
+function MobileDrawer({ current, mailboxes, onNavigate }: { current: Mailbox; mailboxes: Mailbox[]; onNavigate: () => void }) {
+  const navigate = useNavigate()
+  const shell = useShell()
+  const { user } = useSession()
+  const [query, setQuery] = useState('')
+  const go = (path: string) => {
+    onNavigate()
+    navigate(path)
+  }
+  return (
+    <div className="flex h-full w-full flex-col bg-surface">
+      <form
+        className="shrink-0 px-4 pt-4 pb-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          go(`/search${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''}`)
+        }}
+      >
+        <label className="flex h-11 items-center gap-2.5 rounded-xl bg-sunken px-3.5">
+          <Search className="size-5 shrink-0 text-fg-3" aria-hidden />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" aria-label="Search conversations" className="min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-fg-3" />
+        </label>
+      </form>
+      <nav className="min-h-0 flex-1 overflow-y-auto pb-3" aria-label="Inboxes">
+        <h3 className="px-5 pt-4 pb-1.5 text-xs font-semibold tracking-wide text-fg-3 uppercase">Inboxes</h3>
+        <ul>
+          {mailboxes.map((m) => {
+            const active = m.id === current.id
+            return (
+              <li key={m.id}>
+                <button type="button" onClick={() => go(`/m/${m.id}/unassigned`)} className={cx('flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors', active ? 'bg-accent-soft' : 'hover:bg-sunken')}>
+                  <Inbox className={cx('size-6 shrink-0', active ? 'text-accent-fg' : 'text-fg-2')} aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className={cx('block truncate text-[16px] font-semibold', active && 'text-accent-fg')}>{m.name}</span>
+                    <span className="block truncate text-[14px] text-fg-3">{m.email}</span>
+                  </span>
+                  {m.counts.unassigned > 0 && <span className="text-[13px] font-semibold tabular-nums text-fg-2">{m.counts.unassigned}</span>}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <ul className="mt-3 border-t border-line pt-3">
+          {(
+            [
+              ['/customers', 'Customers', UsersRound],
+              ['/reports', 'Reports', ChartNoAxesColumn],
+              ['/settings', 'Settings', Settings],
+            ] as const
+          ).map(([to, label, Icon]) => (
+            <li key={to}>
+              <button type="button" onClick={() => go(to)} className="flex w-full items-center gap-3.5 px-5 py-3 text-left text-[16px] font-medium text-fg-2 hover:bg-sunken">
+                <Icon className="size-6 shrink-0 text-fg-3" aria-hidden />
+                {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="flex shrink-0 items-center gap-3 border-t border-line bg-canvas px-4 py-3">
+        <button type="button" onClick={() => go('/settings/profile')} className="relative shrink-0 rounded-full" aria-label="Your profile">
+          <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} />
+          <span className={cx('absolute right-0 bottom-0 size-3 rounded-full ring-2 ring-canvas', user.chatStatus === 'online' ? 'bg-ok' : 'bg-fg-3')} aria-hidden />
+        </button>
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{user.name}</span>
+        <button
+          type="button"
+          onClick={() => {
+            onNavigate()
+            shell.compose({ mailboxId: current.id })
+          }}
+          className="flex h-10 items-center gap-2 rounded-full bg-accent px-4 text-[15px] font-medium text-white"
+        >
+          <SquarePen className="size-4" aria-hidden />
+          New
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** Folders of the mailbox that is open. Shown beside the conversation list. */
 function FolderSidebar({ mailbox, onNavigate, drawer = false }: { mailbox: Mailbox; onNavigate?: () => void; drawer?: boolean }) {
   const shell = useShell()
@@ -391,7 +476,7 @@ export function Shell() {
             // own padding keeps its contents clear of the clock and the home bar.
             <div className="animate-fade fixed inset-x-0 top-0 z-30 h-[100lvh] bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
               <aside className="safe-pad-y flex h-full w-[84vw] max-w-[320px] flex-col bg-canvas shadow-pop" onClick={(e) => e.stopPropagation()}>
-                <FolderSidebar mailbox={current} drawer onNavigate={() => setDrawer(false)} />
+                <MobileDrawer current={current} mailboxes={list} onNavigate={() => setDrawer(false)} />
               </aside>
             </div>
           )}
