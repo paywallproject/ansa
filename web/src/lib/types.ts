@@ -181,6 +181,9 @@ export interface Thread {
   /** Open tracking: when the customer first viewed this reply, and how many times. */
   openedAt: number | null
   openCount: number
+  openScans: number
+  openLastAt: number | null
+  openLastAgent: string | null
   createdAt: number
   attachments: Attachment[]
 }

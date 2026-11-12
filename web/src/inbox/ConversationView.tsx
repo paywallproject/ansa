@@ -947,6 +947,14 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         Customer viewed on {viewedLabel(thread.openedAt, zone)}
       </span>,
     )
+  } else if (thread.type === 'reply' && thread.openLastAt) {
+    // Loaded, but only by something that looked like a mail scanner. Shown so a missing view can be explained.
+    meta.push(
+      <span className="inline-flex items-center gap-1" title={thread.openLastAgent ? `Loaded by: ${thread.openLastAgent}` : undefined}>
+        <MailOpen className="size-3.5 opacity-50" aria-hidden />
+        Image loaded {viewedLabel(thread.openLastAt, zone)}, not counted
+      </span>,
+    )
   }
   const channel =
     thread.type === 'reply'

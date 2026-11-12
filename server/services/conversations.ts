@@ -232,6 +232,10 @@ function serializeThread(t: any, attachments: any[]) {
     /** Open tracking: when the customer first viewed this reply, and how many times. */
     openedAt: (t.opened_at as number | null) ?? null,
     openCount: (t.open_count as number) ?? 0,
+    /** The image was loaded but not counted (right after sending, by a scanner). With the last load, for "why no view?". */
+    openScans: (t.open_scans as number) ?? 0,
+    openLastAt: (t.open_last_at as number | null) ?? null,
+    openLastAgent: (t.open_last_agent as string | null) ?? null,
     createdAt: t.created_at as number,
     attachments: attachments.map((a) => ({
       id: a.id as number,

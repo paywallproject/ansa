@@ -355,6 +355,11 @@ const migrations: string[] = [
   -- Loads of the open-tracking image taken for a mail scanner (right after sending), counted apart.
   ALTER TABLE threads ADD COLUMN open_scans INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- The last load of the open-tracking image, counted or not: when, and what fetched it. For "why no view?".
+  ALTER TABLE threads ADD COLUMN open_last_at INTEGER;
+  ALTER TABLE threads ADD COLUMN open_last_agent TEXT;
+  `,
 ]
 
 export function migrate() {
