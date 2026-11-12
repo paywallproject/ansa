@@ -148,7 +148,8 @@ export async function testSmtp(smtp: SmtpSettings): Promise<void> {
   }
 }
 
-const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+// The same as the app shows messages in, and as Gmail shows email: what you write is what they get.
+const FONT = 'Arial, Helvetica, sans-serif'
 export const wrapEmailHtml = (inner: string) =>
   `<div style="font-family: ${FONT}; font-size: 14px; line-height: 1.55; color: #1f2328;">${inner}</div>`
 
