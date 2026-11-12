@@ -131,7 +131,7 @@ test('live chat counts only teammates who can see the mailbox', () => {
 
 test('the mailbox form knows when IMAP signs in with the SMTP login', async () => {
   const pass = encrypt('s3cret')
-  run(`UPDATE mailboxes SET smtp_user = 'support@acme.test', smtp_pass_enc = ?, imap_user = 'Support@acme.test ', imap_pass_enc = ? WHERE id = ?`, pass, encrypt('s3cret'), sales)
+  run(`UPDATE mailboxes SET smtp_user = 'support@acme.test', smtp_pass_enc = ?, imap_user = 'support@acme.test ', imap_pass_enc = ? WHERE id = ?`, pass, encrypt('s3cret'), sales)
   run(`UPDATE mailboxes SET smtp_user = 'support@acme.test', smtp_pass_enc = ?, imap_user = 'support@acme.test', imap_pass_enc = ? WHERE id = ?`, pass, encrypt('other'), billing)
   const boxes = (await call(adminToken, 'GET', '/mailboxes')).data.mailboxes
   assert.equal(boxes.find((m: any) => m.id === sales).imapSameLogin, true, 'same login, password encrypted separately')
@@ -156,4 +156,18 @@ test('MCP: an assistant sees only the mailboxes of the teammate whose token it u
   assert.deepEqual(listed.conversations.map((c: any) => c.id), [inSales])
   const boxes = JSON.parse((await tool('list_mailboxes', {})).content[0].text)
   assert.deepEqual(boxes.map((m: any) => m.name), ['Sales'])
+})
+
+test('usernames that differ only in case are different logins', async () => {
+  const pass = encrypt('s3cret')
+  run(`UPDATE mailboxes SET smtp_user = 'Support@acme.test', smtp_pass_enc = ?, imap_user = 'support@acme.test', imap_pass_enc = ? WHERE id = ?`, pass, pass, sales)
+  const boxes = (await call(adminToken, 'GET', '/mailboxes')).data.mailboxes
+  assert.equal(boxes.find((m: any) => m.id === sales).imapSameLogin, false)
+})
+
+test('a failed connection test says which username and which password it tried', async () => {
+  // Nothing listens on port 1, so the login never happens; the message must still not claim one did.
+  const res = await call(adminToken, 'POST', '/mailboxes/test', { id: sales, kind: 'imap', imapHost: '127.0.0.1', imapPort: 1, imapSecurity: 'none', imapUser: 'x@acme.test', copySmtpPassword: true })
+  assert.equal(res.data.ok, false)
+  assert.doesNotMatch(res.data.message, /Tried/)
 })

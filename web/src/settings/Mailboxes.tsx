@@ -208,7 +208,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
   })
 
   const google = preset === 'google'
-  const passwordHint = (isSet?: boolean) => (isSet ? 'Saved. Leave blank to keep the current password.' : google ? 'Paste the 16-character app password.' : undefined)
+  const passwordHint = () => (google ? 'Paste the 16-character app password.' : undefined)
 
   return (
     <form
@@ -303,9 +303,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Username">{(id) => <Input id={id} autoComplete="off" value={form.smtpUser} onChange={text('smtpUser')} placeholder={form.email || 'support@yourcompany.com'} />}</Field>
-          <Field label="Password" hint={passwordHint(mailbox?.smtpPasswordSet)}>
-            {(id) => <Input id={id} type="password" autoComplete="new-password" value={form.smtpPassword} onChange={text('smtpPassword')} />}
-          </Field>
+          <PasswordField saved={!!mailbox?.smtpPasswordSet} value={form.smtpPassword} onChange={(v) => set('smtpPassword', v)} hint={passwordHint()} />
         </div>
         <TestButton payload={() => ({ ...payload(), kind: 'smtp' })} />
       </Section>
@@ -331,9 +329,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
             {!form.sameLogin && (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Username">{(id) => <Input id={id} autoComplete="off" value={form.imapUser} onChange={text('imapUser')} />}</Field>
-                <Field label="Password" hint={passwordHint(mailbox?.imapPasswordSet)}>
-                  {(id) => <Input id={id} type="password" autoComplete="new-password" value={form.imapPassword} onChange={text('imapPassword')} />}
-                </Field>
+                <PasswordField saved={!!mailbox?.imapPasswordSet} value={form.imapPassword} onChange={(v) => set('imapPassword', v)} hint={passwordHint()} />
               </div>
             )}
             {!compact && (
@@ -559,6 +555,62 @@ function LiveChatSection({
         </>
       )}
     </Section>
+  )
+}
+
+/**
+ * A mail password. Once one is saved, there is no empty password box: browsers and password managers fill
+ * empty boxes with a saved login, which would be tested and saved as the mail password. "Change" opens one.
+ */
+function PasswordField({ saved, value, onChange, hint }: { saved: boolean; value: string; onChange: (value: string) => void; hint?: string }) {
+  const [changing, setChanging] = useState(false)
+  if (saved && !changing && !value) {
+    return (
+      <Field label="Password" hint="Saved. It is kept unless you change it.">
+        {(id) => (
+          <div className="flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-sunken pr-1 pl-3">
+            <span id={id} className="min-w-0 flex-1 truncate text-sm text-fg-2">
+              Saved password
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
+              Change
+            </Button>
+          </div>
+        )}
+      </Field>
+    )
+  }
+  return (
+    <Field label="Password" hint={saved ? 'Type the new password. Cancel keeps the saved one.' : hint}>
+      {(id) => (
+        <div className="flex items-center gap-2">
+          <Input
+            id={id}
+            type="password"
+            // Asks browsers and password managers not to fill this with a saved login.
+            autoComplete="new-password"
+            data-1p-ignore=""
+            data-lpignore="true"
+            data-bwignore=""
+            autoFocus={changing}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {saved && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                onChange('')
+                setChanging(false)
+              }}
+            >
+              Cancel
+            </Button>
+          )}
+        </div>
+      )}
+    </Field>
   )
 }
 

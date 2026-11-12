@@ -385,12 +385,13 @@ function serializeMailbox(m: MailboxRow, admin: boolean) {
 }
 
 /**
- * True when IMAP signs in with the SMTP login: same username (ignoring case and spaces) and same password,
+ * True when IMAP signs in with the SMTP login: same username and same password,
  * or no IMAP login saved yet. The form then opens with "Use the same username and password" on.
  */
 function sameLogin(m: MailboxRow): boolean {
   if (!m.imap_user && !m.imap_pass_enc) return true
-  if (m.imap_user.trim().toLowerCase() !== m.smtp_user.trim().toLowerCase()) return false
+  // Exact: some mail servers treat "Support@" and "support@" as different logins.
+  if (m.imap_user.trim() !== m.smtp_user.trim()) return false
   if (m.imap_pass_enc === m.smtp_pass_enc) return true
   try {
     return decrypt(m.imap_pass_enc) === decrypt(m.smtp_pass_enc)
@@ -517,28 +518,36 @@ api.post('/mailboxes/test', requireAdmin, async (c) => {
   const data = await body(c)
   const saved = data.id ? get<MailboxRow>('SELECT * FROM mailboxes WHERE id = ?', int(data.id)) : undefined
   const clean = cleanPassword
+  // Said with a failed login, so a wrong username or a stale password is easy to spot.
+  let tried = ''
   try {
     if (data.kind === 'imap') {
+      const typed = clean(data.imapPassword)
+      const user = str(data.imapUser, 200)
+      tried = `Tried "${user}" with ${typed ? 'the password typed here' : data.copySmtpPassword === true ? 'the saved SMTP password' : 'the saved IMAP password'}.`
       const result = await testImap({
         host: str(data.imapHost, 200),
         port: int(data.imapPort) || 993,
         security: SECURITY.includes(data.imapSecurity) ? data.imapSecurity : 'ssl',
-        user: str(data.imapUser, 200),
-        pass: clean(data.imapPassword) || decrypt(data.copySmtpPassword === true ? saved?.smtp_pass_enc : saved?.imap_pass_enc),
+        user,
+        pass: typed || decrypt(data.copySmtpPassword === true ? saved?.smtp_pass_enc : saved?.imap_pass_enc),
         folder: str(data.imapFolder, 200) || 'INBOX',
       })
       return c.json({ ok: true, message: `Connected. The folder holds ${result.messages} message${result.messages === 1 ? '' : 's'}.` })
     }
+    const typed = clean(data.smtpPassword)
+    tried = `Tried "${str(data.smtpUser, 200)}" with ${typed ? 'the password typed here' : 'the saved password'}.`
     await testSmtp({
       host: str(data.smtpHost, 200),
       port: int(data.smtpPort) || 587,
       security: SECURITY.includes(data.smtpSecurity) ? data.smtpSecurity : 'starttls',
       user: str(data.smtpUser, 200),
-      pass: clean(data.smtpPassword) || decrypt(saved?.smtp_pass_enc),
+      pass: typed || decrypt(saved?.smtp_pass_enc),
     })
     return c.json({ ok: true, message: `Connected. ${brandName()} can send mail through this server.` })
   } catch (err) {
-    return c.json({ ok: false, message: explainMailError(err) })
+    const message = explainMailError(err)
+    return c.json({ ok: false, message: /username or password|auth/i.test(message) && tried ? `${message} ${tried}` : message })
   }
 })
 
