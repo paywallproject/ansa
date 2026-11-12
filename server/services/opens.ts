@@ -40,6 +40,7 @@ export function openPixel(threadId: number): string {
 export function recordOpen(threadId: number, userAgent = '') {
   const t = get<{ conversation_id: number; created_at: number; opened_at: number | null; type: string }>('SELECT conversation_id, created_at, opened_at, type FROM threads WHERE id = ?', threadId)
   if (!t || t.type !== 'reply') return
+  run('UPDATE threads SET open_last_at = ?, open_last_agent = ? WHERE id = ?', now(), userAgent.slice(0, 200), threadId)
   if (now() - t.created_at < SCANNER_MS && !OPEN_PROXIES.test(userAgent)) {
     // Kept apart, so a reply that shows no view can still say its image was fetched.
     run('UPDATE threads SET open_scans = open_scans + 1 WHERE id = ?', threadId)
