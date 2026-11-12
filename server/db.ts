@@ -351,6 +351,10 @@ const migrations: string[] = [
   ALTER TABLE threads ADD COLUMN opened_at INTEGER;
   ALTER TABLE threads ADD COLUMN open_count INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Loads of the open-tracking image taken for a mail scanner (right after sending), counted apart.
+  ALTER TABLE threads ADD COLUMN open_scans INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export function migrate() {

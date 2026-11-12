@@ -10,8 +10,13 @@ import { config } from '../config.ts'
 import { publish } from '../events.ts'
 import { getWorkspace } from './workspace.ts'
 
-/** Mail scanners fetch images the moment a message arrives. A load this soon after sending is not a person. */
-const IGNORE_MS = 10_000
+/**
+ * Security scanners (Microsoft Defender, Mimecast…) fetch images the moment a message arrives. A load this soon
+ * after sending is taken for one, unless it comes through a webmail image proxy: Gmail and Yahoo fetch only when
+ * the person opens the email, and then keep their own copy, so ignoring that first load would lose the open.
+ */
+const SCANNER_MS = 3_000
+const OPEN_PROXIES = /GoogleImageProxy|ggpht\.com|YahooMailProxy/i
 
 const sign = (threadId: number) => crypto.createHmac('sha256', config.secret).update(`open:${threadId}`).digest('base64url').slice(0, 22)
 
@@ -32,9 +37,14 @@ export function openPixel(threadId: number): string {
 }
 
 /** The customer's mail app loaded the image. The first view is kept; later ones are counted. */
-export function recordOpen(threadId: number) {
+export function recordOpen(threadId: number, userAgent = '') {
   const t = get<{ conversation_id: number; created_at: number; opened_at: number | null; type: string }>('SELECT conversation_id, created_at, opened_at, type FROM threads WHERE id = ?', threadId)
-  if (!t || t.type !== 'reply' || now() - t.created_at < IGNORE_MS) return
+  if (!t || t.type !== 'reply') return
+  if (now() - t.created_at < SCANNER_MS && !OPEN_PROXIES.test(userAgent)) {
+    // Kept apart, so a reply that shows no view can still say its image was fetched.
+    run('UPDATE threads SET open_scans = open_scans + 1 WHERE id = ?', threadId)
+    return
+  }
   run('UPDATE threads SET opened_at = COALESCE(opened_at, ?), open_count = open_count + 1 WHERE id = ?', now(), threadId)
   if (t.opened_at === null) {
     const mailboxId = get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)?.mailbox_id

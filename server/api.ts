@@ -145,7 +145,7 @@ api.get('/avatars/:id', (c) => {
 // Open tracking: the invisible image in a reply. Public, since the customer's mail app loads it.
 api.get('/o/:token', (c) => {
   const threadId = threadFromToken(c.req.param('token'))
-  if (threadId) recordOpen(threadId)
+  if (threadId) recordOpen(threadId, c.req.header('user-agent') ?? '')
   return new Response(PIXEL as Uint8Array<ArrayBuffer>, { headers: { 'Content-Type': 'image/gif', 'Cache-Control': 'no-store, no-cache, must-revalidate, private', 'Cross-Origin-Resource-Policy': 'cross-origin' } })
 })
 
