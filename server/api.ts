@@ -17,7 +17,7 @@ import {
   type Env,
 } from './auth.ts'
 import { leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
-import { explainMailError, testSmtp, type MailboxRow } from './mail/outbound.ts'
+import { ASSIGN_AFTER_REPLY, explainMailError, testSmtp, type MailboxRow } from './mail/outbound.ts'
 import { restartMailbox, syncMailboxNow, testImap } from './mail/imap.ts'
 import { cleanHtml } from './mail/html.ts'
 import {
@@ -275,6 +275,7 @@ function serializeMailbox(m: MailboxRow, admin: boolean) {
     syncStatus: m.sync_status,
     syncError: m.sync_error,
     lastSyncAt: m.last_sync_at,
+    assignAfterReply: m.assign_after_reply,
   }
   if (!admin) return base
   return {
@@ -331,6 +332,10 @@ function applyMailboxFields(id: number, data: Record<string, any>) {
   if (typeof data.importExisting === 'boolean') set('import_existing', data.importExisting)
   if (typeof data.autoReplyEnabled === 'boolean') set('auto_reply_enabled', data.autoReplyEnabled)
   if (typeof data.autoReplyBody === 'string') set('auto_reply_body', data.autoReplyBody.slice(0, 10_000))
+  if (data.assignAfterReply !== undefined) {
+    if (!ASSIGN_AFTER_REPLY.includes(data.assignAfterReply)) throw new AppError(`assignAfterReply must be one of: ${ASSIGN_AFTER_REPLY.join(', ')}.`)
+    set('assign_after_reply', data.assignAfterReply)
+  }
 }
 
 api.get('/mailboxes', (c) => {
@@ -481,7 +486,8 @@ api.post('/conversations', async (c) => {
       bodyHtml: String(data.bodyHtml ?? ''),
       kind,
       status: data.status,
-      assigneeId: data.assigneeId === undefined ? (kind === 'reply' ? actor.userId : null) : data.assigneeId,
+      // Left out on an email, the mailbox's "after sending" setting decides.
+      assigneeId: data.assigneeId === undefined ? (kind === 'reply' ? undefined : null) : data.assigneeId === null ? null : int(data.assigneeId),
       tags: Array.isArray(data.tags) ? data.tags.map(String) : undefined,
       cc: data.cc,
       bcc: data.bcc,
@@ -552,6 +558,7 @@ api.post('/conversations/:id/reply', async (c) => {
       attachmentIds: Array.isArray(data.attachmentIds) ? data.attachmentIds.map(int) : undefined,
       sendAt: Number.isFinite(Number(data.sendAt)) && Number(data.sendAt) > 0 ? Number(data.sendAt) : undefined,
       ifNoReply: data.ifNoReply === true,
+      assigneeId: data.assigneeId === undefined ? undefined : data.assigneeId === null ? null : int(data.assigneeId),
     },
     actorOf(c),
   )

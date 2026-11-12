@@ -24,6 +24,8 @@ export interface FolderCounts {
   mentioned: number
 }
 
+export type AssignAfterReply = 'keep' | 'replier' | 'choose'
+
 export interface Mailbox {
   id: number
   name: string
@@ -35,6 +37,8 @@ export interface Mailbox {
   syncStatus: 'idle' | 'connecting' | 'ok' | 'error'
   syncError: string | null
   lastSyncAt: number | null
+  /** Who a conversation goes to after a reply: leave as is, the person replying, or picked in the composer. */
+  assignAfterReply: AssignAfterReply
   counts: FolderCounts
   // Admin-only fields
   signature?: string

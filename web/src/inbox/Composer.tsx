@@ -1,12 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, ChevronDown, Clock, Send, StickyNote, Trash2, X } from 'lucide-react'
+import { Bookmark, ChevronDown, Clock, Send, StickyNote, Trash2, UserRound, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { useLocalState, useSavedReplies, useSession, useUsers } from '../lib/hooks'
+import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
 import { STATUS_DOT, statusOptions } from '../lib/workspace'
-import { Avatar, Banner, Button, Input, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
+import { Avatar, Banner, Button, Input, MenuDivider, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
 import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, paragraphHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
 import { SendLaterDialog, whenLabel } from './SendLater'
 
@@ -59,13 +59,20 @@ export const Composer = forwardRef<
     if (conversation.draft?.bodyHtml) onOpenChange(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // With the mailbox set to "choose when sending", the reply carries who the conversation goes to.
+  // It starts on the current assignee until someone picks another.
+  const mailboxes = useMailboxes()
+  const chooseAssignee = mailboxes.data?.find((m) => m.id === conversation.mailboxId)?.assignAfterReply === 'choose'
+  const [pickedAssignee, setPickedAssignee] = useState<number | null | undefined>(undefined)
+  const sendAssignee = pickedAssignee !== undefined ? pickedAssignee : (conversation.assignee?.id ?? null)
+
   const [later, setLater] = useState(false)
   const send = useMutation({
     mutationFn: ({ status, sendAt, ifNoReply }: { status: SendStatus; sendAt?: number; ifNoReply?: boolean }) => {
       const bodyHtml = lineHtml(editorHtml(editor))
       clearTimeout(draftTimer.current)
       return mode === 'reply'
-        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply })
+        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, ...(chooseAssignee ? { assigneeId: sendAssignee } : {}) })
         : api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
     },
     onSuccess: (data, { status, sendAt }) => {
@@ -74,6 +81,7 @@ export const Composer = forwardRef<
       void client.invalidateQueries({ queryKey: ['mailboxes'] })
       editor?.commands.clearContent()
       uploads.clear()
+      setPickedAssignee(undefined)
       onTyping(false)
       toast(mode === 'note' ? 'Note added' : sendAt ? `Reply scheduled for ${whenLabel(sendAt)}` : 'Reply sent')
       // A scheduled reply changes nothing yet, so the conversation stays open in front of you.
@@ -366,6 +374,7 @@ export const Composer = forwardRef<
                       </>
                     )}
                   </Popover>
+                  {chooseAssignee && <AssignPicker assigneeId={sendAssignee} meId={me.id} users={teammates.data ?? []} onPick={setPickedAssignee} />}
                   <button
                     type="button"
                     aria-label="Send later"
@@ -396,3 +405,67 @@ export const Composer = forwardRef<
     </div>
   )
 })
+
+const NobodyIcon = ({ size = 20 }: { size?: number }) => (
+  <span className="flex shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3" style={{ width: size, height: size }}>
+    <UserRound className="size-3" aria-hidden />
+  </span>
+)
+
+/** Who the conversation is assigned to once this reply is sent. */
+function AssignPicker({ assigneeId, meId, users, onPick }: { assigneeId: number | null; meId: number; users: User[]; onPick: (id: number | null) => void }) {
+  const active = users.filter((u) => !u.disabled)
+  const current = active.find((u) => u.id === assigneeId) ?? null
+  const label = current ? (current.id === meId ? 'Me' : current.name.split(' ')[0]) : 'Unassigned'
+  return (
+    <Popover
+      align="end"
+      side="top"
+      width={230}
+      trigger={({ ref: triggerRef, ...props }) => (
+        <button
+          ref={triggerRef}
+          type="button"
+          {...props}
+          aria-label={`Assign after sending: ${current?.name ?? 'Unassigned'}`}
+          title="Assign after sending"
+          className="ml-1.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-surface pr-2 pl-1 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
+        >
+          {current ? <Avatar name={current.name} color={current.color} size={22} /> : <NobodyIcon size={22} />}
+          <span className="hidden max-w-24 truncate sm:inline">{label}</span>
+          <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          <MenuLabel>Assign after sending</MenuLabel>
+          {active.map((u) => (
+            <MenuItem
+              key={u.id}
+              icon={<Avatar name={u.name} color={u.color} size={20} />}
+              checked={assigneeId === u.id}
+              onSelect={() => {
+                onPick(u.id)
+                close()
+              }}
+            >
+              {u.name} {u.id === meId && <span className="ml-1 text-fg-3">you</span>}
+            </MenuItem>
+          ))}
+          <MenuDivider />
+          <MenuItem
+            icon={<NobodyIcon />}
+            checked={assigneeId === null}
+            onSelect={() => {
+              onPick(null)
+              close()
+            }}
+          >
+            Unassigned
+          </MenuItem>
+        </>
+      )}
+    </Popover>
+  )
+}

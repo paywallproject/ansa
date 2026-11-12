@@ -391,6 +391,18 @@ export interface ReplyInput {
   sendAt?: number
   /** With sendAt: do not send if the customer writes first. */
   ifNoReply?: boolean
+  /** Who the conversation goes to once this is sent (null: nobody). Left out, the mailbox's setting decides. */
+  assigneeId?: number | null
+}
+
+/** Who owns a conversation after a reply: an explicit choice wins, otherwise the mailbox's setting decides. */
+function assigneeAfterReply(current: number | null, mailbox: MailboxRow, input: ReplyInput, actor: Actor): number | null {
+  if (input.assigneeId !== undefined) {
+    if (input.assigneeId !== null && !get('SELECT 1 FROM users WHERE id = ? AND disabled = 0', input.assigneeId)) throw new AppError('That teammate does not exist.', 404)
+    return input.assigneeId
+  }
+  if (mailbox.assign_after_reply === 'replier' && actor.userId) return actor.userId
+  return current
 }
 
 /** What a sent reply does to its conversation: status, assignee and the timers reports use. */
@@ -430,6 +442,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
   const sendAt = input.sendAt && input.sendAt > now() + 30_000 && actor.via !== 'auto' ? input.sendAt : null
   if (sendAt && sendAt > now() + 366 * 86_400_000) throw new AppError('Choose a time within the next year.')
   let mailboxId = 0
+  const after: { assigned?: { from: number | null; to: number | null; toName: string | null } } = {}
   const threadId = tx(() => {
     const conv = get<any>('SELECT c.*, cu.email AS customer_email FROM conversations c JOIN customers cu ON cu.id = c.customer_id WHERE c.id = ?', conversationId)
     if (!conv) throw new AppError('Conversation not found.', 404)
@@ -441,7 +454,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     const last = lastMailOf(conversationId)
     const refs = refsAfter(last)
     const status: Status = input.status && STATUSES.includes(input.status) ? input.status : 'closed'
-    const assignee = conv.assignee_id ?? actor.userId
+    const assignee = actor.via === 'auto' ? conv.assignee_id : assigneeAfterReply(conv.assignee_id, mailbox, input, actor)
     const { id } = run(
       `INSERT INTO threads (conversation_id, type, user_id, body_html, body_text, from_addr, to_addrs, cc, bcc, message_id, in_reply_to, refs, state, event, via, created_at, send_at)
        VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -463,6 +476,13 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       sendAt,
     )
     attach(id, conversationId, input.attachmentIds)
+    if (assignee !== conv.assignee_id && actor.via !== 'auto') {
+      // Taking an unassigned conversation by answering it is routine; any other change is shown in the timeline.
+      const quiet = conv.assignee_id === null && assignee === actor.userId
+      const name = assignee === null ? null : (get<{ name: string }>('SELECT name FROM users WHERE id = ?', assignee)?.name ?? null)
+      if (!quiet) addEvent(conversationId, actor, { kind: 'assigned', to: assignee, toName: name }, at)
+      after.assigned = { from: conv.assignee_id, to: assignee, toName: name }
+    }
     if (sendAt) {
       // Nothing went to the customer yet, so the status and the timers stay as they are until it does.
       run('UPDATE conversations SET thread_count = thread_count + 1, assignee_id = ?, updated_at = ? WHERE id = ?', assignee, at, conversationId)
@@ -480,6 +500,11 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     reindex(conversationId)
     return id
   })
+  const { assigned } = after
+  if (assigned) {
+    emitAppEvent('conversation.assigned', conversationId, { change: { ...assigned, by: actor.via } })
+    if (assigned.to !== null && assigned.to !== actor.userId) notifyAssigned(conversationId, assigned.to, actor.userId)
+  }
   if (sendAt) {
     touch(conversationId, mailboxId, 'updated', actor)
     return threadId
@@ -524,7 +549,8 @@ function releaseScheduled(threadId: number, actor: Actor): boolean {
     )
     // The thread was counted when it was scheduled.
     run('UPDATE conversations SET thread_count = thread_count - 1 WHERE id = ?', conv.id)
-    markReplied(conv.id, { status, assignee: conv.assignee_id ?? t.user_id, cc: parseJson<string[]>(t.cc, []), text: t.body_text, at, closedBy: t.user_id })
+    // The assignee was settled when the reply was scheduled, and may have been changed by hand since.
+    markReplied(conv.id, { status, assignee: conv.assignee_id, cc: parseJson<string[]>(t.cc, []), text: t.body_text, at, closedBy: t.user_id })
     reindex(conv.id)
   })
   touch(conversationId, mailboxId, 'reply', actor)
@@ -723,7 +749,17 @@ export function createConversation(input: CreateInput, actor: Actor): { id: numb
     } else if (input.kind === 'reply') {
       threadId = addReply(
         id,
-        { bodyHtml: input.bodyHtml, cc, bcc: input.bcc, status: input.status ?? 'pending', attachmentIds: input.attachmentIds, createdAt: input.createdAt, skipDelivery: input.skipDelivery },
+        {
+          bodyHtml: input.bodyHtml,
+          cc,
+          bcc: input.bcc,
+          status: input.status ?? 'pending',
+          attachmentIds: input.attachmentIds,
+          createdAt: input.createdAt,
+          skipDelivery: input.skipDelivery,
+          // An assignee given here was set above. Without one, the mailbox's setting decides.
+          assigneeId: input.assigneeId,
+        },
         actor,
       )
     } else {

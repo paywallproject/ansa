@@ -298,6 +298,11 @@ const migrations: string[] = [
   ALTER TABLE threads ADD COLUMN send_at INTEGER;
   CREATE INDEX threads_send_at ON threads(send_at) WHERE send_at IS NOT NULL;
   `,
+  `
+  -- Who a conversation belongs to after a reply goes out: 'keep' (leave the assignee as it is),
+  -- 'replier' (the person who sent it) or 'choose' (picked in the composer at send time).
+  ALTER TABLE mailboxes ADD COLUMN assign_after_reply TEXT NOT NULL DEFAULT 'replier';
+  `,
 ]
 
 export function migrate() {

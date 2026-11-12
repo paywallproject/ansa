@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Mail, StickyNote } from 'lucide-react'
 import { api, qs } from '../lib/api'
-import { useDebounced } from '../lib/hooks'
+import { useDebounced, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Customer, Mailbox } from '../lib/types'
 import { Banner, Button, Field, Input, Modal, Select, cx } from '../ui'
 import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
@@ -32,6 +32,11 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
     enabled: term.length > 1 && !prefill.customerEmail,
   })
   const mailbox = mailboxes.find((m) => m.id === mailboxId)
+  const { user: me } = useSession()
+  const users = useUsers()
+  // With the mailbox set to "choose when sending", pick the assignee here. It starts on you.
+  const chooseAssignee = kind === 'reply' && mailbox?.assignAfterReply === 'choose'
+  const [assigneeId, setAssigneeId] = useState<number | null>(me.id)
 
   const create = useMutation({
     mutationFn: () =>
@@ -44,6 +49,7 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
         kind,
         status: kind === 'reply' ? 'pending' : 'active',
         attachmentIds: uploads.ids,
+        ...(chooseAssignee ? { assigneeId } : {}),
       }),
     onSuccess: ({ conversation }) => {
       void client.invalidateQueries({ queryKey: ['conversations'] })
@@ -110,6 +116,22 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
         </div>
         {kind === 'reply' && mailbox && !mailbox.smtpConfigured && (
           <Banner kind="warn">{mailbox.name} has no SMTP server yet, so this email will fail to send. Add one in Settings → Mailboxes.</Banner>
+        )}
+        {chooseAssignee && (
+          <Field label="Assign to">
+            {(id) => (
+              <Select id={id} value={assigneeId ?? ''} onChange={(e) => setAssigneeId(e.target.value ? Number(e.target.value) : null)}>
+                {(users.data ?? [])
+                  .filter((u) => !u.disabled)
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.id === me.id ? `${u.name} (you)` : u.name}
+                    </option>
+                  ))}
+                <option value="">Unassigned</option>
+              </Select>
+            )}
+          </Field>
         )}
         {mailboxes.length > 1 && (
           <Field label="Mailbox">

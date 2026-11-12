@@ -46,7 +46,7 @@ curl https://your-domain/api/conversations?folder=open \
 | `POST /api/conversations` | Create. Body: `mailboxId`, `customerEmail`, `subject`, `bodyHtml`, `kind` (`reply`, `customer`, `note`) |
 | `GET /api/conversations/:id` | One conversation with its thread |
 | `PATCH /api/conversations/:id` | `status`, `assigneeId`, `subject`, `addTags`, `removeTags`, `snoozedUntil`, `mailboxId` |
-| `POST /api/conversations/:id/reply` | `bodyHtml`, `status`, `cc`, `bcc`, `attachmentIds` |
+| `POST /api/conversations/:id/reply` | `bodyHtml`, `status`, `cc`, `bcc`, `attachmentIds`, `assigneeId` (a user id, or `null` for unassigned; left out, the mailbox's "after sending" setting decides) |
 | `POST /api/conversations/:id/note` | `bodyHtml` |
 | `POST /api/conversations/:id/merge` | `intoId` |
 | `GET /api/customers`, `GET/PATCH /api/customers/:id` | Customers |
