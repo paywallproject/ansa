@@ -17,6 +17,10 @@ export interface SmtpSettings {
   pass: string
 }
 
+/** Who a conversation is assigned to after a reply is sent. See the migration in db.ts. */
+export type AssignAfterReply = 'keep' | 'replier' | 'choose'
+export const ASSIGN_AFTER_REPLY: AssignAfterReply[] = ['keep', 'replier', 'choose']
+
 export interface MailboxRow {
   id: number
   name: string
@@ -45,6 +49,7 @@ export interface MailboxRow {
   auto_reply_enabled: number
   auto_reply_subject: string
   auto_reply_body: string
+  assign_after_reply: AssignAfterReply
   created_at: number
 }
 

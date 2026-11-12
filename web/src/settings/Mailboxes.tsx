@@ -6,7 +6,7 @@ import { api } from '../lib/api'
 import { brand } from '../lib/workspace'
 import { ago } from '../lib/format'
 import { useMailboxes } from '../lib/hooks'
-import type { Mailbox } from '../lib/types'
+import type { AssignAfterReply, Mailbox } from '../lib/types'
 import { Banner, Button, Card, EmptyState, Field, Input, PageHeader, Select, Spinner, Switch, Textarea, cx, useFeedback } from '../ui'
 import { RichField } from '../inbox/Editor'
 
@@ -33,7 +33,14 @@ interface FormState {
   signature: string
   autoReplyEnabled: boolean
   autoReplyBody: string
+  assignAfterReply: AssignAfterReply
 }
+
+const ASSIGN_OPTIONS: { id: AssignAfterReply; label: string; hint: string }[] = [
+  { id: 'keep', label: 'Leave it unassigned', hint: 'Sending doesn’t change the assignee. Unassigned conversations stay unassigned.' },
+  { id: 'replier', label: 'Assign to the person who replied', hint: 'Whoever sends the reply becomes the assignee.' },
+  { id: 'choose', label: 'Choose when sending', hint: 'The composer has an assignee picker next to Send. It starts on the current assignee.' },
+]
 
 const PRESETS: { id: string; label: string; smtpHost: string; smtpPort: number; smtpSecurity: Security; imapHost: string; imapPort: number }[] = [
   { id: 'google', label: 'Google Workspace or Gmail', smtpHost: 'smtp.gmail.com', smtpPort: 587, smtpSecurity: 'starttls', imapHost: 'imap.gmail.com', imapPort: 993 },
@@ -64,6 +71,7 @@ const initial = (m?: Mailbox): FormState => ({
   signature: m?.signature ?? '',
   autoReplyEnabled: m?.autoReplyEnabled ?? false,
   autoReplyBody: m?.autoReplyBody ?? '',
+  assignAfterReply: m?.assignAfterReply ?? 'replier',
 })
 
 function Section({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
@@ -280,6 +288,28 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         <>
           <Section title="Signature" description="Added under every reply from this mailbox, unless the teammate has a personal signature.">
             <RichField value={form.signature} onChange={(html) => set('signature', html)} placeholder="Best regards, the Acme team" minHeight={72} />
+          </Section>
+          <Section title="After sending a reply" description="Who the conversation is assigned to once a teammate replies.">
+            <div role="radiogroup" aria-label="Assignee after sending" className="flex flex-col gap-2">
+              {ASSIGN_OPTIONS.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.assignAfterReply === o.id}
+                  onClick={() => set('assignAfterReply', o.id)}
+                  className={cx('flex items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors', form.assignAfterReply === o.id ? 'border-accent bg-accent-soft' : 'border-line-strong hover:bg-sunken')}
+                >
+                  <span className={cx('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border', form.assignAfterReply === o.id ? 'border-accent' : 'border-line-strong')} aria-hidden>
+                    {form.assignAfterReply === o.id && <span className="size-2 rounded-full bg-accent" />}
+                  </span>
+                  <span>
+                    <span className={cx('block text-[13px] font-medium', form.assignAfterReply === o.id && 'text-accent-fg')}>{o.label}</span>
+                    <span className="block text-xs text-fg-3">{o.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </Section>
           <Section title="Auto reply" description="Send an automatic acknowledgement when a customer starts a new conversation.">
             <Switch checked={form.autoReplyEnabled} onChange={(v) => set('autoReplyEnabled', v)} label="Send an auto reply to new conversations" />

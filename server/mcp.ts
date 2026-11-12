@@ -165,18 +165,20 @@ function buildServer(user: User) {
       title: 'Send a reply to the customer',
       description:
         'Email a reply to the customer on an existing conversation. This sends real email. `body` is plain text (blank lines separate paragraphs) or simple HTML. ' +
-        'The signature is added automatically. `status` is what the conversation becomes after sending (default closed; a customer reply reopens it).',
+        'The signature is added automatically. `status` is what the conversation becomes after sending (default closed; a customer reply reopens it). ' +
+        '`assignee_id` is who it is assigned to afterwards (null: unassigned); leave it out to follow the mailbox\'s setting.',
       inputSchema: {
         id: z.number().int(),
         body: z.string().min(1),
         status: z.enum(['active', 'waiting', 'pending', 'closed']).optional(),
         cc: z.array(z.string()).optional(),
         bcc: z.array(z.string()).optional(),
+        assignee_id: z.number().int().nullable().optional(),
       },
       annotations: { destructiveHint: false, openWorldHint: true },
     },
     safe((a) => {
-      addReply(a.id, { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc }, actor)
+      addReply(a.id, { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id }, actor)
       return { sent: true, conversation: brief(getConversation(a.id)) }
     }),
   )

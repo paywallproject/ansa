@@ -502,3 +502,39 @@ test('send later: a scheduled reply waits, goes out when due, and holds back if 
   assert.deepEqual([conv.draft?.bodyHtml, conv.threadCount], ['<div>Reminder</div>', 2])
   assert.throws(() => conversations.sendScheduledNow(tc, actor), /not waiting/)
 })
+
+test('after sending: each mailbox decides who the conversation is assigned to', () => {
+  const box = run(`INSERT INTO mailboxes (name, email, created_at) VALUES ('Sales', 'sales@acme.test', 1)`).id
+  const other = run(`INSERT INTO users (name, email, password_hash, created_at) VALUES ('Other Agent', 'other@acme.test', 'x', 1)`).id
+  const actor = { userId: agentId, via: 'web' as const }
+  const mode = (m: string) => run('UPDATE mailboxes SET assign_after_reply = ? WHERE id = ?', m, box)
+  const open = (assigneeId: number | null = null) =>
+    conversations.createConversation({ mailboxId: box, customerEmail: 'assign@acme.test', subject: 'Who', bodyHtml: '<p>Hi</p>', kind: 'customer', assigneeId }, { userId: null, via: 'email' }).id
+  const reply = (id: number, extra: Partial<Parameters<typeof conversations.addReply>[1]> = {}) => {
+    conversations.addReply(id, { bodyHtml: '<p>Answer</p>', status: 'pending', skipDelivery: true, ...extra }, actor)
+    return conversations.getConversation(id)
+  }
+
+  // The default: whoever replies takes it, even from a teammate, and the timeline says so.
+  assert.equal(reply(open()).assignee?.id, agentId)
+  const taken = reply(open(other))
+  assert.equal(taken.assignee?.id, agentId)
+  assert.ok(taken.threads.some((t) => t.type === 'event' && t.event?.kind === 'assigned'))
+
+  // Leave as is: unassigned stays unassigned, an assignee stays put.
+  mode('keep')
+  assert.equal(reply(open()).assignee, null)
+  assert.equal(reply(open(other)).assignee?.id, other)
+
+  // Choose when sending: the reply names the assignee, or null for nobody. Left out, nothing changes.
+  mode('choose')
+  assert.equal(reply(open(), { assigneeId: other }).assignee?.id, other)
+  assert.equal(reply(open(agentId), { assigneeId: null }).assignee, null)
+  assert.equal(reply(open(other)).assignee?.id, other)
+  assert.throws(() => reply(open(), { assigneeId: 99999 }), /teammate/)
+
+  // A new outbound email with an assignee keeps it whatever the mailbox says.
+  mode('replier')
+  const created = conversations.createConversation({ mailboxId: box, customerEmail: 'assign@acme.test', subject: 'Out', bodyHtml: '<p>Hello</p>', kind: 'reply', assigneeId: other, skipDelivery: true }, actor)
+  assert.equal(conversations.getConversation(created.id).assignee?.id, other)
+})
