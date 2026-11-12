@@ -25,6 +25,10 @@ import {
   X,
   Clock,
   FileCode,
+  StickyNote,
+  EllipsisVertical,
+  Reply,
+  Archive,
   MailOpen,
   MessageCircle,
 } from 'lucide-react'
@@ -51,6 +55,8 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
   const [panel, setPanel] = useState(false)
   const [typing, setTyping] = useState(false)
   const [merging, setMerging] = useState(false)
+  // Phone: the sheet with status, assignee, tags and more, opened from the card at the bottom.
+  const [details, setDetails] = useState(false)
   // The composer stays closed until someone asks to write. An unsent draft reopens it.
   const [composing, setComposing] = useState(false)
   const openComposer = (mode: 'reply' | 'note') => {
@@ -180,23 +186,75 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
     return <EmptyState icon={<CircleAlert />} title="This conversation is gone" body="It may have been deleted or merged into another one." action={<Button onClick={onBack}>Back to the list</Button>} />
   }
 
+  const header = (
+    <Header
+      conversation={conversation}
+      viewers={viewers}
+      busy={update.isPending}
+      onBack={onBack}
+      onPatch={(patch) => update.mutate(patch)}
+      onStatus={setStatus}
+      onDelete={() => void remove()}
+      onMerge={() => {
+        setDetails(false)
+        setMerging(true)
+      }}
+      onTogglePanel={() => {
+        setDetails(false)
+        setPanel((open) => !open)
+      }}
+    />
+  )
+  const statusLabel = STATUS_LABEL[conversation.status]
+
   return (
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header
-          conversation={conversation}
-          viewers={viewers}
-          busy={update.isPending}
-          onBack={onBack}
-          onPatch={(patch) => update.mutate(patch)}
-          onStatus={setStatus}
-          onDelete={() => void remove()}
-          onMerge={() => setMerging(true)}
-          onTogglePanel={() => setPanel((open) => !open)}
-        />
+        {/* On a phone the email gets the screen: the header's controls live in a sheet opened from the card below. */}
+        <div className="max-md:hidden">{header}</div>
         <LightboxProvider images={images}>
           <ThreadList conversation={conversation} composing={composing} onCompose={openComposer} />
         </LightboxProvider>
+        {/* Phone: a summary card and an action bar along the bottom, as in Help Scout's app. */}
+        {!composing && (
+          <div className="shrink-0 bg-canvas md:hidden">
+            <button type="button" onClick={() => setDetails(true)} className="mx-3 mb-2 flex w-[calc(100%-1.5rem)] items-center gap-3 rounded-2xl bg-surface px-3.5 py-3 text-left shadow-[0_4px_20px_rgba(24,24,29,0.10)]">
+              <Avatar name={conversation.customer.name || conversation.customer.email} size={44} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[17px] font-semibold">{conversation.subject}</span>
+                <span className="mt-0.5 flex items-center gap-1.5 text-[14px] text-fg-3">
+                  <span className={cx('size-2 rounded-full', STATUS_DOT[conversation.status])} aria-hidden />
+                  {statusLabel}
+                  <span aria-hidden>·</span>
+                  <span className="truncate">{conversation.assignee ? conversation.assignee.name : 'Unassigned'}</span>
+                </span>
+              </span>
+            </button>
+            <nav aria-label="Conversation actions" className="flex items-center justify-around border-t border-line bg-surface px-2 pt-1.5 pb-2">
+              {(
+                [
+                  ['Back to the list', ArrowLeft, onBack],
+                  ['Close conversation', Archive, () => setStatus('closed')],
+                  ['Reply', Reply, () => openComposer('reply')],
+                  ['Add a note', StickyNote, () => openComposer('note')],
+                  ['More', EllipsisVertical, () => setDetails(true)],
+                ] as const
+              ).map(([label, Icon, run]) => (
+                <button key={label} type="button" aria-label={label} title={label} onClick={run} className="flex size-12 items-center justify-center rounded-xl text-fg-2 active:bg-sunken">
+                  <Icon className="size-6" aria-hidden />
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
+        {details && (
+          <div className="fixed inset-0 z-30 flex items-end bg-black/40 md:hidden" onClick={() => setDetails(false)}>
+            <div className="sheet-safe w-full rounded-t-2xl bg-surface pt-2 shadow-pop" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Conversation details">
+              <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line-strong" aria-hidden />
+              {header}
+            </div>
+          </div>
+        )}
         <Composer
           key={conversation.id}
           ref={composer}
@@ -708,7 +766,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
       {/* On a phone, messages are cards on a light grey background, as in Help Scout's app. */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-3 md:bg-transparent md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
-        <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-28')}>
+        <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-4 md:pb-28')}>
           {conversation.threads.map((thread, index) => {
             const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
             return (
@@ -742,7 +800,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
         </ol>
       </div>
       {!composing && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center gap-2.5">
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center gap-2.5 max-md:hidden">
           <button type="button" onClick={() => onCompose('reply')} className="pointer-events-auto flex h-11 min-w-[124px] items-center justify-center gap-2.5 rounded-[10px] bg-accent pr-3 pl-5 text-sm font-semibold text-white shadow-[0_6px_16px_-4px_rgba(34,31,92,0.45)] transition-colors hover:bg-accent-hover">
             Reply
             <kbd className="flex size-[22px] items-center justify-center rounded-md bg-white/20 font-sans text-xs font-semibold">R</kbd>

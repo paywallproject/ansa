@@ -431,6 +431,12 @@ export function Shell() {
   useEffect(() => setDrawer(false), [location.pathname])
   const match = useMatch('/m/:mailboxId/*')
   const current = list.find((m) => m.id === Number(match?.params.mailboxId))
+  // A conversation is open: on a phone it takes the whole screen, without the top bar.
+  const inConversation = !!useMatch('/m/:mailboxId/:folder/:conversationId') || !!useMatch('/search/:conversationId')
+  useEffect(() => {
+    document.documentElement.classList.toggle('reading', inConversation)
+    return () => document.documentElement.classList.remove('reading')
+  }, [inConversation])
   // Remembered so the logo and the home page come back to this mailbox.
   useEffect(() => {
     if (current) rememberMailbox(current.id)
@@ -463,7 +469,9 @@ export function Shell() {
   return (
     <ShellContext.Provider value={actions}>
       <div className="flex h-full flex-col">
-        <TopBar mailboxes={list} current={current} onMenu={current ? () => setDrawer(true) : undefined} />
+        <div className={cx(inConversation && 'max-md:hidden')}>
+          <TopBar mailboxes={list} current={current} onMenu={current ? () => setDrawer(true) : undefined} />
+        </div>
         <PullToRefresh />
         <div className="flex min-h-0 flex-1">
           {current && (
