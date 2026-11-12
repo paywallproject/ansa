@@ -142,6 +142,12 @@
   color: var(--fg);
   overflow-wrap: anywhere;
 }
+/* Easier to read on a phone. */
+@media (max-width: 767px) {
+  .prose-mail {
+    font-size: 15px;
+  }
+}
 .prose-mail > :first-child {
   margin-top: 0;
 }
