@@ -17,6 +17,7 @@ import { ImportSettings } from './Import'
 import { workspace } from '../lib/workspace'
 import { PhotoPicker } from './PhotoPicker'
 import { allZones, browserZone, validZone } from '../lib/timezone'
+import { badgeEnabled, badgeSupported, setBadgeEnabled } from '../lib/badge'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -186,6 +187,7 @@ function ProfileSettings() {
             <Switch checked={form.notifyReplies} onChange={(v) => setForm({ ...form, notifyReplies: v })} label="A customer replies to my conversation" />
             <Switch checked={form.notifyMentions} onChange={(v) => setForm({ ...form, notifyMentions: v })} label="A teammate mentions me in a note" />
           </div>
+          <AppBadgeSwitch />
           <div className="flex justify-end">
             <Button type="submit" variant="primary" loading={save.isPending}>
               Save changes
@@ -219,6 +221,35 @@ function ProfileSettings() {
           </div>
         </form>
       </Card>
+    </div>
+  )
+}
+
+/** The red count on the app icon, for this device. Saved at once, apart from the form above. */
+function AppBadgeSwitch() {
+  const { toast } = useFeedback()
+  const [on, setOn] = useState(badgeEnabled)
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="flex flex-col gap-3">
+      <h3 className="text-[13px] font-medium">On this device</h3>
+      <Switch
+        checked={on}
+        disabled={busy}
+        onChange={async (next) => {
+          setBusy(true)
+          const result = await setBadgeEnabled(next)
+          setBusy(false)
+          if (result.ok) setOn(next)
+          else toast(result.message ?? 'Could not change that.', { kind: 'error' })
+        }}
+        label="Show a count on the app icon"
+        description={
+          badgeSupported()
+            ? 'A red number on the icon: your Unassigned and Mine conversations. On an iPhone this asks to allow notifications, which the count needs. It updates while the app is open or recently used.'
+            : 'Not available in this browser. On an iPhone, add the app to your home screen and turn this on from there.'
+        }
+      />
     </div>
   )
 }
