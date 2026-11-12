@@ -53,12 +53,22 @@ export interface MailboxRow {
   created_at: number
 }
 
+/**
+ * The username a login really uses. A password with no username can never sign in, and the form shows the
+ * mailbox address as the example username, so a blank one means that address. Blank with no password stays
+ * blank: an SMTP relay that needs no login.
+ */
+export function loginUser(user: string | null | undefined, hasPassword: boolean, mailboxEmail: string): string {
+  const typed = (user ?? '').trim()
+  return typed || (hasPassword ? mailboxEmail : '')
+}
+
 export function smtpOf(mailbox: MailboxRow): SmtpSettings {
   return {
     host: mailbox.smtp_host,
     port: mailbox.smtp_port,
     security: mailbox.smtp_security,
-    user: mailbox.smtp_user,
+    user: loginUser(mailbox.smtp_user, !!mailbox.smtp_pass_enc, mailbox.email),
     pass: decrypt(mailbox.smtp_pass_enc),
   }
 }

@@ -171,3 +171,13 @@ test('a failed connection test says which username and which password it tried',
   assert.equal(res.data.ok, false)
   assert.doesNotMatch(res.data.message, /Tried/)
 })
+
+test('a blank mail username means the mailbox address once there is a password', async () => {
+  const { loginUser, smtpOf } = await import('../mail/outbound.ts')
+  assert.equal(loginUser('', true, 'support@acme.test'), 'support@acme.test')
+  assert.equal(loginUser('  ', true, 'support@acme.test'), 'support@acme.test')
+  assert.equal(loginUser('', false, 'support@acme.test'), '', 'a relay with no login stays without one')
+  assert.equal(loginUser('me@other.test', true, 'support@acme.test'), 'me@other.test')
+  run(`UPDATE mailboxes SET smtp_user = '', smtp_pass_enc = ? WHERE id = ?`, encrypt('pw'), sales)
+  assert.equal(smtpOf(get('SELECT * FROM mailboxes WHERE id = ?', sales)).user, 'sales@acme.test')
+})

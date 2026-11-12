@@ -17,7 +17,7 @@ import {
   type Env,
 } from './auth.ts'
 import { agentActive, leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
-import { ASSIGN_AFTER_REPLY, explainMailError, testSmtp, type MailboxRow } from './mail/outbound.ts'
+import { ASSIGN_AFTER_REPLY, explainMailError, loginUser, testSmtp, type MailboxRow } from './mail/outbound.ts'
 import { restartMailbox, syncMailboxNow, testImap } from './mail/imap.ts'
 import { cleanHtml } from './mail/html.ts'
 import {
@@ -523,7 +523,9 @@ api.post('/mailboxes/test', requireAdmin, async (c) => {
   try {
     if (data.kind === 'imap') {
       const typed = clean(data.imapPassword)
-      const user = str(data.imapUser, 200)
+      const mailboxEmail = str(data.email, 200) || saved?.email || ''
+      // Same fallbacks as the real connection: a blank IMAP username uses the SMTP one, then the mailbox address.
+      const user = str(data.imapUser, 200) || loginUser(str(data.smtpUser, 200), true, mailboxEmail)
       tried = `Tried "${user}" with ${typed ? 'the password typed here' : data.copySmtpPassword === true ? 'the saved SMTP password' : 'the saved IMAP password'}.`
       const result = await testImap({
         host: str(data.imapHost, 200),
@@ -536,13 +538,15 @@ api.post('/mailboxes/test', requireAdmin, async (c) => {
       return c.json({ ok: true, message: `Connected. The folder holds ${result.messages} message${result.messages === 1 ? '' : 's'}.` })
     }
     const typed = clean(data.smtpPassword)
-    tried = `Tried "${str(data.smtpUser, 200)}" with ${typed ? 'the password typed here' : 'the saved password'}.`
+    const pass = typed || decrypt(saved?.smtp_pass_enc)
+    const user = loginUser(str(data.smtpUser, 200), !!pass, str(data.email, 200) || saved?.email || '')
+    tried = `Tried "${user}" with ${typed ? 'the password typed here' : 'the saved password'}.`
     await testSmtp({
       host: str(data.smtpHost, 200),
       port: int(data.smtpPort) || 587,
       security: SECURITY.includes(data.smtpSecurity) ? data.smtpSecurity : 'starttls',
-      user: str(data.smtpUser, 200),
-      pass: typed || decrypt(saved?.smtp_pass_enc),
+      user,
+      pass,
     })
     return c.json({ ok: true, message: `Connected. ${brandName()} can send mail through this server.` })
   } catch (err) {

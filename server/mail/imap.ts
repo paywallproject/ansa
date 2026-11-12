@@ -3,7 +3,7 @@ import { all, get, run, now, getSetting, setSetting } from '../db.ts'
 import { config } from '../config.ts'
 import { decrypt } from '../crypto.ts'
 import { publish } from '../events.ts'
-import { explainMailError, type MailboxRow } from './outbound.ts'
+import { explainMailError, type MailboxRow, loginUser } from './outbound.ts'
 import { ingestRaw } from './ingest.ts'
 
 export interface ImapSettings {
@@ -83,7 +83,8 @@ class MailboxWorker {
       host: mailbox.imap_host,
       port: mailbox.imap_port,
       security: mailbox.imap_security,
-      user: mailbox.imap_user,
+      // IMAP always needs a username: a blank one falls back to the SMTP login, then to the mailbox address.
+      user: mailbox.imap_user.trim() || loginUser(mailbox.smtp_user, true, mailbox.email),
       pass: decrypt(mailbox.imap_pass_enc),
       folder: mailbox.imap_folder,
     })
