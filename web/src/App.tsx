@@ -1,5 +1,6 @@
 import { lastMailbox } from './lib/lastMailbox'
 import { useAppBadge } from './lib/badge'
+import { useVisualViewport } from './lib/viewport'
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -64,6 +65,7 @@ function Authed() {
   useHeartbeat()
   useInitialTimezone()
   useAppBadge()
+  useVisualViewport()
   return (
     <Routes>
       <Route element={<Shell />}>

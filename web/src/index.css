@@ -101,6 +101,10 @@
   #root {
     height: 100%;
   }
+  /* On touch screens the app takes the height the keyboard leaves visible (set by useVisualViewport). */
+  #root {
+    height: var(--app-height, 100%);
+  }
   body {
     /* Nothing may make the page itself scroll sideways; wide content scrolls inside its own box. */
     overflow-x: clip;
@@ -328,6 +332,10 @@
   }
   .safe-shift {
     margin-top: env(safe-area-inset-top);
+  }
+  /* With the keyboard up it covers the home bar: no bottom padding, or a gap shows above the keyboard. */
+  .keyboard-open #root {
+    padding-bottom: 0;
   }
   .safe-pad-y {
     padding-top: env(safe-area-inset-top);
