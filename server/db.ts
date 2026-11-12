@@ -342,6 +342,10 @@ const migrations: string[] = [
   -- Each teammate's time zone (IANA name), for Send later. Empty until the web app fills in the browser's.
   ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT '';
   `,
+  `
+  -- The email as it arrived (RFC 822 source), kept in blob storage for "Show original". NULL for older mail.
+  ALTER TABLE threads ADD COLUMN raw_key TEXT;
+  `,
 ]
 
 export function migrate() {

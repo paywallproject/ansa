@@ -202,3 +202,57 @@ test('each teammate keeps a time zone, and only a real one', async () => {
   assert.match(bad.data.error, /not a time zone/)
   assert.equal((await call(agentToken, 'GET', '/me')).data.user.timezone, 'America/Chicago')
 })
+
+test('show original: the email as it arrived, its plain text and headers, kept until the conversation is deleted', async () => {
+  const { ingestRaw } = await import('../mail/ingest.ts')
+  const { blobs } = await import('../blobs.ts')
+  const raw = [
+    'From: Messy Sender <messy@example.com>',
+    'To: sales@acme.test',
+    'Subject: A very messy email',
+    'Message-ID: <messy-1@example.com>',
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/alternative; boundary="b"',
+    '',
+    '--b',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    'The clean plain text version.',
+    '--b',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    '<table><tr><td><font size=1>The <b>messy</b> HTML version</font></td></tr></table>',
+    '--b--',
+    '',
+  ].join('\r\n')
+  const result = await ingestRaw(sales, raw)
+  const thread = get<{ id: number; raw_key: string; conversation_id: number }>('SELECT id, raw_key, conversation_id FROM threads WHERE message_id = ?', '<messy-1@example.com>')!
+  assert.ok(result && thread.raw_key)
+
+  const conv = (await call(adminToken, 'GET', `/conversations/${thread.conversation_id}`)).data.conversation
+  assert.equal(conv.threads[0].hasOriginal, true)
+  const original = (await call(adminToken, 'GET', `/threads/${thread.id}/original`)).data
+  assert.equal(original.available, true)
+  assert.equal(original.text, 'The clean plain text version.')
+  assert.match(original.source, /<font size=1>The <b>messy<\/b>/)
+  assert.equal(original.headers.find((h: any) => h.name === 'Subject').value, 'A very messy email')
+
+  const eml = await app.request(`/api/threads/${thread.id}/original.eml`, { headers: { Authorization: `Bearer ${adminToken}` } })
+  assert.equal(eml.headers.get('content-type'), 'message/rfc822')
+  assert.equal(await eml.text(), raw)
+
+  // Someone without the mailbox cannot read it.
+  await call(adminToken, 'PATCH', `/users/${agentId}`, { mailboxAccess: 'some', mailboxIds: [billing] })
+  assert.equal((await call(agentToken, 'GET', `/threads/${thread.id}/original`)).status, 404)
+  await call(adminToken, 'PATCH', `/users/${agentId}`, { mailboxAccess: 'some', mailboxIds: [sales] })
+
+  // Deleting the conversation removes the kept original too.
+  await call(adminToken, 'DELETE', `/conversations/${thread.conversation_id}`)
+  await new Promise((resolve) => setTimeout(resolve, 100)) // files on disk are removed in the background
+  assert.equal(blobs.get(thread.raw_key), null)
+
+  // Older mail without an original still shows its text.
+  const older = (await call(adminToken, 'GET', `/threads/${get<{ id: number }>('SELECT id FROM threads WHERE conversation_id = ?', inSales)!.id}/original`)).data
+  assert.equal(older.available, false)
+  assert.equal(typeof older.text, 'string')
+})

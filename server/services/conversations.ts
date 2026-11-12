@@ -227,6 +227,8 @@ function serializeThread(t: any, attachments: any[]) {
     error: t.error as string | null,
     event: parseJson<Record<string, any> | null>(t.event, null),
     via: t.via as string,
+    /** The email as it arrived is kept: "Show original" can show it. */
+    hasOriginal: !!t.raw_key,
     createdAt: t.created_at as number,
     attachments: attachments.map((a) => ({
       id: a.id as number,
@@ -921,7 +923,12 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
 export function deleteConversation(id: number, actor: Actor) {
   const conv = get<any>('SELECT mailbox_id FROM conversations WHERE id = ?', id)
   if (!conv) throw new AppError('Conversation not found.', 404)
-  const files = all<{ storage_key: string }>('SELECT a.storage_key FROM attachments a JOIN threads t ON t.id = a.thread_id WHERE t.conversation_id = ?', id)
+  // Attachments and kept originals: the caller removes them once the rows are gone.
+  const files = all<{ storage_key: string }>(
+    `SELECT a.storage_key FROM attachments a JOIN threads t ON t.id = a.thread_id WHERE t.conversation_id = ?1
+     UNION ALL SELECT raw_key FROM threads WHERE conversation_id = ?1 AND raw_key IS NOT NULL`,
+    id,
+  )
   tx(() => {
     run('DELETE FROM conversations WHERE id = ?', id)
     run('DELETE FROM search WHERE rowid = ?', id)
