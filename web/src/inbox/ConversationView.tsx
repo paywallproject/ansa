@@ -992,6 +992,8 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const lightbox = useLightbox()
   const zone = useZone()
   const [original, setOriginal] = useState(false)
+  // The customer's signature folds away behind "⋯", as in Help Scout.
+  const [showSignature, setShowSignature] = useState(false)
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
@@ -1000,6 +1002,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const files = thread.attachments.filter((a) => !a.inline)
   const text = useMemo(() => (folded ? stripTags(thread.bodyHtml) : ''), [folded, thread.bodyHtml])
   const html = useMemo(() => trimBlankEdges(showQuoted && quoted.data ? quoted.data : thread.bodyHtml), [showQuoted, quoted.data, thread.bodyHtml])
+  const hasSignature = html.includes('ansa-signature')
 
   // The line under the name says where the message came from or went, and how.
   const meta: ReactNode[] = []
@@ -1160,7 +1163,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
               </div>
             )}
             <div
-              className="prose-mail [&_img]:cursor-zoom-in"
+              className={cx('prose-mail [&_img]:cursor-zoom-in', hasSignature && !showSignature && 'hide-signature')}
               dangerouslySetInnerHTML={{ __html: html }}
               // A picture inside the message opens large too, unless it is a link.
               onClick={(e) => {
@@ -1168,6 +1171,18 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 if (target instanceof HTMLImageElement && !target.closest('a')) lightbox(new URL(target.src).pathname.startsWith('/api/attachments/') ? new URL(target.src).pathname : target.src, { url: target.src, filename: target.alt || 'Image' })
               }}
             />
+            {hasSignature && (
+              <button
+                type="button"
+                onClick={() => setShowSignature((on) => !on)}
+                aria-expanded={showSignature}
+                aria-label={showSignature ? 'Hide signature' : 'Show signature'}
+                title={showSignature ? 'Hide signature' : 'Show signature'}
+                className="mt-2 flex h-6 items-center rounded-md bg-sunken px-2 text-fg-3 transition-colors hover:bg-hover hover:text-fg"
+              >
+                <Ellipsis className="size-4" aria-hidden />
+              </button>
+            )}
             {thread.hasQuoted && (
               <button
                 type="button"

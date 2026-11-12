@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { blobs } from '../blobs.ts'
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
 import { get, run, getSetting, setSetting } from '../db.ts'
-import { cleanHtml, fitStored, fillTemplate, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
+import { cleanHtml, fitStored, fillTemplate, textToHtmlWithSignature, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
 import type { MailboxRow } from './outbound.ts'
 import { addCustomerMessage, addReply, createConversation } from '../services/conversations.ts'
 import { findOrCreateCustomer, isEmail, normEmail } from '../services/customers.ts'
@@ -163,9 +163,9 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
     stripped = stripHelpdeskNotification(mail.html) ?? (forward ? null : stripQuotedHtml(mail.html))
   } else {
     const text = mail.text || ''
-    full = textToHtml(text)
+    full = textToHtmlWithSignature(text)
     const head = forward ? null : stripQuotedText(text)
-    if (head) stripped = textToHtml(head)
+    if (head) stripped = textToHtmlWithSignature(head)
   }
   if (!htmlToText(full).trim() && mail.attachments.length === 0) full = '<p>(empty message)</p>'
   // Within what one database value can hold: pasted-in pictures can make an email larger than that.

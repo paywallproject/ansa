@@ -100,6 +100,18 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     },
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
+  // With conversations selected in the list, the status shortcuts act on all of them, as in an open conversation.
+  const setSelectedStatus = (status: string) => !bulk.isPending && bulk.mutate({ patch: { status } })
+  useHotkeys(
+    {
+      e: () => setSelectedStatus('closed'),
+      's c': () => setSelectedStatus('closed'),
+      's p': () => setSelectedStatus('pending'),
+      's a': () => setSelectedStatus('active'),
+    },
+    checked.size > 0 && !selectedId,
+  )
+
   // Swipe a row on a phone: close it, or take it. Undo puts it back.
   const quick = useMutation({
     mutationFn: ({ id, patch }: { id: number; patch: Record<string, unknown>; undo: Record<string, unknown>; message: string }) => api.patch(`/conversations/${id}`, patch),

@@ -162,6 +162,10 @@
     line-height: 1.6;
   }
 }
+/* A customer's signature, folded away until "⋯" is pressed. */
+.prose-mail.hide-signature .ansa-signature {
+  display: none;
+}
 .prose-mail > :first-child {
   margin-top: 0;
 }

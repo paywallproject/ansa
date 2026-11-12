@@ -5,6 +5,14 @@ const ALLOWED_TAGS = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'img', 'sub', 'sup', 'small',
 ]
 
+/** The class Ansa keeps on a customer's email signature, so the app can fold it away behind "⋯". */
+export const SIGNATURE_CLASS = 'ansa-signature'
+/**
+ * How mail apps mark a signature: Gmail (gmail_signature), Help Scout (helpscout-signature), Thunderbird
+ * (moz-signature), Outlook (id="Signature"), Yahoo and others ("signature" in a class or id).
+ */
+const SIGNATURE_MARK = /(^|[\s_-])(gmail_signature|helpscout-signature|moz-signature|signature)($|[\s_-])/i
+
 /** Clean untrusted HTML (incoming mail, editor output) down to a small, safe subset. */
 export function cleanHtml(html: string): string {
   return sanitizeHtml(html, {
@@ -16,11 +24,17 @@ export function cleanHtml(html: string): string {
       th: ['colspan', 'rowspan'],
       ol: ['start'],
     },
+    // One class survives: Ansa's own marker for a signature (set below from the mail app's marking).
+    allowedClasses: { div: [SIGNATURE_CLASS], span: [SIGNATURE_CLASS], table: [SIGNATURE_CLASS], p: [SIGNATURE_CLASS] },
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowedSchemesByTag: { img: ['http', 'https', 'cid', 'data'] },
     allowProtocolRelative: false,
     nonTextTags: ['style', 'script', 'textarea', 'option', 'noscript', 'title', 'head'],
     transformTags: {
+      div: markSignature,
+      span: markSignature,
+      table: markSignature,
+      p: markSignature,
       a: (tagName, attribs) => ({
         tagName,
         attribs: { ...attribs, target: '_blank', rel: 'noopener noreferrer nofollow' },
@@ -28,6 +42,23 @@ export function cleanHtml(html: string): string {
     },
     exclusiveFilter: (frame) => frame.tag === 'img' && /^data:(?!image\/(png|jpe?g|gif|webp))/i.test(frame.attribs.src || ''),
   }).trim()
+}
+
+function markSignature(tagName: string, attribs: Record<string, string>) {
+  // These tags keep no other attributes, so only the marker can come out.
+  const out: Record<string, string> = {}
+  if (SIGNATURE_MARK.test(attribs.class || '') || SIGNATURE_MARK.test(attribs.id || '')) out.class = SIGNATURE_CLASS
+  return { tagName, attribs: out }
+}
+
+/** A plain-text email's signature: everything after the standard "-- " line, marked like an HTML one. */
+export function textToHtmlWithSignature(text: string): string {
+  const at = text.search(/\n-- ?\r?\n/)
+  if (at < 0) return textToHtml(text)
+  const body = text.slice(0, at)
+  const signature = text.slice(at).replace(/^\n-- ?\r?\n/, '')
+  if (!signature.trim() || !body.trim()) return textToHtml(text)
+  return `${textToHtml(body)}<div class="${SIGNATURE_CLASS}">${textToHtml(signature)}</div>`
 }
 
 const TRAILING_ATTRIBUTION = /(<(div|p|span|br)[^<>]{0,300}>\s*)*(On\s[^<]{5,200}\swrote:|Le\s[^<]{5,200}\sa écrit\s?:|Am\s[^<]{5,200}\sschrieb[^<]{0,80}:)\s*(<\/?(div|p|span|br)[^<>]{0,300}>\s*)*$/i
