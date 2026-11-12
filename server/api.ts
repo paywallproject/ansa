@@ -34,6 +34,7 @@ import {
   retryDelivery,
   sendScheduledNow,
   cancelScheduled,
+  deleteNote,
   saveDraft,
   updateConversation,
   type Actor,
@@ -797,6 +798,14 @@ api.get('/threads/:id/original.eml', (c) => {
   return new Response(raw as Uint8Array<ArrayBuffer>, {
     headers: { 'Content-Type': 'message/rfc822', 'Content-Disposition': `attachment; filename="message-${id}.eml"`, 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' },
   })
+})
+
+// Delete a note: its author or an admin.
+api.delete('/threads/:id', (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  removeFiles(deleteNote(id, actorOf(c), c.get('user').role === 'admin'))
+  return c.json({ ok: true })
 })
 
 api.post('/threads/:id/retry', (c) => {
