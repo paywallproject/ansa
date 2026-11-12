@@ -334,6 +334,12 @@
     margin-top: env(safe-area-inset-top);
   }
   /* With the keyboard up it covers the home bar: no bottom padding, or a gap shows above the keyboard. */
+  /* Reading a conversation on a phone, the top bar is hidden: the strip behind the clock matches the page. */
+  @media (max-width: 767px) {
+    .reading body::before {
+      background: var(--canvas);
+    }
+  }
   .keyboard-open #root {
     padding-bottom: 0;
   }
