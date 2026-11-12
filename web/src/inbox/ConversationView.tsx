@@ -68,11 +68,32 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
   useDocumentTitle(conversation?.subject ?? '')
 
   // Tell teammates we are here, and whether we are writing a reply.
+  // Phones (an iPhone home screen app especially) freeze timers whenever the app is in the background, so the
+  // regular ping alone could leave us missing for up to 20 seconds after coming back: announce at once on return,
+  // and leave while away so teammates do not see someone who is not looking.
   useEffect(() => {
-    const ping = () => void api.post(`/conversations/${id}/presence`, { state: typing ? 'replying' : 'viewing' }).catch(() => {})
+    const ping = () => {
+      if (document.visibilityState === 'hidden') return
+      void api.post(`/conversations/${id}/presence`, { state: typing ? 'replying' : 'viewing' }).catch(() => {})
+    }
+    const leave = () => {
+      // keepalive lets the request finish while the page is being hidden or closed.
+      void fetch(`/api/conversations/${id}/presence`, { method: 'DELETE', headers: { 'X-Requested-With': 'ansa' }, credentials: 'same-origin', keepalive: true }).catch(() => {})
+    }
+    const onVisibility = () => (document.visibilityState === 'visible' ? ping() : leave())
     ping()
-    const timer = setInterval(ping, 20_000)
-    return () => clearInterval(timer)
+    const timer = setInterval(ping, 15_000)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', ping)
+    window.addEventListener('focus', ping)
+    window.addEventListener('pagehide', leave)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', ping)
+      window.removeEventListener('focus', ping)
+      window.removeEventListener('pagehide', leave)
+    }
   }, [id, typing])
   useEffect(
     () => () => {
