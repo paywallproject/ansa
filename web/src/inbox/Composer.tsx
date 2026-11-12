@@ -61,10 +61,26 @@ export const Composer = forwardRef<
   const modeRef = useRef(mode)
   modeRef.current = mode
 
-  // An unsent draft reopens the composer when the conversation loads.
-  useEffect(() => {
-    if (conversation.draft?.bodyHtml) onOpenChange(true)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // The draft as saved, mirrored into the conversation's cache so the thread's draft card shows it at once.
+  const lastSaved = useRef(conversation.draft?.bodyHtml ?? '')
+  const cacheDraft = (bodyHtml: string, kind: 'reply' | 'note') => {
+    lastSaved.current = bodyHtml
+    client.setQueryData(['conversation', conversation.id], (old: any) =>
+      old ? { ...old, conversation: { ...old.conversation, draft: bodyHtml ? { kind, bodyHtml, updatedAt: Date.now() } : null } } : old,
+    )
+    void client.invalidateQueries({ queryKey: ['conversations'] })
+  }
+  const saveNow = (html: string, kind: 'reply' | 'note') => {
+    clearTimeout(draftTimer.current)
+    setSaveState(html ? 'saving' : 'idle')
+    return api
+      .put(`/conversations/${conversation.id}/draft`, { kind, bodyHtml: html })
+      .then(() => {
+        setSaveState(html ? 'saved' : 'idle')
+        cacheDraft(html, kind)
+      })
+      .catch(() => setSaveState('idle'))
+  }
 
   // With the mailbox set to "choose when sending", the reply carries who the conversation goes to.
   // It starts on the current assignee until someone picks another.
@@ -88,6 +104,7 @@ export const Composer = forwardRef<
       void client.invalidateQueries({ queryKey: ['mailboxes'] })
       editor?.commands.clearContent()
       setSaveState('idle')
+      lastSaved.current = ''
       uploads.clear()
       setPickedAssignee(undefined)
       onTyping(false)
@@ -150,38 +167,49 @@ export const Composer = forwardRef<
     content: paragraphHtml(conversation.draft?.bodyHtml ?? ''),
     placeholder: mode === 'reply' ? `Reply to ${customerName}` : 'Write a note for your team. Type @ to mention a teammate',
     onSubmit: () => submitRef.current(),
-    onKeyDown: (event) => mentionKey(event),
+    onKeyDown: (event) => {
+      if (mentionKey(event)) return true
+      // Esc saves the draft and closes the reply box, as in Help Scout.
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        saveAndCloseRef.current()
+        return true
+      }
+      return false
+    },
     onCaret: (ed) => trackMention(ed),
     onChange: (html) => {
       onTyping(!!html && modeRef.current === 'reply')
       clearTimeout(draftTimer.current)
       setSaveState(html ? 'saving' : 'idle')
-      draftTimer.current = setTimeout(() => {
-        api
-          .put(`/conversations/${conversation.id}/draft`, { kind: modeRef.current, bodyHtml: html })
-          .then(() => {
-            setSaveState(html ? 'saved' : 'idle')
-            if (html) void client.invalidateQueries({ queryKey: ['conversations'] })
-          })
-          .catch(() => setSaveState('idle'))
-      }, 700)
+      draftTimer.current = setTimeout(() => void saveNow(html, modeRef.current), 700)
     },
   })
   useEffect(() => () => clearTimeout(draftTimer.current), [])
 
-  // A draft that appears while the editor is empty came from a scheduled reply someone took back: show it.
+  // A draft changed somewhere else (an assistant's draft_reply, a reply taken back from Send later, Discard on
+  // the draft card): load it, unless the reply box is open with text in it, which is never overwritten.
   const draftHtml = conversation.draft?.bodyHtml ?? ''
-  const hadDraft = useRef(!!draftHtml)
   useEffect(() => {
-    if (draftHtml && !hadDraft.current && editor?.isEmpty) {
-      // A reply taken back from Send later, or one an assistant drafted (MCP draft_reply): a note stays a note.
-      setMode(conversation.draft?.kind ?? 'reply')
-      editor.commands.setContent(paragraphHtml(draftHtml))
-      setSaveState('saved')
-      onOpenChange(true)
-    }
-    hadDraft.current = !!draftHtml
+    if (!editor || draftHtml === lastSaved.current) return
+    lastSaved.current = draftHtml
+    if (open && !editor.isEmpty) return
+    setMode(conversation.draft?.kind ?? 'reply')
+    editor.commands.setContent(paragraphHtml(draftHtml), { emitUpdate: false })
+    setSaveState(draftHtml ? 'saved' : 'idle')
   }, [draftHtml, editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Save the draft and close the reply box. The draft then shows in the conversation, with Edit to reopen it. */
+  const saveAndClose = () => {
+    const html = editorHtml(editor)
+    onOpenChange(false)
+    onTyping(false)
+    if (!html) return
+    void saveNow(html, mode)
+    toast('Draft saved')
+  }
+  const saveAndCloseRef = useRef(saveAndClose)
+  saveAndCloseRef.current = saveAndClose
 
   useImperativeHandle(ref, () => ({
     focus: (next) => {
@@ -199,7 +227,7 @@ export const Composer = forwardRef<
     setSaveState('idle')
     uploads.clear()
     onTyping(false)
-    void api.put(`/conversations/${conversation.id}/draft`, { kind: mode, bodyHtml: '' }).catch(() => {})
+    void saveNow('', mode)
     onOpenChange(false)
   }
 
@@ -304,7 +332,7 @@ export const Composer = forwardRef<
       <div className={cx('sheet-safe fixed inset-x-0 top-0 z-40 flex flex-col', isNote ? 'bg-note' : 'bg-surface', !open && 'hidden')} style={{ height: 'var(--app-height, 100dvh)' }} role="dialog" aria-label={isNote ? 'Note' : 'Reply'}>
         {mentionList}
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-2">
-          <button type="button" aria-label="Close. Your draft is kept." onClick={() => onOpenChange(false)} className="flex size-11 items-center justify-center rounded-full text-fg-2">
+          <button type="button" aria-label="Close. Your draft is kept." onClick={saveAndClose} className="flex size-11 items-center justify-center rounded-full text-fg-2">
             <X className="size-6" aria-hidden />
           </button>
           <h2 className="flex-1 text-center text-[17px] font-semibold">{isNote ? 'Note' : 'Reply'}</h2>
@@ -499,7 +527,9 @@ export const Composer = forwardRef<
             </EditorToolbar>
 
             <div className="ml-auto flex items-center">
-              <span aria-live="polite" className="mr-1 text-xs text-fg-3">{saveState === 'saved' ? 'Draft saved' : saveState === 'saving' ? 'Saving…' : ''}</span>
+              <button type="button" onClick={saveAndClose} title="Save the draft and close (Esc)" className="mr-1 h-8 rounded-md px-2 text-[13px] font-medium text-fg-2 transition-colors hover:bg-black/5 hover:text-fg dark:hover:bg-white/10">
+                {saveState === 'saving' ? 'Saving…' : 'Save draft'}
+              </button>
               <button type="button" aria-label="Discard draft" title="Discard draft" onClick={discard} className={tool}>
                 <Trash2 className="size-4" aria-hidden />
               </button>
