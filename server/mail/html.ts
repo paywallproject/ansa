@@ -207,3 +207,16 @@ export function previewOf(text: string, length = 180): string {
 export function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{\s*([a-zA-Z.]+)\s*\}\}/g, (_m, key: string) => vars[key] ?? '')
 }
+
+/**
+ * Keep a message within what one database value can hold. Cloudflare's SQLite stops at 2 MB per value
+ * (SQLITE_TOOBIG), and an email with pictures pasted into its HTML can be larger. Embedded images go first,
+ * replaced by a note; anything still too long is cut, with a note. Under the limit, nothing changes.
+ */
+export const MAX_STORED_CHARS = 1_000_000
+export function fitStored(html: string, max = MAX_STORED_CHARS): string {
+  if (html.length <= max) return html
+  let out = html.replace(/<img\b[^>]*\bsrc\s*=\s*["']?data:[^"'>\s]*["']?[^>]*>/gi, '<em>[image removed: too large to keep]</em>')
+  if (out.length > max) out = `${out.slice(0, max)}<p><em>[The rest of this message was too long to keep.]</em></p>`
+  return out
+}
