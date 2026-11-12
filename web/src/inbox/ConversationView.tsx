@@ -1125,8 +1125,10 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
           thread.state === 'failed' && 'ring-1 ring-danger/50',
         )}
       >
-        {/* A bar down the left edge marks what the team wrote. */}
-        {!isCustomer && <span className={cx('absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
+        {/* A thin line down the left marks what the team wrote, as in Help Scout: from the name to the end of the
+            message, not the "opened" line under it. It sits 6-10px in from the card's edge. */}
+        <div className="relative">
+        {!isCustomer && <span className={cx('absolute top-0 bottom-0 -left-2.5 w-0.5 rounded-full md:-left-[38px] lg:-left-[70px]', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
         <header>
           <div className="flex items-center gap-3 md:gap-2.5">
             <Avatar name={name} color={color} src={photo} size={36} className="md:hidden" />
@@ -1274,9 +1276,10 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 ))}
               </ul>
             )}
-            {viewed}
           </div>
         )}
+        </div>
+        {!folded && viewed}
       </article>
     </li>
   )
