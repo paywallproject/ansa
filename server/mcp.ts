@@ -12,12 +12,14 @@ import {
   folderCounts,
   getConversation,
   listConversations,
+  saveDraft,
   updateConversation,
   type Actor,
   type ConversationSummary,
 } from './services/conversations.ts'
 import { getCustomer, listCustomers, updateCustomer } from './services/customers.ts'
 import { buildReport } from './services/reports.ts'
+import { publish } from './events.ts'
 import { assertConversation, assertMailbox, canSeeMailbox, scopeOf } from './services/access.ts'
 
 const iso = (ts: number | null | undefined) => (ts ? new Date(ts).toISOString() : null)
@@ -41,8 +43,8 @@ const brief = (c: ConversationSummary) => ({
   url: `${config.appUrl}/c/${c.id}`,
 })
 
-function detail(id: number, mailboxIds: number[] | null) {
-  const c = getConversation(id, { mailboxIds })
+function detail(id: number, mailboxIds: number[] | null, userId: number) {
+  const c = getConversation(id, { mailboxIds, userId })
   return {
     ...brief(c),
     customer: {
@@ -68,6 +70,8 @@ function detail(id: number, mailboxIds: number[] | null) {
           },
     ),
     other_conversations_from_customer: c.previousConversations.map((p) => ({ id: p.id, subject: p.subject, status: p.status })),
+    // Your unsent draft on this conversation (from the web app or draft_reply), if any.
+    your_draft: c.draft ? { kind: c.draft.kind, text: htmlToText(c.draft.bodyHtml) } : null,
   }
 }
 
@@ -100,7 +104,9 @@ function buildServer(user: User) {
         `Ansa is a shared inbox for customer support. You act as ${user.name} (${user.email}). ` +
         'A conversation is one email thread with a customer. Its status is active (needs a reply), pending (waiting on the customer), closed or spam. ' +
         'reply_to_conversation sends a real email to the customer, so draft carefully and confirm with the user before sending unless told otherwise. ' +
-        'add_note is internal and safe: customers never see notes.',
+        'add_note is internal and safe: customers never see notes. ' +
+        'draft_reply is also safe: it writes a reply into the user\'s own draft for them to review and send from Ansa, and sends nothing. ' +
+        'Prefer it when the user wants to check a reply first.',
     },
   )
 
@@ -164,7 +170,7 @@ function buildServer(user: User) {
       inputSchema: { id: z.number().int() },
       annotations: { readOnlyHint: true },
     },
-    safe((a) => detail(mine(a.id), scope)),
+    safe((a) => detail(mine(a.id), scope, user.id)),
   )
 
   server.registerTool(
@@ -188,6 +194,31 @@ function buildServer(user: User) {
     safe((a) => {
       addReply(mine(a.id), { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id }, actor)
       return { sent: true, conversation: brief(getConversation(a.id)) }
+    }),
+  )
+
+  server.registerTool(
+    'draft_reply',
+    {
+      title: 'Draft a reply for review',
+      description:
+        "Write a reply into the user's draft on a conversation, without sending anything. When they open the conversation in Ansa, " +
+        'the reply box opens with this text, ready to edit and send. It replaces any draft they already had there (get_conversation shows it as your_draft). ' +
+        '`body` is plain text (blank lines separate paragraphs) or simple HTML; the signature is added when it is sent. `kind` "note" drafts an internal note instead.',
+      inputSchema: {
+        id: z.number().int(),
+        body: z.string().min(1),
+        kind: z.enum(['reply', 'note']).optional().describe('Default reply'),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true },
+    },
+    safe((a) => {
+      const id = mine(a.id)
+      saveDraft(id, user.id, a.kind ?? 'reply', toHtml(a.body))
+      // An open conversation shows the draft at once (its reply box picks up a draft that appears while empty).
+      const c = getConversation(id)
+      publish({ type: 'conversation', id, mailboxId: c.mailboxId, reason: 'draft', actorId: user.id })
+      return { drafted: true, kind: a.kind ?? 'reply', url: c.url, note: 'Nothing was sent. The user can review and send it from Ansa.' }
     }),
   )
 
