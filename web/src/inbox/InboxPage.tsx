@@ -1,14 +1,14 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, SquareCheckBig, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
 import { canSee } from '../lib/access'
 import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers, useViewers } from '../lib/hooks'
 import type { ConversationSummary, Folder, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback, MenuDivider, MenuLabel } from '../ui'
-import { FOLDERS } from '../Shell'
+import { FOLDERS, visibleFolders } from '../Shell'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { ConversationView } from './ConversationView'
 import { SwipeRow } from './SwipeRow'
@@ -43,6 +43,8 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const selectedId = Number(params.conversationId) || null
   const q = searchParams.get('q') ?? ''
   const [draftQuery, setDraftQuery] = useState(q)
+  // On a phone the checkboxes hide until you choose Select, as in Help Scout's app.
+  const [selecting, setSelecting] = useState(false)
   const debouncedQuery = useDebounced(draftQuery, 300)
   const [sort, setSort] = useLocalState<Sort>('ansa-sort', 'recent')
   const [checked, setChecked] = useState<Set<number>>(new Set())
@@ -243,9 +245,53 @@ export function InboxPage({ search = false }: { search?: boolean }) {
               <Input autoFocus aria-label="Search conversations" placeholder="Search conversations" className="h-9 pl-8" value={draftQuery} onChange={(e) => setDraftQuery(e.target.value)} />
             </div>
           ) : (
-            <h1 className="min-w-0 truncate text-[15px] font-semibold">{folderInfo?.label ?? 'All conversations'}</h1>
+            <>
+              <h1 className="min-w-0 truncate text-[15px] font-semibold max-md:hidden">{folderInfo?.label ?? 'All conversations'}</h1>
+              {/* On a phone: the folder, its count and a switcher, centred, as in Help Scout's app. */}
+              {mailbox && (
+                <div className="flex min-w-0 flex-1 justify-center pl-8 md:hidden">
+                  <Popover
+                    align="start"
+                    width={240}
+                    trigger={({ ref, ...props }) => (
+                      <button ref={ref} type="button" {...props} className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[17px] font-semibold">
+                        <span className="truncate">{folderInfo?.label ?? 'All conversations'}</span>
+                        {folderInfo?.countKey && mailbox.counts[folderInfo.countKey] > 0 && <span className="font-normal text-fg-3 tabular-nums">({mailbox.counts[folderInfo.countKey]})</span>}
+                        <ChevronDown className="size-4 shrink-0 text-fg-3" aria-hidden />
+                      </button>
+                    )}
+                  >
+                    {(close) =>
+                      visibleFolders().map((f) => {
+                        const count = f.countKey ? mailbox.counts[f.countKey] : 0
+                        return (
+                          <MenuItem
+                            key={f.id}
+                            icon={<f.icon />}
+                            checked={f.id === folder}
+                            hint={count > 0 && f.id !== 'spam' ? <span className="text-xs font-semibold tabular-nums">{count}</span> : undefined}
+                            onSelect={() => {
+                              close()
+                              navigate(`/m/${mailbox.id}/${f.id}`)
+                            }}
+                          >
+                            {f.label}
+                          </MenuItem>
+                        )
+                      })
+                    }
+                  </Popover>
+                </div>
+              )}
+            </>
           )}
-          <span className="flex-1" />
+          <span className="flex-1 max-md:hidden" />
+          <IconButton label={selecting ? 'Done selecting' : 'Select conversations'} size="sm" active={selecting} onClick={() => {
+              if (selecting) setChecked(new Set())
+              setSelecting(!selecting)
+            }} className="md:hidden">
+            <SquareCheckBig className="size-4" />
+          </IconButton>
           <Popover
             align="end"
             trigger={({ ref, ...props }) => (
@@ -330,6 +376,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
                     checked={checked.has(c.id)}
                     onCheck={() => toggle(c.id)}
                     showMailbox={search}
+                    selecting={selecting || checked.size > 0}
                     folder={search ? null : folder}
                     onSwipeClose={c.status === 'closed' ? undefined : () => swipeClose(c)}
                     onSwipeAssign={canSee(user, c.mailboxId) ? () => swipeAssign(c) : undefined}
@@ -403,6 +450,7 @@ function Row({
   folder,
   onSwipeClose,
   onSwipeAssign,
+  selecting,
 }: {
   conversation: ConversationSummary
   to: string
@@ -412,6 +460,8 @@ function Row({
   folder: Folder | null
   onSwipeClose?: () => void
   onSwipeAssign?: () => void
+  /** On a phone, checkboxes show only in select mode; otherwise the customer's avatar takes their place. */
+  selecting: boolean
 }) {
   const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
   // Waiting on the customer: shown quieter, so the conversations that need us stand out.
@@ -430,9 +480,14 @@ function Row({
       end={onSwipeClose && { label: 'Close', icon: <Archive className="size-5" />, tone: 'bg-ok', onCommit: onSwipeClose }}
       start={onSwipeAssign && { label: c.assignee?.id === me.id ? 'Unassign' : 'Assign to me', icon: <UserRoundCheck className="size-5" />, tone: 'bg-accent', onCommit: onSwipeAssign }}
     >
-      <div className="flex w-10 shrink-0 justify-center pt-4 md:w-12 md:items-center md:pt-0">
+      <div className={cx('w-10 shrink-0 justify-center pt-4 md:flex md:w-12 md:items-center md:pt-0', selecting ? 'flex' : 'hidden')}>
         <CheckBox checked={checked} label={`Select conversation: ${c.subject}`} onClick={onCheck} />
       </div>
+      {!selecting && (
+        <Link to={to} tabIndex={-1} aria-hidden className="shrink-0 pt-3.5 pr-3 pl-4 md:hidden">
+          <Avatar name={c.customer.name || c.customer.email} size={44} />
+        </Link>
+      )}
       <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-3.5 pr-4 outline-offset-[-2px] md:py-2.5 md:pr-5')}>
         <span className={cx('truncate text-[15px] md:text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
@@ -450,7 +505,7 @@ function Row({
             ))}
             {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 md:inline">+{c.tags.length - 3}</span>}
           </span>
-          <span className={cx('mt-0.5 block truncate text-sm md:text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 md:truncate md:text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
           {/* On a phone, tags get a line of their own, under the preview. */}
           {c.tags.length > 0 && (
             <span className="mt-1.5 flex flex-wrap gap-1 md:hidden">
