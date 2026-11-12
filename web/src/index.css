@@ -136,6 +136,8 @@
 
 /* Rendered email and note bodies, and the editor's content. */
 .prose-mail {
+  /* Messages, read and written, look as Gmail shows them: Arial. Outgoing email uses the same. */
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 14px;
   line-height: 1.6;
   color: var(--fg);
