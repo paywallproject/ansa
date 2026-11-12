@@ -179,5 +179,17 @@ test('a blank mail username means the mailbox address once there is a password',
   assert.equal(loginUser('', false, 'support@acme.test'), '', 'a relay with no login stays without one')
   assert.equal(loginUser('me@other.test', true, 'support@acme.test'), 'me@other.test')
   run(`UPDATE mailboxes SET smtp_user = '', smtp_pass_enc = ? WHERE id = ?`, encrypt('pw'), sales)
-  assert.equal(smtpOf(get('SELECT * FROM mailboxes WHERE id = ?', sales)).user, 'sales@acme.test')
+  assert.equal(smtpOf(get('SELECT * FROM mailboxes WHERE id = ?', sales)!).user, 'sales@acme.test')
+})
+
+test('pending conversations sink below the ones waiting on us, whatever the sort', async () => {
+  const system = { userId: null, via: 'email' as const }
+  const older = conversations.createConversation({ mailboxId: sales, customerEmail: 'a@example.com', subject: 'Older, active', bodyHtml: '<p>1</p>', kind: 'customer', createdAt: 1_000 }, system).id
+  const newer = conversations.createConversation({ mailboxId: sales, customerEmail: 'b@example.com', subject: 'Newer, pending', bodyHtml: '<p>2</p>', kind: 'customer' }, system).id
+  conversations.updateConversation(newer, { status: 'pending' }, { userId: adminId, via: 'web' })
+  for (const sort of ['recent', 'oldest', 'waiting'] as const) {
+    const ids = conversations.listConversations({ mailboxId: sales, folder: 'open', sort }).items.map((c) => c.id)
+    assert.ok(ids.indexOf(older) < ids.indexOf(newer), `${sort}: ${ids}`)
+    assert.equal(ids[ids.length - 1], newer, sort)
+  }
 })
