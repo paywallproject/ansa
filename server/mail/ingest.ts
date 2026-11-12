@@ -71,6 +71,10 @@ function teammateReply(mailbox: MailboxRow, mail: ParsedMail, ref: { conversatio
   }
 }
 
+/** Help Scout's marker in its outgoing emails: {#HS:<thread id>-<conversation number>#}. */
+const HS_MARKER_ONE = /\{#HS:\d+-(\d+)#\}/
+const HS_MARKER_ALL = /\{#HS:\d+-\d+#\}/g
+
 /** Keep at most this much of a message's source. Larger mail is mostly attachments, which are stored anyway. */
 export const ORIGINAL_MAX_BYTES = 1024 * 1024
 
@@ -126,6 +130,22 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
       break
     }
   }
+  // A reply to an email sent from Help Scout before the move: its headers name a message Ansa never saw, but
+  // Help Scout put {#HS:<thread>-<conversation number>#} in the text, and the import kept those numbers.
+  // Only the conversation's own customer can be filed into it this way.
+  if (conversationId === null) {
+    const marker = HS_MARKER_ONE.exec(`${mail.html || ''}\n${mail.text || ''}`)
+    const hit = marker
+      ? get<{ conversation_id: number }>(
+          `SELECT m.conversation_id FROM import_map m JOIN conversations c ON c.id = m.conversation_id
+           JOIN customer_emails e ON e.customer_id = c.customer_id
+           WHERE m.source = 'helpscout' AND m.external_number = ? AND e.email = ? LIMIT 1`,
+          Number(marker[1]),
+          from,
+        )
+      : undefined
+    if (hit) conversationId = hit.conversation_id
+  }
   // A teammate answered a notification email: send their words to the customer as a reply.
   for (const id of candidates) {
     const ref = parseNotificationRef(id)
@@ -135,19 +155,23 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
 
   let full: string
   let stripped: string | null = null
+  // Quoted history ("On … wrote:") folds away behind "Show quoted text", in new conversations too, as Help Scout
+  // does. A forward keeps everything in view: there the quoted part is the message.
+  const forward = created && (/^\s*(fwd?|fw)\s*:/i.test(mail.subject || '') || /-{4,}\s*Forwarded message|Begin forwarded message:/i.test(mail.text || ''))
   if (mail.html) {
     full = cleanHtml(mail.html)
-    stripped = stripHelpdeskNotification(mail.html) ?? (created ? null : stripQuotedHtml(mail.html))
+    stripped = stripHelpdeskNotification(mail.html) ?? (forward ? null : stripQuotedHtml(mail.html))
   } else {
     const text = mail.text || ''
     full = textToHtml(text)
-    const head = created ? null : stripQuotedText(text)
+    const head = forward ? null : stripQuotedText(text)
     if (head) stripped = textToHtml(head)
   }
   if (!htmlToText(full).trim() && mail.attachments.length === 0) full = '<p>(empty message)</p>'
   // Within what one database value can hold: pasted-in pictures can make an email larger than that.
-  let bodyHtml = fitStored(stripped ?? full)
-  let bodyFullHtml = stripped ? fitStored(full) : null
+  // Help Scout's {#HS:…#} markers are bookkeeping, not words for anyone to read.
+  let bodyHtml = fitStored((stripped ?? full).replace(HS_MARKER_ALL, ''))
+  let bodyFullHtml = stripped ? fitStored(full.replace(HS_MARKER_ALL, '')) : null
 
   const customer = findOrCreateCustomer(from, sender.name)
   const to = addresses(mail.to)
