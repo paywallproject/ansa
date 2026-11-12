@@ -17,11 +17,21 @@ export function useVisualViewport() {
     const onRotate = () => {
       full = 0
     }
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true
     const update = () => {
       full = Math.max(full, vv.height)
-      root.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
+      const keyboard = full - vv.height > 120
+      let height = vv.height
+      // A home screen app on newer iOS reports a screen shorter than it is, by the strip behind the clock, so
+      // the app stopped short and left a blank band above the home bar. Without the keyboard, use the real
+      // screen height when the shortfall is that strip (under 100px), not anything bigger.
+      if (standalone && !keyboard) {
+        const screenHeight = window.innerWidth < window.innerHeight ? screen.height : screen.width
+        if (screenHeight > height && screenHeight - height < 100) height = screenHeight
+      }
+      root.style.setProperty('--app-height', `${Math.round(height)}px`)
       // The keyboard covers the home bar, so the bottom safe-area padding is not needed while it is up.
-      root.classList.toggle('keyboard-open', full - vv.height > 120)
+      root.classList.toggle('keyboard-open', keyboard)
       if (window.scrollY !== 0) window.scrollTo(0, 0)
     }
     update()

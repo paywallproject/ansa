@@ -343,6 +343,11 @@
       background: var(--surface);
     }
   }
+  /* The app may be sized to the real screen, a little taller than iOS reports: the page itself never scrolls. */
+  html,
+  body {
+    overflow: hidden;
+  }
   .keyboard-open #root {
     padding-bottom: 0;
   }
