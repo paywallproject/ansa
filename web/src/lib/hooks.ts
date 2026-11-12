@@ -39,6 +39,20 @@ export function useLiveEvents() {
         void client.invalidateQueries({ queryKey: ['mailboxes'] })
       }, 150)
     }
+    // Who is viewing what, for the conversation list. Events keep it current after this.
+    const loadPresence = async () => {
+      try {
+        const { presence } = await api.get<{ presence: { conversationId: number; viewers: Viewer[] }[] }>('/presence')
+        const now = new Map(presence.map((p) => [p.conversationId, p.viewers]))
+        // Clear what we knew from before the connection dropped; viewers may have left meanwhile.
+        for (const [key] of client.getQueriesData<Viewer[]>({ queryKey: ['presence'] })) {
+          if (!now.has(key[1] as number)) client.setQueryData(key, [])
+        }
+        for (const [id, viewers] of now) client.setQueryData(['presence', id], viewers)
+      } catch {
+        /* the next event fills it in */
+      }
+    }
     const connect = () => {
       if (closed || source || document.visibilityState === 'hidden') return
       source = new EventSource('/api/events')
@@ -71,6 +85,7 @@ export function useLiveEvents() {
           void client.invalidateQueries({ queryKey: ['conversation', event.conversationId] })
         } else if (event.type === 'hello') {
           refreshLists()
+          void loadPresence()
         }
       }
       source.onerror = () => {
@@ -134,6 +149,12 @@ export function useInitialTimezone() {
     }
     void api.patch('/me', { timezone: zone }).then(refresh, () => {})
   }, [user.timezone]) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** Teammates viewing or replying to a conversation right now, kept live by useLiveEvents. Excludes you. */
+export function useViewers(conversationId: number, meId: number): Viewer[] {
+  const query = useQuery<Viewer[]>({ queryKey: ['presence', conversationId], queryFn: () => [], enabled: false, staleTime: Infinity })
+  return (query.data ?? []).filter((v) => v.userId !== meId)
 }
 
 const isTyping = (target: EventTarget | null) => {

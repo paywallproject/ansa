@@ -278,3 +278,22 @@ test('a new email can be sent later: it waits as pending, then goes out like any
   assert.equal(sent.threads[0].state, 'sent')
   assert.equal(sent.status, 'pending')
 })
+
+test('the conversation list can see who is viewing what, in mailboxes you can see', async () => {
+  const salesConv = conversations.createConversation({ mailboxId: sales, customerEmail: 'p1@example.com', subject: 'S', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' }).id
+  const billingConv = conversations.createConversation({ mailboxId: billing, customerEmail: 'p2@example.com', subject: 'B', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' }).id
+  await call(adminToken, 'POST', `/conversations/${salesConv}/presence`, { state: 'replying' })
+  await call(adminToken, 'POST', `/conversations/${billingConv}/presence`, { state: 'viewing' })
+
+  const forAdmin = (await call(adminToken, 'GET', '/presence')).data.presence
+  assert.ok(forAdmin.some((p: any) => p.conversationId === salesConv && p.viewers[0].state === 'replying' && p.viewers[0].name === 'Ada Admin'))
+  assert.ok(forAdmin.some((p: any) => p.conversationId === billingConv))
+
+  // The agent sees only Sales.
+  const forAgent = (await call(agentToken, 'GET', '/presence')).data.presence.map((p: any) => p.conversationId)
+  assert.ok(forAgent.includes(salesConv))
+  assert.ok(!forAgent.includes(billingConv))
+
+  await call(adminToken, 'DELETE', `/conversations/${salesConv}/presence`)
+  assert.ok(!(await call(adminToken, 'GET', '/presence')).data.presence.some((p: any) => p.conversationId === salesConv))
+})

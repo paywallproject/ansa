@@ -16,7 +16,7 @@ import {
   USER_COLORS,
   type Env,
 } from './auth.ts'
-import { agentActive, leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
+import { agentActive, allPresence, leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
 import { ASSIGN_AFTER_REPLY, explainMailError, loginUser, testSmtp, type MailboxRow } from './mail/outbound.ts'
 import { restartMailbox, syncMailboxNow, testImap } from './mail/imap.ts'
 import { cleanHtml, htmlToText } from './mail/html.ts'
@@ -742,6 +742,17 @@ api.post('/conversations/:id/presence', async (c) => {
   return c.json({ ok: true })
 })
 
+// Who is viewing which conversation, for the conversation list. Only conversations in mailboxes you can see.
+api.get('/presence', (c) => {
+  const user = c.get('user')
+  const current = allPresence()
+  const ids = current.map((p) => p.conversationId)
+  const mailboxOf = new Map(
+    ids.length ? (all<{ id: number; mailbox_id: number }>(`SELECT id, mailbox_id FROM conversations WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids).map((r) => [r.id, r.mailbox_id]) as [number, number][]) : [],
+  )
+  return c.json({ presence: current.filter((p) => mailboxOf.has(p.conversationId) && canSeeMailbox(user, mailboxOf.get(p.conversationId)!)) })
+})
+
 api.delete('/conversations/:id/presence', (c) => {
   leavePresence(idParam(c.req.param('id')), c.get('user').id)
   return c.json({ ok: true })
@@ -1147,6 +1158,11 @@ api.get('/events', (c) =>
     const unsubscribe = subscribe((event) => {
       // News about a conversation goes only to people who can see its mailbox.
       if (event.type === 'conversation' && !canSeeMailbox(user, event.mailboxId)) return
+      // So does who is viewing it.
+      if (event.type === 'presence' && user.mailboxAccess !== 'all') {
+        const mailboxId = get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', event.conversationId)?.mailbox_id
+        if (!mailboxId || !canSeeMailbox(user, mailboxId)) return
+      }
       if (open) void stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {})
     })
     stream.onAbort(() => {
