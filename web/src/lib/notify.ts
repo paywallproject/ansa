@@ -40,12 +40,32 @@ export async function setNotifyEnabled(on: boolean): Promise<{ ok: boolean; mess
   return { ok: true }
 }
 
-/** Show a notification. Tapping it opens `url`. The tag replaces an older one for the same chat, so open tabs do not stack copies. */
-export async function showNotification(title: string, body: string, url: string, tag: string) {
-  if (!notifyEnabled()) return
-  const options: NotificationOptions = { body, tag, icon: '/icon-192.png', badge: '/icon-192.png', data: { url } }
+/** The service worker once it is running. Right after it is registered it is still starting, and cannot show anything yet. */
+async function activeRegistration(): Promise<ServiceWorkerRegistration | null> {
   const reg = await registration()
-  if (reg) return void reg.showNotification(title, options).catch(() => {})
+  if (!reg) return null
+  if (reg.active) return reg
+  const ready = navigator.serviceWorker.ready.then((r) => (r.active ? r : null))
+  return Promise.race([ready, new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000))]).catch(() => null)
+}
+
+/**
+ * Show a notification. Tapping it opens `url`. The tag replaces an older one for the same chat, so open tabs do
+ * not stack copies. Through the service worker when it runs (the only way on an iPhone); otherwise, on a computer,
+ * as a plain browser notification. Returns false when nothing could be shown.
+ */
+export async function showNotification(title: string, body: string, url: string, tag: string, force = false): Promise<boolean> {
+  if (!force && !notifyEnabled()) return false
+  const options: NotificationOptions = { body, tag, icon: '/icon-192.png', badge: '/icon-192.png', data: { url } }
+  const reg = await activeRegistration()
+  if (reg) {
+    try {
+      await reg.showNotification(title, options)
+      return true
+    } catch {
+      /* fall back below */
+    }
+  }
   try {
     const n = new Notification(title, options)
     n.onclick = () => {
@@ -53,7 +73,8 @@ export async function showNotification(title: string, body: string, url: string,
       window.location.assign(url)
       n.close()
     }
+    return true
   } catch {
-    /* not allowed here */
+    return false
   }
 }
