@@ -21,14 +21,16 @@ export function useVisualViewport() {
     const update = () => {
       full = Math.max(full, vv.height)
       const keyboard = full - vv.height > 120
-      // The app is exactly as tall as what can be seen: drawing past it gets cut off.
-      root.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
-      // A home screen app on newer iOS gets an area that ends well above the bottom of the screen, clear of the
-      // home bar already; keeping the home-bar padding too left a blank band. Then the padding goes.
+      let height = vv.height
+      // A home screen app on newer iOS reports a page shorter than the screen, by the strip behind the clock.
+      // The screen below is still ours to draw on. Without the keyboard, take the real screen height when the
+      // shortfall is that strip (under 100px). html and body take it too (see index.css): sized to the reported
+      // height, they cut off whatever reached below it.
       if (standalone && !keyboard) {
         const screenHeight = window.innerWidth < window.innerHeight ? screen.height : screen.width
-        root.classList.toggle('ends-above-home-bar', screenHeight - vv.height >= 20)
+        if (screenHeight > height && screenHeight - height < 100) height = screenHeight
       }
+      root.style.setProperty('--app-height', `${Math.round(height)}px`)
       // The keyboard covers the home bar, so the bottom safe-area padding is not needed while it is up.
       root.classList.toggle('keyboard-open', keyboard)
       if (window.scrollY !== 0) window.scrollTo(0, 0)
@@ -42,7 +44,7 @@ export function useVisualViewport() {
       vv.removeEventListener('scroll', update)
       window.removeEventListener('orientationchange', onRotate)
       root.style.removeProperty('--app-height')
-      root.classList.remove('keyboard-open', 'ends-above-home-bar')
+      root.classList.remove('keyboard-open')
     }
   }, [])
 }
