@@ -39,8 +39,10 @@ interface ShellActions {
   compose: (prefill?: ComposePrefill) => void
   openPalette: () => void
   openShortcuts: () => void
+  /** The phone drawer: inboxes, search and pages. The conversation list's header opens it. */
+  openDrawer: () => void
 }
-const ShellContext = createContext<ShellActions>({ compose: () => {}, openPalette: () => {}, openShortcuts: () => {} })
+const ShellContext = createContext<ShellActions>({ compose: () => {}, openPalette: () => {}, openShortcuts: () => {}, openDrawer: () => {} })
 export const useShell = () => useContext(ShellContext)
 
 export const FOLDERS: { id: Folder; label: string; icon: typeof Inbox; countKey?: 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'snoozed' | 'spam' }[] = [
@@ -434,9 +436,12 @@ export function Shell() {
   // A conversation is open: on a phone it takes the whole screen, without the top bar.
   const inConversation = !!useMatch('/m/:mailboxId/:folder/:conversationId') || !!useMatch('/search/:conversationId')
   useEffect(() => {
-    document.documentElement.classList.toggle('reading', inConversation)
-    return () => document.documentElement.classList.remove('reading')
-  }, [inConversation])
+    const root = document.documentElement
+    root.classList.toggle('reading', inConversation)
+    // In a mailbox on a phone the list's own header is the top bar (as in Help Scout's app).
+    root.classList.toggle('bare', !!current && !inConversation)
+    return () => root.classList.remove('reading', 'bare')
+  }, [inConversation, current])
   // Remembered so the logo and the home page come back to this mailbox.
   useEffect(() => {
     if (current) rememberMailbox(current.id)
@@ -445,7 +450,7 @@ export function Shell() {
   useTitleCount(current ? current.counts.unassigned : list.reduce((sum, m) => sum + m.counts.unassigned, 0))
 
   const actions = useMemo<ShellActions>(
-    () => ({ compose: (prefill) => setCompose(prefill ?? {}), openPalette: () => setPalette(true), openShortcuts: () => setShortcuts(true) }),
+    () => ({ compose: (prefill) => setCompose(prefill ?? {}), openPalette: () => setPalette(true), openShortcuts: () => setShortcuts(true), openDrawer: () => setDrawer(true) }),
     [],
   )
 
@@ -469,7 +474,7 @@ export function Shell() {
   return (
     <ShellContext.Provider value={actions}>
       <div className="flex h-full flex-col">
-        <div className={cx(inConversation && 'max-md:hidden')}>
+        <div className={cx((inConversation || current) && 'max-md:hidden')}>
           <TopBar mailboxes={list} current={current} onMenu={current ? () => setDrawer(true) : undefined} />
         </div>
         <PullToRefresh />

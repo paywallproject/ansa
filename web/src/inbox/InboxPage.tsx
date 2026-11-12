@@ -8,7 +8,8 @@ import { canSee } from '../lib/access'
 import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers, useViewers } from '../lib/hooks'
 import type { ConversationSummary, Folder, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback, MenuDivider, MenuLabel } from '../ui'
-import { FOLDERS, visibleFolders } from '../Shell'
+import { FOLDERS, useShell, visibleFolders } from '../Shell'
+import { Logo } from '../pages/Auth'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { ConversationView } from './ConversationView'
 import { SwipeRow } from './SwipeRow'
@@ -43,6 +44,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const selectedId = Number(params.conversationId) || null
   const q = searchParams.get('q') ?? ''
   const [draftQuery, setDraftQuery] = useState(q)
+  const shell = useShell()
   // On a phone the checkboxes hide until you choose Select, as in Help Scout's app.
   const [selecting, setSelecting] = useState(false)
   const debouncedQuery = useDebounced(draftQuery, 300)
@@ -238,7 +240,13 @@ export function InboxPage({ search = false }: { search?: boolean }) {
           </div>
         </div>
       ) : (
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-4 md:px-5">
+        <div className="flex h-14 shrink-0 items-center gap-2 px-2 md:border-b md:border-line md:px-5">
+          {/* Phone: the logo opens the drawer (inboxes, search, settings), as in Help Scout's app. */}
+          {!search && (
+            <button type="button" aria-label="Open menu" onClick={shell.openDrawer} className="flex size-10 shrink-0 items-center justify-center rounded-lg md:hidden">
+              <Logo size={28} />
+            </button>
+          )}
           {search ? (
             <div className="relative max-w-xl flex-1">
               <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-fg-3" aria-hidden />
@@ -249,7 +257,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
               <h1 className="min-w-0 truncate text-[15px] font-semibold max-md:hidden">{folderInfo?.label ?? 'All conversations'}</h1>
               {/* On a phone: the folder, its count and a switcher, centred, as in Help Scout's app. */}
               {mailbox && (
-                <div className="flex min-w-0 flex-1 justify-center pl-8 md:hidden">
+                <div className="flex min-w-0 flex-1 justify-center md:hidden">
                   <Popover
                     align="start"
                     width={240}
@@ -475,7 +483,7 @@ function Row({
 
   return (
     <SwipeRow
-      className="group border-b border-line"
+      className="group md:border-b md:border-line"
       contentClassName={cx('w-full transition-shadow hover:shadow-[inset_2px_0_0_var(--accent)]', checked ? 'bg-accent-soft' : 'bg-surface hover:bg-sunken')}
       end={onSwipeClose && { label: 'Close', icon: <Archive className="size-5" />, tone: 'bg-ok', onCommit: onSwipeClose }}
       start={onSwipeAssign && { label: c.assignee?.id === me.id ? 'Unassign' : 'Assign to me', icon: <UserRoundCheck className="size-5" />, tone: 'bg-accent', onCommit: onSwipeAssign }}
@@ -484,12 +492,12 @@ function Row({
         <CheckBox checked={checked} label={`Select conversation: ${c.subject}`} onClick={onCheck} />
       </div>
       {!selecting && (
-        <Link to={to} tabIndex={-1} aria-hidden className="shrink-0 pt-3.5 pr-3 pl-4 md:hidden">
-          <Avatar name={c.customer.name || c.customer.email} size={44} />
+        <Link to={to} tabIndex={-1} aria-hidden className="shrink-0 pt-3 pr-3 pl-4 md:hidden">
+          <Avatar name={c.customer.name || c.customer.email} size={40} />
         </Link>
       )}
-      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-3.5 pr-4 outline-offset-[-2px] md:py-2.5 md:pr-5')}>
-        <span className={cx('truncate text-[15px] md:text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
+      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-3 pr-4 outline-offset-[-2px] md:py-2.5 md:pr-5')}>
+        <span className={cx('truncate text-[16px] md:text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2 max-md:font-semibold max-md:text-fg')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}

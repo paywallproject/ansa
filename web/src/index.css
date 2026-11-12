@@ -339,6 +339,9 @@
     .reading body::before {
       background: var(--canvas);
     }
+    .bare body::before {
+      background: var(--surface);
+    }
   }
   .keyboard-open #root {
     padding-bottom: 0;
