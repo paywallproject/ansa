@@ -31,6 +31,7 @@ import type { ConversationSummary, Customer, Folder, Mailbox } from './lib/types
 import { Avatar, Kbd, MenuDivider, MenuItem, MenuLabel, Modal, Popover, StatusBadge, cx } from './ui'
 import { Logo } from './pages/Auth'
 import { rememberMailbox } from './lib/lastMailbox'
+import { PullToRefresh } from './PullToRefresh'
 import { brand, workspace } from './lib/workspace'
 import { NewConversation, type ComposePrefill } from './inbox/NewConversation'
 
@@ -339,6 +340,7 @@ export function Shell() {
     <ShellContext.Provider value={actions}>
       <div className="flex h-full flex-col">
         <TopBar mailboxes={list} current={current} onMenu={current ? () => setDrawer(true) : undefined} />
+        <PullToRefresh />
         <div className="flex min-h-0 flex-1">
           {current && (
             <aside className="hidden shrink-0 border-r border-line md:block">
