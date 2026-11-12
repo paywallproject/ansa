@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import crypto from 'node:crypto'
+import net from 'node:net'
 import tls from 'node:tls'
 import { blobs } from '../blobs.ts'
 import { all, get, run, parseJson } from '../db.ts'
@@ -68,29 +69,32 @@ function transportFor(smtp: SmtpSettings) {
     connectionTimeout: 20_000,
     greetingTimeout: 20_000,
     socketTimeout: 60_000,
-    ...(config.imapPollOnly && smtp.security === 'ssl' ? { getSocket: openTlsSocket(smtp) } : {}),
+    ...(config.imapPollOnly && smtp.security !== 'none' ? { getSocket: openSocketByName(smtp) } : {}),
   } as Parameters<typeof nodemailer.createTransport>[0])
 }
 
 /**
- * On Cloudflare, nodemailer's own TLS connection fails because it connects to a resolved IP address.
- * Open the TLS socket by host name and hand it over. STARTTLS and plain connections do not need this.
+ * On Cloudflare, nodemailer's own connection fails because it connects to a resolved IP address:
+ * neither the TLS handshake (SSL) nor the later upgrade (STARTTLS) works on a socket opened by IP.
+ * Open the socket by host name and hand it over. For STARTTLS nodemailer then upgrades it as usual.
  */
-function openTlsSocket(smtp: SmtpSettings) {
-  return (_options: unknown, callback: (err: Error | null, socket?: { connection: tls.TLSSocket; secured: boolean }) => void) => {
+function openSocketByName(smtp: SmtpSettings) {
+  const secure = smtp.security === 'ssl'
+  return (_options: unknown, callback: (err: Error | null, socket?: { connection: net.Socket; secured: boolean }) => void) => {
     let settled = false
-    const socket = tls.connect({ host: smtp.host, port: smtp.port, servername: smtp.host })
+    const socket = secure ? tls.connect({ host: smtp.host, port: smtp.port, servername: smtp.host }) : net.connect({ host: smtp.host, port: smtp.port })
     const finish = (err: Error | null) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      socket.removeListener('error', finish)
       if (err) {
         socket.destroy()
         callback(Object.assign(err, { code: (err as { code?: string }).code || 'ECONNECTION' }))
-      } else callback(null, { connection: socket, secured: true })
+      } else callback(null, { connection: socket, secured: secure })
     }
     const timer = setTimeout(() => finish(new Error('Connection timeout')), 20_000)
-    socket.once('secureConnect', () => finish(null))
+    socket.once(secure ? 'secureConnect' : 'connect', () => finish(null))
     socket.once('error', finish)
   }
 }
