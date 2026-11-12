@@ -335,3 +335,41 @@ test('open tracking: a signed image marks a reply viewed, once enough time has p
   assert.equal(opens.openPixel(conv.threadId), '')
   saveWorkspace({ trackOpens: true })
 })
+
+test('open tracking: Gmail opening at once still counts; an early scanner is set apart', async () => {
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'gmail@example.com', subject: 'Quick open', bodyHtml: '<p>Hi</p>', kind: 'reply' }, { userId: adminId, via: 'web' })
+  const { openToken } = await import('../services/opens.ts')
+  const token = openToken(conv.threadId)
+  // A security scanner, a second after sending.
+  await app.request(`/api/o/${token}.gif`, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; scanner)' } })
+  let row = get('SELECT opened_at, open_count, open_scans FROM threads WHERE id = ?', conv.threadId)
+  assert.equal(row.opened_at, null)
+  assert.equal(row.open_scans, 1)
+  // The customer opens it in Gmail straight away: Google's image proxy fetches it, and that is an open.
+  await app.request(`/api/o/${token}.gif`, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 5.1; rv:11.0) Gecko Firefox/11.0 (via ggpht.com GoogleImageProxy)' } })
+  row = get('SELECT opened_at, open_count FROM threads WHERE id = ?', conv.threadId)
+  assert.ok(row.opened_at)
+  assert.equal(row.open_count, 1)
+})
+
+test('open tracking: the image is in the email that goes out', async () => {
+  const nodemailer = (await import('nodemailer')).default as any
+  const { config } = await import('../config.ts')
+  const { deliverThread } = await import('../mail/outbound.ts')
+  const { openToken } = await import('../services/opens.ts')
+  const sent: any[] = []
+  const realCreate = nodemailer.createTransport
+  nodemailer.createTransport = () => ({ sendMail: async (mail: any) => void sent.push(mail), close() {} })
+  run(`UPDATE mailboxes SET smtp_host = 'smtp.acme.test' WHERE id = ?`, sales)
+  config.mailDisabled = false
+  try {
+    const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'pixel@example.com', subject: 'Pixel', bodyHtml: '<p>Hello</p>', kind: 'reply', skipDelivery: true }, { userId: adminId, via: 'web' })
+    await deliverThread(conv.threadId)
+    assert.equal(sent.length, 1)
+    assert.ok(sent[0].html.includes(`${config.appUrl}/api/o/${openToken(conv.threadId)}.gif`), 'the open-tracking image is in the sent HTML')
+    assert.ok(!sent[0].text.includes('/api/o/'), 'and not in the plain-text part')
+  } finally {
+    config.mailDisabled = true
+    nodemailer.createTransport = realCreate
+  }
+})
