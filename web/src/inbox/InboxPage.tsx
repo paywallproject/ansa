@@ -508,10 +508,11 @@ function Row({
           <Avatar name={c.customer.name || c.customer.email} size={40} />
         </Link>
       )}
-      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2 pr-4 outline-offset-[-2px] md:py-2.5 md:pr-5')}>
+      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2 pr-4 outline-offset-[-2px] md:py-2 md:pr-5')}>
         <span className={cx('truncate text-[16px] leading-snug md:text-[13px] md:leading-normal', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2 max-md:font-semibold max-md:text-fg')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
-        <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
-          <span className="flex min-w-0 items-center gap-1.5">
+        <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto md:flex md:items-center md:gap-2">
+          {/* On a computer the subject and the preview share one line, as in Help Scout. */}
+          <span className="flex min-w-0 items-center gap-1.5 md:max-w-[65%] md:shrink-0">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
             {viewers.length > 0 && <ViewersBadge viewers={viewers} />}
             <span className={cx('truncate text-[15px] leading-snug md:text-[13px] md:leading-normal', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
@@ -525,7 +526,7 @@ function Row({
             ))}
             {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 md:inline">+{c.tags.length - 3}</span>}
           </span>
-          <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:truncate md:text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:min-w-0 md:flex-1 md:truncate md:text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
           {/* On a phone, tags get a line of their own, under the preview. */}
           {c.tags.length > 0 && (
             <span className="mt-1.5 flex flex-wrap gap-1 md:hidden">
