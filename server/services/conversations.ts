@@ -168,8 +168,10 @@ export function listConversations(opts: ListOptions) {
   const scoped = mailboxFilterSql(opts.mailboxIds)
   if (scoped) where.push(scoped.replace(/^AND /, ''))
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  const order =
+  const byTime =
     opts.sort === 'oldest' ? 'c.updated_at ASC' : opts.sort === 'waiting' ? 'c.waiting_since IS NULL, c.waiting_since ASC, c.updated_at DESC' : 'c.updated_at DESC'
+  // Pending conversations wait on the customer, not on us: they sink below the rest, as in Help Scout.
+  const order = `c.status = 'pending', ${byTime}`
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
   const offset = Math.max(opts.offset ?? 0, 0)
   const rows = allNamed(`${BASE_SELECT} ${whereSql} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params)
