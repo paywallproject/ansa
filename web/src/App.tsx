@@ -1,4 +1,5 @@
 import { lastMailbox } from './lib/lastMailbox'
+import { useAppBadge } from './lib/badge'
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -62,6 +63,7 @@ function Authed() {
   useLiveEvents()
   useHeartbeat()
   useInitialTimezone()
+  useAppBadge()
   return (
     <Routes>
       <Route element={<Shell />}>
