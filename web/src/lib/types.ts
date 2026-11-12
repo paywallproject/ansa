@@ -194,7 +194,7 @@ export interface Conversation extends Omit<ConversationSummary, 'customer'> {
   customer: Customer
   threads: Thread[]
   previousConversations: { id: number; subject: string; status: Status; updatedAt: number }[]
-  draft: { kind: 'reply' | 'note'; bodyHtml: string } | null
+  draft: { kind: 'reply' | 'note'; bodyHtml: string; updatedAt?: number } | null
   /** Live chat only: true while the visitor has the chat open. Null for other conversations. */
   visitorOnline: boolean | null
   url: string

@@ -205,8 +205,8 @@ function buildServer(user: User) {
     {
       title: 'Draft a reply for review',
       description:
-        "Write a reply into the user's draft on a conversation, without sending anything. When they open the conversation in Ansa, " +
-        'the reply box opens with this text, ready to edit and send. It replaces any draft they already had there (get_conversation shows it as your_draft). ' +
+        "Write a reply into the user's draft on a conversation, without sending anything. It shows in the conversation in Ansa as a draft " +
+        'with an Edit button, ready to review and send. It replaces any draft they already had there (get_conversation shows it as your_draft). ' +
         '`body` is plain text (blank lines separate paragraphs) or simple HTML; the signature is added when it is sent. `kind` "note" drafts an internal note instead.',
       inputSchema: {
         id: z.number().int(),

@@ -39,6 +39,7 @@ import { useDebounced, useDocumentTitle, useHotkeys, useMailboxes, useSession, u
 import type { Attachment, Conversation, ConversationSummary, Status, Thread, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { Composer, type ComposerHandle } from './Composer'
+import { lineHtml } from './Editor'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { LightboxProvider, isImageType, useLightbox, type LightboxImage } from './Lightbox'
 import { useZone, zonedLabel } from '../lib/timezone'
@@ -807,6 +808,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
               </Fragment>
             )
           })}
+          {conversation.draft && !composing && <DraftCard conversation={conversation} onEdit={() => onCompose(conversation.draft?.kind ?? 'reply')} />}
         </ol>
       </div>
       {!composing && (
@@ -966,6 +968,50 @@ function OriginalDialog({ thread, onClose }: { thread: Thread; onClose: () => vo
         </div>
       )}
     </Modal>
+  )
+}
+
+/**
+ * Your unsent draft, shown at the end of the conversation as in Help Scout: the reply box stays closed until
+ * you choose Edit. Drafts are private, so only their writer sees this.
+ */
+function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdit: () => void }) {
+  const { user } = useSession()
+  const client = useQueryClient()
+  const { toast } = useFeedback()
+  const draft = conversation.draft!
+  const isNote = draft.kind === 'note'
+  const discard = async () => {
+    try {
+      await api.put(`/conversations/${conversation.id}/draft`, { kind: draft.kind, bodyHtml: '' })
+      client.setQueryData(['conversation', conversation.id], (old: any) => (old ? { ...old, conversation: { ...old.conversation, draft: null } } : old))
+      void client.invalidateQueries({ queryKey: ['conversations'] })
+      toast('Draft discarded')
+    } catch (err) {
+      toast((err as Error).message, { kind: 'error' })
+    }
+  }
+  return (
+    <li className="relative md:px-14">
+      <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} className="absolute top-4 right-9 z-10 ring-4 ring-surface max-md:hidden" />
+      <article aria-label={isNote ? 'Draft note' : 'Draft reply'} className={cx('relative rounded-[20px] border px-4 pt-4 pb-5 shadow-card md:rounded-xl md:px-12 md:pt-5 md:pb-6 md:shadow-none lg:px-20', isNote ? 'border-note-line bg-note' : 'border-line bg-surface')}>
+        <span className="absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full bg-accent" aria-hidden />
+        <header className="flex items-center gap-2.5 border-b border-line pb-3">
+          <span className="min-w-0 flex-1 truncate text-[17px] font-semibold md:text-sm">You</span>
+          <span className="shrink-0 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-fg">{isNote ? 'Draft note' : 'Draft'}</span>
+          {draft.updatedAt && (
+            <time className="shrink-0 text-[13px] text-fg-3 tabular-nums md:text-xs" title={fullTime(draft.updatedAt)}>
+              {messageTime(draft.updatedAt)}
+            </time>
+          )}
+        </header>
+        <div className="prose-mail mt-4" dangerouslySetInnerHTML={{ __html: lineHtml(draft.bodyHtml) }} />
+        <div className="mt-5 flex items-center gap-2">
+          <Button onClick={onEdit}>Edit</Button>
+          <Button variant="ghost" onClick={() => void discard()}>Discard</Button>
+        </div>
+      </article>
+    </li>
   )
 }
 

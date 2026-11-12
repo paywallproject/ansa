@@ -273,13 +273,13 @@ export function getConversation(id: number, opts: { userId?: number; mailboxIds?
   const summary = getSummary(id)
   const customer = getCustomer(summary.customer.id)
   const previous = listConversations({ customerId: customer.id, limit: 8, mailboxIds: opts.mailboxIds }).items.filter((c) => c.id !== id)
-  const draft = opts.userId ? get<any>('SELECT kind, body_html FROM drafts WHERE conversation_id = ? AND user_id = ?', id, opts.userId) : undefined
+  const draft = opts.userId ? get<any>('SELECT kind, body_html, updated_at FROM drafts WHERE conversation_id = ? AND user_id = ?', id, opts.userId) : undefined
   return {
     ...summary,
     customer,
     threads: listThreads(id),
     previousConversations: previous.map((c) => ({ id: c.id, subject: c.subject, status: c.status, updatedAt: c.updatedAt })),
-    draft: draft ? { kind: draft.kind as 'reply' | 'note', bodyHtml: draft.body_html as string } : null,
+    draft: draft ? { kind: draft.kind as 'reply' | 'note', bodyHtml: draft.body_html as string, updatedAt: draft.updated_at as number } : null,
     /** Live chat only: the visitor has the chat open, so a reply reaches them there instead of by email. */
     visitorOnline: summary.source === 'chat' ? visitorOnline(id) : null,
     url: `${config.appUrl}/c/${id}`,
