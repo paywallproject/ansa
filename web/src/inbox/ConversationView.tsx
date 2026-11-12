@@ -940,22 +940,20 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   if (thread.type === 'reply' && thread.to.length > 0) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
   if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
   if (isNote) meta.push(<>Only your team sees this</>)
-  if (thread.type === 'reply' && thread.openedAt) {
-    meta.push(
-      <span className="inline-flex items-center gap-1" title={thread.openCount > 1 ? `Viewed ${thread.openCount} times` : undefined}>
-        <MailOpen className="size-3.5" aria-hidden />
+  // Open tracking, shown under the message, as Help Scout does.
+  const viewed =
+    thread.type === 'reply' && thread.openedAt ? (
+      <p className="mt-5 flex items-center gap-2 text-[13px] text-fg-2" title={thread.openCount > 1 ? `Viewed ${thread.openCount} times` : undefined}>
+        <MailOpen className="size-4 shrink-0" aria-hidden />
         Customer viewed on {viewedLabel(thread.openedAt, zone)}
-      </span>,
-    )
-  } else if (thread.type === 'reply' && thread.openLastAt) {
-    // Loaded, but only by something that looked like a mail scanner. Shown so a missing view can be explained.
-    meta.push(
-      <span className="inline-flex items-center gap-1" title={thread.openLastAgent ? `Loaded by: ${thread.openLastAgent}` : undefined}>
-        <MailOpen className="size-3.5 opacity-50" aria-hidden />
+      </p>
+    ) : thread.type === 'reply' && thread.openLastAt ? (
+      // Loaded, but only by something that looked like a mail scanner. Shown so a missing view can be explained.
+      <p className="mt-5 flex items-center gap-2 text-[13px] text-fg-3" title={thread.openLastAgent ? `Loaded by: ${thread.openLastAgent}` : undefined}>
+        <MailOpen className="size-4 shrink-0 opacity-60" aria-hidden />
         Image loaded {viewedLabel(thread.openLastAt, zone)}, not counted
-      </span>,
-    )
-  }
+      </p>
+    ) : null
   const channel =
     thread.type === 'reply'
       ? thread.via === 'auto'
@@ -1119,6 +1117,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 ))}
               </ul>
             )}
+            {viewed}
           </div>
         )}
       </article>
