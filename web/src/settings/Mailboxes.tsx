@@ -91,7 +91,8 @@ const initial = (m?: Mailbox): FormState => ({
   smtpHost: m?.smtpHost ?? '',
   smtpPort: m?.smtpPort ?? 587,
   smtpSecurity: m?.smtpSecurity ?? 'starttls',
-  smtpUser: m?.smtpUser ?? '',
+  // A saved mailbox with no SMTP username signs in with its own address: show that, rather than a grey example.
+  smtpUser: m?.smtpUser || (m?.smtpPasswordSet ? m.email : ''),
   smtpPassword: '',
   imapEnabled: m?.imapEnabled ?? true,
   imapHost: m?.imapHost ?? '',
@@ -174,7 +175,9 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
   const payload = () => ({
     ...form,
     id: mailbox?.id,
-    imapUser: form.sameLogin ? form.smtpUser : form.imapUser,
+    // A blank username means the mailbox address, as the box's example shows.
+    smtpUser: form.smtpUser.trim() || (form.smtpPassword || mailbox?.smtpPasswordSet ? form.email.trim() : ''),
+    imapUser: form.sameLogin ? form.smtpUser.trim() || form.email.trim() : form.imapUser,
     imapPassword: form.sameLogin ? form.smtpPassword : form.imapPassword,
     // With a shared login and no new password typed, the server reuses the saved SMTP password.
     copySmtpPassword: form.sameLogin,
