@@ -379,3 +379,33 @@ test('an example APP_URL left from .env.example is not used for links', async ()
   for (const url of ['https://help.example.com', 'https://example.com', 'https://support.example.org/', 'http://ansa.test', 'https://your-domain', 'not a url']) assert.equal(isPlaceholderUrl(url), true, url)
   for (const url of ['https://help.newsletterglue.com', 'https://ansa.acme.workers.dev', 'http://localhost:3000', 'https://examples.com']) assert.equal(isPlaceholderUrl(url), false, url)
 })
+
+test('MCP draft_reply: writes the teammate\'s own draft, sends nothing, and get_conversation shows it', async () => {
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'draftme@example.com', subject: 'Draft please', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${agentToken}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    })
+    const text = await res.text()
+    const json = JSON.parse(text.startsWith('{') ? text : text.split('\n').find((l) => l.startsWith('data: '))!.slice(6))
+    return json.result as { isError?: boolean; content: { text: string }[] }
+  }
+  const threadsBefore = get<{ n: number }>('SELECT COUNT(*) AS n FROM threads WHERE conversation_id = ?', conv.id)!.n
+  const drafted = await tool('draft_reply', { id: conv.id, body: 'Thanks for writing in!\n\nWe will look into it.' })
+  assert.equal(drafted.isError, undefined)
+  assert.equal(JSON.parse(drafted.content[0].text).drafted, true)
+  // Nothing was sent or added to the conversation.
+  assert.equal(get<{ n: number }>('SELECT COUNT(*) AS n FROM threads WHERE conversation_id = ?', conv.id)!.n, threadsBefore)
+  // The teammate sees it in the app as their draft, and the assistant can read it back.
+  const inApp = (await call(agentToken, 'GET', `/conversations/${conv.id}`)).data.conversation.draft
+  assert.equal(inApp.kind, 'reply')
+  assert.match(inApp.bodyHtml, /Thanks for writing in!/)
+  const detail = JSON.parse((await tool('get_conversation', { id: conv.id })).content[0].text)
+  assert.match(detail.your_draft.text, /We will look into it/)
+  // Not someone else's draft, and not in a mailbox the teammate cannot see.
+  assert.equal((await call(adminToken, 'GET', `/conversations/${conv.id}`)).data.conversation.draft, null)
+  const billingConv = conversations.createConversation({ mailboxId: billing, customerEmail: 'x@example.com', subject: 'B', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  assert.equal((await tool('draft_reply', { id: billingConv.id, body: 'nope' })).isError, true)
+})

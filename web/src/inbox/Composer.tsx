@@ -164,7 +164,8 @@ export const Composer = forwardRef<
   const hadDraft = useRef(!!draftHtml)
   useEffect(() => {
     if (draftHtml && !hadDraft.current && editor?.isEmpty) {
-      setMode('reply')
+      // A reply taken back from Send later, or one an assistant drafted (MCP draft_reply): a note stays a note.
+      setMode(conversation.draft?.kind ?? 'reply')
       editor.commands.setContent(paragraphHtml(draftHtml))
       onOpenChange(true)
     }

@@ -23,6 +23,7 @@ The assistant acts as the teammate who created the token. Revoke the token to cu
 | `get_conversation` | Read a thread: messages, replies, notes, customer |
 | `reply_to_conversation` | Email a reply to the customer |
 | `add_note` | Add an internal note |
+| `draft_reply` | Write a reply (or note) into your draft for you to review and send from Ansa. Sends nothing |
 | `update_conversation` | Change status, assignee, tags, subject, snooze |
 | `create_conversation` | Email a customer, or log a message or call |
 | `list_customers`, `get_customer`, `update_customer` | Find and edit customer profiles |
