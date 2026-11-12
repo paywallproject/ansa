@@ -7,11 +7,12 @@
   --surface: #ffffff;
   --sunken: #f1f1f4;
   --hover: #ececf0;
-  --line: #e7e7ec;
-  --line-strong: #d6d6de;
-  --fg: #18181d;
-  --fg-2: #55555f;
-  --fg-3: #71717c;
+  /* Slate text, as in Help Scout: softer than black, with a blue cast. fg-3 stays readable at small sizes (4.6:1). */
+  --line: #e4e9ef;
+  --line-strong: #d2d9e1;
+  --fg: #1f2d3d;
+  --fg-2: #4a5a6b;
+  --fg-3: #6b7c8f;
   --nav: #221f5c;
   --accent: #5448e2;
   --accent-hover: #4639cf;
