@@ -1,18 +1,29 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { fromWall, toWall, useZone, zonedLabel } from '../lib/timezone'
 import { Button, Input, Modal, Select, cx } from '../ui'
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 const MORNING = 8
 
-const atHour = (date: Date, hour: number, minute = 0) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute)
-const addDays = (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, date.getHours(), date.getMinutes())
+// These work on wall dates (see lib/timezone.ts): the UTC fields hold the clock in the teammate's zone.
+const atHour = (date: Date, hour: number, minute = 0) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, minute))
+const addDays = (date: Date, days: number) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days, date.getUTCHours(), date.getUTCMinutes()))
 
 /**
  * Read a time someone typed: "8 am", "3 days", "2 hours", "tomorrow 2pm", "monday", "Aug 7 9:30".
- * A day without a time means 8:00 that morning. Returns null when it is not a time in the future.
+ * A day without a time means 8:00 that morning, in `zone`. Returns the instant, or null when it is not a
+ * time in the future.
  */
-export function parseWhen(input: string, now = new Date()): Date | null {
+export function parseWhen(input: string, zone: string, nowTs = Date.now()): number | null {
+  const wall = parseWall(input, toWall(nowTs, zone))
+  if (!wall) return null
+  const at = fromWall(wall, zone)
+  return at > nowTs ? at : null
+}
+
+function parseWall(input: string, now: Date): Date | null {
   let text = input.trim().toLowerCase().replace(/,/g, ' ').replace(/\s+/g, ' ')
   if (!text) return null
 
@@ -49,13 +60,13 @@ export function parseWhen(input: string, now = new Date()): Date | null {
   const monthDay = /^([a-z]{3,9}) (\d{1,2})$/.exec(text) ?? /^(\d{1,2}) ([a-z]{3,9})$/.exec(text)
   if (!text || text === 'today') day = now
   else if (text === 'tomorrow' || text === 'tmr') day = addDays(now, 1)
-  else if (weekday >= 0 && /^(next )?[a-z]+$/.test(text)) day = addDays(now, (weekday - now.getDay() + 7) % 7 || 7)
+  else if (weekday >= 0 && /^(next )?[a-z]+$/.test(text)) day = addDays(now, (weekday - now.getUTCDay() + 7) % 7 || 7)
   else if (monthDay) {
     const [name, num] = /^\d/.test(monthDay[1]) ? [monthDay[2], monthDay[1]] : [monthDay[1], monthDay[2]]
     const month = MONTHS.indexOf(name.slice(0, 3))
     if (month < 0 || Number(num) < 1 || Number(num) > 31) return null
-    day = new Date(now.getFullYear(), month, Number(num))
-    if (atHour(day, 23, 59) < now) day = new Date(now.getFullYear() + 1, month, Number(num))
+    day = new Date(Date.UTC(now.getUTCFullYear(), month, Number(num)))
+    if (atHour(day, 23, 59) < now) day = new Date(Date.UTC(now.getUTCFullYear() + 1, month, Number(num)))
   } else return null
 
   let result = atHour(day, hour ?? MORNING, minute)
@@ -64,30 +75,27 @@ export function parseWhen(input: string, now = new Date()): Date | null {
   return result > now ? result : null
 }
 
-const dayTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-const dateTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-/** "Fri, 8:00 AM" within a week, "Fri, Aug 7, 8:00 AM" further out. */
-export const whenLabel = (ts: number, now = Date.now()) => (ts - now < 6 * 86_400_000 ? dayTime : dateTime).format(ts)
-
-function presets(now = new Date()) {
+function presets(zone: string, nowTs = Date.now()) {
+  const now = toWall(nowTs, zone)
   const tomorrow = addDays(now, 1)
-  const monday = addDays(now, (1 - now.getDay() + 7) % 7 || 7)
+  const monday = addDays(now, (1 - now.getUTCDay() + 7) % 7 || 7)
   const list = [
-    { label: 'Tomorrow morning', at: atHour(tomorrow, MORNING) },
-    { label: 'Tomorrow afternoon', at: atHour(tomorrow, 14) },
+    { label: 'Tomorrow morning', at: fromWall(atHour(tomorrow, MORNING), zone) },
+    { label: 'Tomorrow afternoon', at: fromWall(atHour(tomorrow, 14), zone) },
   ]
   // When tomorrow is Monday, "Monday morning" would be the first row again.
-  if (monday.getDate() !== tomorrow.getDate()) list.push({ label: 'Monday morning', at: atHour(monday, MORNING) })
+  if (monday.getUTCDate() !== tomorrow.getUTCDate()) list.push({ label: 'Monday morning', at: fromWall(atHour(monday, MORNING), zone) })
   return list
 }
 
 export function SendLaterDialog({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (sendAt: number, ifNoReply: boolean) => void }) {
   const [text, setText] = useState('')
   const [ifNoReply, setIfNoReply] = useState(true)
-  const typed = text.trim() ? parseWhen(text) : null
-  const pick = (at: Date) => {
+  const zone = useZone()
+  const typed = text.trim() ? parseWhen(text, zone) : null
+  const pick = (at: number) => {
     setText('')
-    onPick(at.getTime(), ifNoReply)
+    onPick(at, ifNoReply)
   }
   return (
     <Modal open={open} onClose={onClose} title="Send later" width={440}>
@@ -113,19 +121,25 @@ export function SendLaterDialog({ open, onClose, onPick }: { open: boolean; onCl
           {text.trim() ? (
             <li>
               {typed ? (
-                <Row label="Send at" hint={whenLabel(typed.getTime())} onClick={() => pick(typed)} primary />
+                <Row label="Send at" hint={zonedLabel(typed, zone)} onClick={() => pick(typed)} primary />
               ) : (
                 <p className="px-2.5 py-2 text-[13px] text-fg-3">Not a time yet. Try “tomorrow 2pm”, “monday”, “3 days” or “Aug 7”.</p>
               )}
             </li>
           ) : (
-            presets().map((p, index) => (
+            presets(zone).map((p, index) => (
               <li key={p.label}>
-                <Row label={p.label} hint={whenLabel(p.at.getTime())} onClick={() => pick(p.at)} primary={index === 0} />
+                <Row label={p.label} hint={zonedLabel(p.at, zone)} onClick={() => pick(p.at)} primary={index === 0} />
               </li>
             ))
           )}
         </ul>
+        <p className="mt-3 text-xs text-fg-3">
+          Times are in {zone.replace(/_/g, ' ')}.{' '}
+          <Link to="/settings/profile" onClick={onClose} className="underline hover:text-fg">
+            Change your time zone
+          </Link>
+        </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" onClick={onClose}>
             Cancel

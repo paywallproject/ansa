@@ -338,6 +338,10 @@ const migrations: string[] = [
   ) WITHOUT ROWID;
   CREATE INDEX mailbox_users_user ON mailbox_users(user_id);
   `,
+  `
+  -- Each teammate's time zone (IANA name), for Send later. Empty until the web app fills in the browser's.
+  ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT '';
+  `,
 ]
 
 export function migrate() {

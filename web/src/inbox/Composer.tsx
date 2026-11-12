@@ -9,7 +9,8 @@ import { STATUS_LABEL } from '../lib/format'
 import { STATUS_DOT, statusOptions } from '../lib/workspace'
 import { Avatar, Banner, Button, Input, MenuDivider, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
 import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, paragraphHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
-import { SendLaterDialog, whenLabel } from './SendLater'
+import { SendLaterDialog } from './SendLater'
+import { useZone, zonedLabel } from '../lib/timezone'
 
 export interface ComposerHandle {
   focus: (mode: 'reply' | 'note') => void
@@ -40,6 +41,7 @@ export const Composer = forwardRef<
 >(function Composer({ conversation, agentName, othersReplying, open, onOpenChange, onTyping, onSent }, ref) {
   const client = useQueryClient()
   const { toast } = useFeedback()
+  const zone = useZone()
   const [mode, setMode] = useState<'reply' | 'note'>(conversation.draft?.kind ?? 'reply')
   // A live chat goes back and forth, so closing it on every reply would be wrong. Chats keep their own choice.
   const isChat = conversation.source === 'chat'
@@ -86,7 +88,7 @@ export const Composer = forwardRef<
       uploads.clear()
       setPickedAssignee(undefined)
       onTyping(false)
-      toast(mode === 'note' ? 'Note added' : sendAt ? `Reply scheduled for ${whenLabel(sendAt)}` : 'Reply sent')
+      toast(mode === 'note' ? 'Note added' : sendAt ? `Reply scheduled for ${zonedLabel(sendAt, zone)}` : 'Reply sent')
       // A scheduled reply changes nothing yet, so the conversation stays open in front of you.
       onSent(mode === 'reply' && !sendAt ? status : null)
     },

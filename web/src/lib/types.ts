@@ -21,6 +21,8 @@ export interface User {
   /** 'all': every mailbox (always so for admins). 'some': only mailboxIds. */
   mailboxAccess: 'all' | 'some'
   mailboxIds: number[]
+  /** IANA time zone for Send later. Empty until first filled in from the browser. */
+  timezone: string
   createdAt: number
 }
 

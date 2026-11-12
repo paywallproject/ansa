@@ -35,7 +35,7 @@ import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Mo
 import { Composer, type ComposerHandle } from './Composer'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { LightboxProvider, isImageType, useLightbox, type LightboxImage } from './Lightbox'
-import { whenLabel } from './SendLater'
+import { useZone, zonedLabel } from '../lib/timezone'
 import { CustomerPanel } from './CustomerPanel'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
@@ -810,6 +810,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
   const lightbox = useLightbox()
+  const zone = useZone()
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
@@ -910,7 +911,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 <p className="min-w-40 flex-1">
                   {thread.sendAt ? (
                     <>
-                      <span className="font-medium">Sends {whenLabel(thread.sendAt)}</span>
+                      <span className="font-medium">Sends {zonedLabel(thread.sendAt, zone)}</span>
                       {thread.event?.ifNoReply ? ', unless the customer writes first.' : '.'} Then the conversation becomes {(STATUS_LABEL[thread.event?.status as string] ?? 'closed').toLowerCase()}.
                     </>
                   ) : (

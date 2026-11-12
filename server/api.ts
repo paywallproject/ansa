@@ -52,6 +52,7 @@ import { blobs } from './blobs.ts'
 import { cancelImport, connectHelpScout, importStatus, resumeImport, startImport } from './services/import-helpscout.ts'
 import { publish } from './events.ts'
 import { assertConversation, assertMailbox, assertThread, canSeeMailbox, scopeOf } from './services/access.ts'
+import { validTimezone } from './services/chat.ts'
 import { chatOnline, chatSettingsOf, cleanChatSettings, ensureChatKey, type ChatMailbox } from './services/chat.ts'
 
 export const api = new Hono<Env>()
@@ -224,6 +225,11 @@ api.patch('/me', async (c) => {
   if (typeof data.notifyAssigned === 'boolean') run('UPDATE users SET notify_assigned = ? WHERE id = ?', data.notifyAssigned, user.id)
   if (typeof data.notifyReplies === 'boolean') run('UPDATE users SET notify_replies = ? WHERE id = ?', data.notifyReplies, user.id)
   if (typeof data.notifyMentions === 'boolean') run('UPDATE users SET notify_mentions = ? WHERE id = ?', data.notifyMentions, user.id)
+  if (typeof data.timezone === 'string') {
+    const zone = data.timezone.trim().slice(0, 64)
+    if (zone && !validTimezone(zone)) throw new AppError(`"${zone}" is not a time zone. Use a name such as America/New_York.`)
+    run('UPDATE users SET timezone = ? WHERE id = ?', zone, user.id)
+  }
   if (data.chatStatus === 'online' || data.chatStatus === 'away') {
     run('UPDATE users SET chat_status = ? WHERE id = ?', data.chatStatus, user.id)
     publish({ type: 'refresh', scope: 'users' })
