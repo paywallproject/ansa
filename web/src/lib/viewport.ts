@@ -11,18 +11,27 @@ export function useVisualViewport() {
     const vv = window.visualViewport
     if (!vv || !window.matchMedia('(pointer: coarse)').matches) return
     const root = document.documentElement
+    // The tallest the visible area has been: the screen without a keyboard. Some iOS versions shrink the page along
+    // with the keyboard, so comparing with window.innerHeight would never see the keyboard open.
+    let full = vv.height
+    const onRotate = () => {
+      full = 0
+    }
     const update = () => {
+      full = Math.max(full, vv.height)
       root.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
       // The keyboard covers the home bar, so the bottom safe-area padding is not needed while it is up.
-      root.classList.toggle('keyboard-open', window.innerHeight - vv.height > 120)
+      root.classList.toggle('keyboard-open', full - vv.height > 120)
       if (window.scrollY !== 0) window.scrollTo(0, 0)
     }
     update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
+    window.addEventListener('orientationchange', onRotate)
     return () => {
       vv.removeEventListener('resize', update)
       vv.removeEventListener('scroll', update)
+      window.removeEventListener('orientationchange', onRotate)
       root.style.removeProperty('--app-height')
       root.classList.remove('keyboard-open')
     }
