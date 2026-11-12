@@ -88,9 +88,20 @@ function presets(zone: string, nowTs = Date.now()) {
   return list
 }
 
-export function SendLaterDialog({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (sendAt: number, ifNoReply: boolean) => void }) {
+export function SendLaterDialog({
+  open,
+  onClose,
+  onPick,
+  condition = true,
+}: {
+  open: boolean
+  onClose: () => void
+  onPick: (sendAt: number, ifNoReply: boolean) => void
+  /** Offer "If no reply". A new conversation has nothing to reply to, so it always sends. */
+  condition?: boolean
+}) {
   const [text, setText] = useState('')
-  const [ifNoReply, setIfNoReply] = useState(true)
+  const [ifNoReply, setIfNoReply] = useState(condition)
   const zone = useZone()
   const typed = text.trim() ? parseWhen(text, zone) : null
   const pick = (at: number) => {
@@ -107,16 +118,20 @@ export function SendLaterDialog({ open, onClose, onPick }: { open: boolean; onCl
       >
         <div className="flex gap-2">
           <Input autoFocus aria-label="When to send" placeholder="Try: 8 am, 3 days, Aug 7" value={text} onChange={(e) => setText(e.target.value)} className="min-w-0 flex-1" />
-          <div className="w-36 shrink-0">
-            <Select aria-label="Send condition" value={ifNoReply ? 'quiet' : 'always'} onChange={(e) => setIfNoReply(e.target.value === 'quiet')}>
-              <option value="quiet">If no reply</option>
-              <option value="always">Always</option>
-            </Select>
-          </div>
+          {condition && (
+            <div className="w-36 shrink-0">
+              <Select aria-label="Send condition" value={ifNoReply ? 'quiet' : 'always'} onChange={(e) => setIfNoReply(e.target.value === 'quiet')}>
+                <option value="quiet">If no reply</option>
+                <option value="always">Always</option>
+              </Select>
+            </div>
+          )}
         </div>
-        <p className="mt-2 text-xs text-fg-3">
-          {ifNoReply ? 'If the customer writes before then, the reply is not sent. You can still send it yourself.' : 'The reply is sent at that time, whatever happens before.'}
-        </p>
+        {condition && (
+          <p className="mt-2 text-xs text-fg-3">
+            {ifNoReply ? 'If the customer writes before then, the reply is not sent. You can still send it yourself.' : 'The reply is sent at that time, whatever happens before.'}
+          </p>
+        )}
         <ul className="mt-3 flex flex-col gap-0.5">
           {text.trim() ? (
             <li>

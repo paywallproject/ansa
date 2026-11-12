@@ -395,6 +395,9 @@ export function Modal({
     const first = panel.current?.querySelector<HTMLElement>('[autofocus], input, textarea, select, [contenteditable=true]')
     ;(first ?? panel.current)?.focus()
     const onKey = (e: KeyboardEvent) => {
+      // With a dialog open over another, only the top one listens: Escape must not close both.
+      const dialogs = document.querySelectorAll('[role=dialog]')
+      if (dialogs.length > 1 && dialogs[dialogs.length - 1] !== panel.current) return
       if (e.key === 'Escape') {
         e.stopPropagation()
         onClose()

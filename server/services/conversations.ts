@@ -745,6 +745,8 @@ export interface CreateInput {
   source?: string
   createdAt?: number
   skipDelivery?: boolean
+  /** kind 'reply' only: send the first email later, at this time. */
+  sendAt?: number
   email?: Pick<CustomerMessageInput, 'bodyFullHtml' | 'bodyText' | 'from' | 'to' | 'messageId' | 'inReplyTo' | 'refs' | 'historical'>
 }
 
@@ -786,11 +788,16 @@ export function createConversation(input: CreateInput, actor: Actor): { id: numb
           attachmentIds: input.attachmentIds,
           createdAt: input.createdAt,
           skipDelivery: input.skipDelivery,
+          sendAt: input.sendAt,
           // An assignee given here was set above. Without one, the mailbox's setting decides.
           assigneeId: input.assigneeId,
         },
         actor,
       )
+      // Only a scheduled email so far: nobody is waiting on us, so it waits as pending, with the email as its preview.
+      if (get(`SELECT 1 FROM threads WHERE id = ? AND state = 'scheduled'`, threadId)) {
+        run(`UPDATE conversations SET status = 'pending', preview = ? WHERE id = ?`, previewOf(htmlToText(cleanHtml(input.bodyHtml))), id)
+      }
     } else {
       threadId = addNote(id, { bodyHtml: input.bodyHtml, attachmentIds: input.attachmentIds, createdAt: input.createdAt }, actor)
       run('UPDATE conversations SET preview = ?, status = ? WHERE id = ?', previewOf(htmlToText(input.bodyHtml)), input.status ?? 'active', id)

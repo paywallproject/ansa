@@ -626,6 +626,7 @@ api.post('/conversations', async (c) => {
       cc: data.cc,
       bcc: data.bcc,
       attachmentIds: Array.isArray(data.attachmentIds) ? data.attachmentIds.map(int) : undefined,
+      sendAt: kind === 'reply' && Number(data.sendAt) > 0 ? Number(data.sendAt) : undefined,
     },
     actor,
   )

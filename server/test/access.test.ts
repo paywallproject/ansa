@@ -256,3 +256,25 @@ test('show original: the email as it arrived, its plain text and headers, kept u
   assert.equal(older.available, false)
   assert.equal(typeof older.text, 'string')
 })
+
+test('a new email can be sent later: it waits as pending, then goes out like any scheduled reply', async () => {
+  const sendAt = Date.now() + 3_600_000
+  const res = await call(adminToken, 'POST', '/conversations', { mailboxId: sales, customerEmail: 'later@example.com', subject: 'Following up', bodyHtml: '<p>See you next week</p>', kind: 'reply', sendAt })
+  assert.equal(res.status, 201)
+  const conv = res.data.conversation
+  assert.equal(conv.status, 'pending')
+  assert.equal(conv.preview, 'See you next week')
+  assert.equal(conv.threads[0].state, 'scheduled')
+  assert.equal(conv.threads[0].sendAt, sendAt)
+
+  const realNow = Date.now
+  Date.now = () => sendAt + 1000
+  try {
+    await conversations.dispatchScheduled()
+  } finally {
+    Date.now = realNow
+  }
+  const sent = conversations.getConversation(conv.id)
+  assert.equal(sent.threads[0].state, 'sent')
+  assert.equal(sent.status, 'pending')
+})
