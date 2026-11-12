@@ -1,6 +1,4 @@
 @import 'tailwindcss';
-/* Hanken Grotesk: a narrow, Helvetica-like grotesque, close to Help Scout's type. Self-hosted, like everything else. */
-@import '@fontsource-variable/hanken-grotesk';
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
@@ -67,7 +65,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Hanken Grotesk Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* The device's own UI font, as Help Scout falls back to: San Francisco on Apple devices, Segoe UI on Windows. */
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
