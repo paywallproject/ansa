@@ -298,7 +298,9 @@ export function reindex(conversationId: number) {
 }
 
 function touch(conversationId: number, mailboxId: number, reason: string, actor: Actor) {
-  publish({ type: 'conversation', id: conversationId, mailboxId, reason, actorId: actor.userId })
+  // The source lets browsers tell a live chat from email, for chat notifications, without asking again.
+  const source = get<{ source: string }>('SELECT source FROM conversations WHERE id = ?', conversationId)?.source
+  publish({ type: 'conversation', id: conversationId, mailboxId, reason, actorId: actor.userId, source })
 }
 
 /** Tell apps about a reply or note. A conversation that starts with one also counts as created. */

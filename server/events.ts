@@ -1,7 +1,7 @@
 /** In-process event bus that feeds the browser over Server-Sent Events, plus viewer presence. */
 
 export type AppEvent =
-  | { type: 'conversation'; id: number; mailboxId: number; reason: string; actorId?: number | null }
+  | { type: 'conversation'; id: number; mailboxId: number; reason: string; actorId?: number | null; source?: string }
   | { type: 'presence'; conversationId: number; viewers: Viewer[] }
   | { type: 'mailbox'; id: number }
   | { type: 'refresh'; scope: string }
