@@ -62,7 +62,8 @@ export const visibleFolders = () => FOLDERS.filter((f) => (f.id !== 'mentioned' 
 
 const folderItem = (active: boolean) =>
   cx(
-    'group flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors [&>svg]:size-4 [&>svg]:shrink-0',
+    // Bigger on a phone, where the folders open in a drawer and are tapped with a thumb.
+    'group flex h-11 items-center gap-3 rounded-lg px-3 text-[15px] font-medium transition-colors md:h-8 md:gap-2.5 md:rounded-md md:px-2.5 md:text-[13px] [&>svg]:size-5 [&>svg]:shrink-0 md:[&>svg]:size-4',
     active ? 'bg-surface text-accent-fg shadow-card' : 'text-fg-2 hover:bg-hover hover:text-fg [&>svg]:text-fg-3',
   )
 
@@ -288,7 +289,7 @@ function FolderSidebar({ mailbox, onNavigate }: { mailbox: Mailbox; onNavigate?:
             onNavigate?.()
             shell.compose({ mailboxId: mailbox.id })
           }}
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-line-strong bg-surface text-[13px] font-medium text-fg-2 shadow-card transition-colors hover:text-fg"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-line-strong bg-surface text-[15px] font-medium md:h-9 md:text-[13px] text-fg-2 shadow-card transition-colors hover:text-fg"
         >
           <SquarePen className="size-4" aria-hidden />
           New conversation

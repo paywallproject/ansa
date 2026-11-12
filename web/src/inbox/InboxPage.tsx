@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, ChevronDown, Clock, Eye, Inbox, PenLine, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
 import { canSee } from '../lib/access'
@@ -11,6 +11,7 @@ import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinn
 import { FOLDERS } from '../Shell'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { ConversationView } from './ConversationView'
+import { SwipeRow } from './SwipeRow'
 
 type Sort = 'recent' | 'waiting' | 'oldest'
 const SORTS: Record<Sort, string> = { recent: 'Newest activity', waiting: 'Longest waiting', oldest: 'Oldest activity' }
@@ -95,6 +96,23 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     },
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
+  // Swipe a row on a phone: close it, or take it. Undo puts it back.
+  const quick = useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Record<string, unknown>; undo: Record<string, unknown>; message: string }) => api.patch(`/conversations/${id}`, patch),
+    onSuccess: (_data, { id, undo, message }) => {
+      void client.invalidateQueries({ queryKey: ['conversations'] })
+      void client.invalidateQueries({ queryKey: ['mailboxes'] })
+      void client.invalidateQueries({ queryKey: ['conversation', id] })
+      toast(message, { action: { label: 'Undo', run: () => quick.mutate({ id, patch: undo, undo: {}, message: 'Undone' }) } })
+    },
+    onError: (err: Error) => toast(err.message, { kind: 'error' }),
+  })
+  const swipeClose = (c: ConversationSummary) => quick.mutate({ id: c.id, patch: { status: 'closed' }, undo: { status: c.status }, message: 'Closed' })
+  const swipeAssign = (c: ConversationSummary) => {
+    const mine = c.assignee?.id === user.id
+    quick.mutate({ id: c.id, patch: { assigneeId: mine ? null : user.id }, undo: { assigneeId: c.assignee?.id ?? null }, message: mine ? 'Unassigned' : 'Assigned to you' })
+  }
+
   const bulkDelete = async () => {
     const ok = await confirm({ title: `Delete ${plural(checked.size, 'conversation')}?`, body: 'Their messages, notes and attachments are removed for the whole team. You cannot undo this.', confirmLabel: 'Delete', danger: true })
     if (ok) bulk.mutate({ delete: true })
@@ -306,7 +324,16 @@ export function InboxPage({ search = false }: { search?: boolean }) {
                       {STATUS_LABEL.pending === 'Pending' ? 'Pending · waiting on the customer' : STATUS_LABEL.pending}
                     </li>
                   )}
-                  <Row conversation={c} to={`${base}/${c.id}${suffix}`} checked={checked.has(c.id)} onCheck={() => toggle(c.id)} showMailbox={search} folder={search ? null : folder} />
+                  <Row
+                    conversation={c}
+                    to={`${base}/${c.id}${suffix}`}
+                    checked={checked.has(c.id)}
+                    onCheck={() => toggle(c.id)}
+                    showMailbox={search}
+                    folder={search ? null : folder}
+                    onSwipeClose={c.status === 'closed' ? undefined : () => swipeClose(c)}
+                    onSwipeAssign={canSee(user, c.mailboxId) ? () => swipeAssign(c) : undefined}
+                  />
                 </Fragment>
               ))}
             </ul>
@@ -367,7 +394,25 @@ function ViewersBadge({ viewers }: { viewers: Viewer[] }) {
   )
 }
 
-function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { conversation: ConversationSummary; to: string; checked: boolean; onCheck: () => void; showMailbox: boolean; folder: Folder | null }) {
+function Row({
+  conversation: c,
+  to,
+  checked,
+  onCheck,
+  showMailbox,
+  folder,
+  onSwipeClose,
+  onSwipeAssign,
+}: {
+  conversation: ConversationSummary
+  to: string
+  checked: boolean
+  onCheck: () => void
+  showMailbox: boolean
+  folder: Folder | null
+  onSwipeClose?: () => void
+  onSwipeAssign?: () => void
+}) {
   const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
   // Waiting on the customer: shown quieter, so the conversations that need us stand out.
   const pending = c.status === 'pending'
@@ -379,28 +424,44 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
   const when = openFolder && c.waitingSince ? c.waitingSince : c.updatedAt
 
   return (
-    <li className={cx('group flex border-b border-line transition-shadow hover:shadow-[inset_2px_0_0_var(--accent)]', checked ? 'bg-accent-soft/60' : 'hover:bg-sunken')}>
-      <div className="flex w-10 shrink-0 justify-center pt-3.5 md:w-12 md:items-center md:pt-0">
+    <SwipeRow
+      className="group border-b border-line"
+      contentClassName={cx('w-full transition-shadow hover:shadow-[inset_2px_0_0_var(--accent)]', checked ? 'bg-accent-soft' : 'bg-surface hover:bg-sunken')}
+      end={onSwipeClose && { label: 'Close', icon: <Archive className="size-5" />, tone: 'bg-ok', onCommit: onSwipeClose }}
+      start={onSwipeAssign && { label: c.assignee?.id === me.id ? 'Unassign' : 'Assign to me', icon: <UserRoundCheck className="size-5" />, tone: 'bg-accent', onCommit: onSwipeAssign }}
+    >
+      <div className="flex w-10 shrink-0 justify-center pt-4 md:w-12 md:items-center md:pt-0">
         <CheckBox checked={checked} label={`Select conversation: ${c.subject}`} onClick={onCheck} />
       </div>
-      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2.5 pr-4 outline-offset-[-2px] md:pr-5')}>
-        <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
+      <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-3.5 pr-4 outline-offset-[-2px] md:py-2.5 md:pr-5')}>
+        <span className={cx('truncate text-[15px] md:text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
             {viewers.length > 0 && <ViewersBadge viewers={viewers} />}
-            <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
+            <span className={cx('truncate text-[15px] md:text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
             {c.tags.slice(0, 3).map((t) => (
-              <span key={t.id} className="hidden h-5 shrink-0 items-center gap-1 rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover sm:inline-flex">
+              <span key={t.id} className="hidden h-5 shrink-0 items-center gap-1 rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover md:inline-flex">
                 <span className="size-1.5 shrink-0 rounded-full" style={{ background: t.color }} aria-hidden />
                 {t.name}
               </span>
             ))}
-            {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 sm:inline">+{c.tags.length - 3}</span>}
+            {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 md:inline">+{c.tags.length - 3}</span>}
           </span>
-          <span className={cx('mt-0.5 block truncate text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          <span className={cx('mt-0.5 block truncate text-sm md:text-[13px]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          {/* On a phone, tags get a line of their own, under the preview. */}
+          {c.tags.length > 0 && (
+            <span className="mt-1.5 flex flex-wrap gap-1 md:hidden">
+              {c.tags.slice(0, 4).map((t) => (
+                <span key={t.id} className="inline-flex h-5 items-center gap-1 rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2">
+                  <span className="size-1.5 shrink-0 rounded-full" style={{ background: t.color }} aria-hidden />
+                  {t.name}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         <span className="hidden items-center justify-end gap-2 md:flex">
           {c.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-fg-3" aria-label="Has attachments" />}
@@ -412,10 +473,10 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
           )}
         </span>
         <span className={cx('hidden text-[13px] tabular-nums md:block', pending ? 'text-fg-3' : 'font-medium text-fg-2')}>{c.id}</span>
-        <time className={cx('col-start-2 row-start-1 shrink-0 text-xs tabular-nums md:col-start-auto md:row-start-auto md:text-[13px]', waiting ? 'font-semibold text-fg' : 'text-fg-3')} dateTime={new Date(when).toISOString()}>
+        <time className={cx('col-start-2 row-start-1 shrink-0 text-[13px] tabular-nums md:col-start-auto md:row-start-auto md:text-[13px]', waiting ? 'font-semibold text-fg' : 'text-fg-3')} dateTime={new Date(when).toISOString()}>
           {shortTime(when)}
         </time>
       </Link>
-    </li>
+    </SwipeRow>
   )
 }
