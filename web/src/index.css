@@ -95,6 +95,15 @@
   --shadow-card: var(--shadow-card);
 }
 
+/* The room to keep clear of the home bar. Zero when the app's own area already ends above it, which a
+   home screen app on newer iOS does (useVisualViewport sets .ends-above-home-bar). */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom);
+}
+.ends-above-home-bar {
+  --safe-bottom: 0px;
+}
+
 @layer base {
   html,
   body,
@@ -316,7 +325,7 @@
 @media (display-mode: standalone) {
   #root {
     box-sizing: border-box;
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) var(--safe-bottom) env(safe-area-inset-left);
   }
   body::before {
     content: '';
@@ -328,7 +337,7 @@
   }
   /* Full-screen layers sit outside #root, so they need the same clearance. */
   .safe-pad {
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) var(--safe-bottom) env(safe-area-inset-left);
   }
   .safe-shift {
     margin-top: env(safe-area-inset-top);
@@ -359,7 +368,7 @@
   }
   .safe-pad-y {
     padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--safe-bottom);
   }
   /* The strip behind the home bar shows the page background: match the white of the lists. */
   body {
@@ -371,7 +380,7 @@
    bar, without the home-bar padding while the keyboard is up (it covers the home bar). */
 .sheet-safe {
   padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-bottom);
 }
 .keyboard-open .sheet-safe {
   padding-bottom: 0;

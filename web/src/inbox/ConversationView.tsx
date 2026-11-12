@@ -230,7 +230,7 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
                 </span>
               </span>
             </button>
-            <nav aria-label="Conversation actions" className="flex items-center justify-around border-t border-line bg-surface px-2 pt-1.5 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+            <nav aria-label="Conversation actions" className="flex items-center justify-around border-t border-line bg-surface px-2 pt-1.5 pb-[calc(0.5rem+var(--safe-bottom))]">
               {(
                 [
                   ['Back to the list', ArrowLeft, onBack],

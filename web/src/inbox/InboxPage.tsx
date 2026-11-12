@@ -326,7 +326,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto max-md:pb-[env(safe-area-inset-bottom)]">
+      <div className="min-h-0 flex-1 overflow-y-auto max-md:pb-[var(--safe-bottom)]">
         {list.isPending && list.fetchStatus !== 'idle' ? (
           <div className="flex justify-center py-10">
             <Spinner />
