@@ -24,6 +24,7 @@ import {
   UserRound,
   X,
   Clock,
+  FileCode,
   MessageCircle,
 } from 'lucide-react'
 import { api, qs } from '../lib/api'
@@ -789,6 +790,84 @@ function trimBlankEdges(html: string): string {
   return template.innerHTML
 }
 
+/** The email as it arrived: the sender's plain-text version, and the raw source with every header. */
+function OriginalDialog({ thread, onClose }: { thread: Thread; onClose: () => void }) {
+  const [tab, setTab] = useState<'text' | 'source'>('text')
+  const original = useQuery({
+    queryKey: ['original', thread.id],
+    queryFn: () => api.get<{ available: boolean; text: string; source: string | null; headers: { name: string; value: string }[] }>(`/threads/${thread.id}/original`),
+    staleTime: Infinity,
+  })
+  const header = (name: string) => original.data?.headers.find((h) => h.name.toLowerCase() === name)?.value
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Original message"
+      width={760}
+      footer={
+        <>
+          {original.data?.available && (
+            <a href={`/api/threads/${thread.id}/original.eml`} download className="mr-auto">
+              <Button icon={<Download />}>Download .eml</Button>
+            </a>
+          )}
+          <Button onClick={onClose}>Close</Button>
+        </>
+      }
+    >
+      {original.isPending ? (
+        <Spinner />
+      ) : original.isError ? (
+        <p className="text-[13px] text-danger">{(original.error as Error).message}</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {original.data.available ? (
+            <>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[13px]">
+                {(['from', 'to', 'cc', 'date', 'subject'] as const).map((name) =>
+                  header(name) ? (
+                    <Fragment key={name}>
+                      <dt className="text-fg-3 capitalize">{name}</dt>
+                      <dd className="truncate" title={header(name)}>
+                        {header(name)}
+                      </dd>
+                    </Fragment>
+                  ) : null,
+                )}
+              </dl>
+              <div role="tablist" aria-label="View" className="flex w-max gap-1 rounded-lg bg-sunken p-1">
+                {(['text', 'source'] as const).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === id}
+                    onClick={() => setTab(id)}
+                    className={cx('h-7 rounded-md px-3 text-[13px] font-medium transition-colors', tab === id ? 'bg-surface text-fg shadow-card' : 'text-fg-2 hover:text-fg')}
+                  >
+                    {id === 'text' ? 'Plain text' : 'Source'}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="rounded-lg bg-sunken px-3 py-2 text-[13px] text-fg-2">This email arrived before originals were kept, so only its text is shown. Email received from now on keeps its original.</p>
+          )}
+          <pre
+            className={cx(
+              'max-h-[55vh] overflow-auto rounded-lg border border-line bg-sunken p-3 text-xs leading-relaxed whitespace-pre-wrap text-fg [overflow-wrap:anywhere]',
+              tab === 'source' && original.data.available ? 'font-mono' : 'font-sans text-[13px]',
+            )}
+          >
+            {tab === 'source' && original.data.available ? original.data.source : original.data.text || 'No text in this message.'}
+          </pre>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean; onToggle: () => void }) {
   const client = useQueryClient()
   const { toast } = useFeedback()
@@ -811,6 +890,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   })
   const lightbox = useLightbox()
   const zone = useZone()
+  const [original, setOriginal] = useState(false)
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
@@ -851,6 +931,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
 
   return (
     <li className="relative md:px-14">
+      {original && <OriginalDialog thread={thread} onClose={() => setOriginal(false)} />}
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
       <Avatar name={name} color={color} src={photo} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
@@ -878,6 +959,29 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
             <time className={cx('shrink-0 text-xs tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
               {timeOnly.format(thread.createdAt)}
             </time>
+            {isCustomer && thread.via === 'email' && (
+              <Popover
+                align="end"
+                width={200}
+                trigger={({ ref, ...props }) => (
+                  <button ref={ref} type="button" {...props} aria-label="Message actions" title="Message actions" className="-my-1 -mr-1.5 flex size-7 shrink-0 items-center justify-center rounded-md text-fg-3 hover:bg-hover hover:text-fg">
+                    <Ellipsis className="size-4" aria-hidden />
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <MenuItem
+                    icon={<FileCode />}
+                    onSelect={() => {
+                      close()
+                      setOriginal(true)
+                    }}
+                  >
+                    Show original
+                  </MenuItem>
+                )}
+              </Popover>
+            )}
           </div>
           {folded ? (
             <button type="button" onClick={onToggle} tabIndex={-1} className="mt-1 block w-full truncate text-left text-[13px] text-fg-3">

@@ -1,3 +1,5 @@
+import crypto from 'node:crypto'
+import { blobs } from '../blobs.ts'
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
 import { get, run, getSetting, setSetting } from '../db.ts'
 import { cleanHtml, fillTemplate, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
@@ -66,6 +68,29 @@ function teammateReply(mailbox: MailboxRow, mail: ParsedMail, ref: { conversatio
   } catch (err) {
     notifyReplyRejected(mailbox, user.email, ref.conversationId, `${brandName()} could not send your reply: ${(err as Error).message}`)
     return null
+  }
+}
+
+/** Keep at most this much of a message's source. Larger mail is mostly attachments, which are stored anyway. */
+export const ORIGINAL_MAX_BYTES = 1024 * 1024
+
+/**
+ * Keep the email as it arrived, for "Show original". A message over the limit keeps only its headers, since the
+ * rest is mostly attachments that are stored as files already.
+ */
+function keepOriginal(threadId: number, source: Buffer | string) {
+  try {
+    let bytes = typeof source === 'string' ? new TextEncoder().encode(source) : new Uint8Array(source)
+    if (bytes.byteLength > ORIGINAL_MAX_BYTES) {
+      const text = new TextDecoder().decode(bytes.subarray(0, 256 * 1024))
+      const end = text.search(/\r?\n\r?\n/)
+      bytes = new TextEncoder().encode(`${end > 0 ? text.slice(0, end) : text.slice(0, 64 * 1024)}\r\n\r\n[${brandName()} kept only the headers: the full message was larger than 1 MB.]\r\n`)
+    }
+    const key = `raw/${threadId}-${crypto.randomBytes(8).toString('hex')}`
+    blobs.put(key, bytes)
+    run('UPDATE threads SET raw_key = ? WHERE id = ?', key, threadId)
+  } catch (err) {
+    console.error('[ingest] could not keep the original:', (err as Error).message)
   }
 }
 
@@ -154,6 +179,8 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
   } else {
     threadId = addCustomerMessage(conversationId!, { customerId: customer.id, bodyHtml, cc, createdAt, via: 'email', ...email })
   }
+
+  keepOriginal(threadId, source)
 
   // Attachments. Inline images are rewritten from cid: links to our own URLs.
   let hasFiles = false

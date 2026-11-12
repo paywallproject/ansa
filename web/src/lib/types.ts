@@ -176,6 +176,8 @@ export interface Thread {
   error: string | null
   event: Record<string, any> | null
   via: string
+  /** The email as it arrived is kept, for "Show original". */
+  hasOriginal: boolean
   createdAt: number
   attachments: Attachment[]
 }

@@ -19,7 +19,8 @@ import {
 import { agentActive, leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
 import { ASSIGN_AFTER_REPLY, explainMailError, loginUser, testSmtp, type MailboxRow } from './mail/outbound.ts'
 import { restartMailbox, syncMailboxNow, testImap } from './mail/imap.ts'
-import { cleanHtml } from './mail/html.ts'
+import { cleanHtml, htmlToText } from './mail/html.ts'
+import { simpleParser } from 'mailparser'
 import {
   addNote,
   addReply,
@@ -498,7 +499,8 @@ api.patch('/mailboxes/:id', requireAdmin, async (c) => {
 api.delete('/mailboxes/:id', requireAdmin, async (c) => {
   const id = idParam(c.req.param('id'))
   const files = all<{ storage_key: string }>(
-    'SELECT a.storage_key FROM attachments a JOIN threads t ON t.id = a.thread_id JOIN conversations c ON c.id = t.conversation_id WHERE c.mailbox_id = ?',
+    `SELECT a.storage_key FROM attachments a JOIN threads t ON t.id = a.thread_id JOIN conversations c ON c.id = t.conversation_id WHERE c.mailbox_id = ?1
+     UNION ALL SELECT t.raw_key FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE c.mailbox_id = ?1 AND t.raw_key IS NOT NULL`,
     id,
   )
   tx(() => {
@@ -747,6 +749,34 @@ api.delete('/conversations/:id/presence', (c) => {
 api.get('/threads/:id/full', (c) => {
   assertThread(c.get('user'), idParam(c.req.param('id')))
   return c.json({ html: getQuotedHtml(idParam(c.req.param('id'))) })
+})
+
+// "Show original": the email as it arrived. Kept for mail received since this feature; older mail has none.
+api.get('/threads/:id/original', async (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  const t = get<{ raw_key: string | null; body_html: string; body_full_html: string | null; type: string }>('SELECT raw_key, body_html, body_full_html, type FROM threads WHERE id = ?', id)!
+  const raw = t.raw_key ? blobs.get(t.raw_key) : null
+  if (!raw) return c.json({ available: false, text: htmlToText(t.body_full_html || t.body_html), source: null, headers: [] })
+  const source = new TextDecoder().decode(raw)
+  const mail = await simpleParser(Buffer.from(raw), { skipImageLinks: true })
+  const headers = mail.headerLines.map((h) => {
+    const at = h.line.indexOf(':')
+    return { name: at > 0 ? h.line.slice(0, at) : h.key, value: (at > 0 ? h.line.slice(at + 1) : h.line).replace(/\r?\n[ \t]+/g, ' ').trim() }
+  })
+  const text = mail.text?.trim() || (mail.html ? htmlToText(cleanHtml(mail.html)) : '') || htmlToText(t.body_full_html || t.body_html)
+  return c.json({ available: true, text, source, headers })
+})
+
+api.get('/threads/:id/original.eml', (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  const key = get<{ raw_key: string | null }>('SELECT raw_key FROM threads WHERE id = ?', id)?.raw_key
+  const raw = key ? blobs.get(key) : null
+  if (!raw) throw new AppError('The original of this message was not kept.', 404)
+  return new Response(raw as Uint8Array<ArrayBuffer>, {
+    headers: { 'Content-Type': 'message/rfc822', 'Content-Disposition': `attachment; filename="message-${id}.eml"`, 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' },
+  })
 })
 
 api.post('/threads/:id/retry', (c) => {
