@@ -95,13 +95,9 @@
   --shadow-card: var(--shadow-card);
 }
 
-/* The room to keep clear of the home bar. Zero when the app's own area already ends above it, which a
-   home screen app on newer iOS does (useVisualViewport sets .ends-above-home-bar). */
+/* The room to keep clear of the home bar. */
 :root {
   --safe-bottom: env(safe-area-inset-bottom);
-}
-.ends-above-home-bar {
-  --safe-bottom: 0px;
 }
 
 @layer base {
@@ -110,7 +106,10 @@
   #root {
     height: 100%;
   }
-  /* On touch screens the app takes the height the keyboard leaves visible (set by useVisualViewport). */
+  /* On touch screens the page takes the height set by useVisualViewport: the real screen, or what the keyboard
+     leaves visible. html and body too, or they would cut off the app at the height iOS reports. */
+  html,
+  body,
   #root {
     height: var(--app-height, 100%);
   }
