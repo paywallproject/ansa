@@ -133,6 +133,10 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
       },
       a: () => conversation && update.mutate({ assigneeId: conversation.assignee?.id === user.id ? null : user.id }),
       e: () => setStatus('closed'),
+      // Status: press S, then C (closed), P (pending) or A (active).
+      's c': () => setStatus('closed'),
+      's p': () => setStatus('pending'),
+      's a': () => setStatus('active'),
     },
     !!conversation,
   )

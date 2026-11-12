@@ -519,6 +519,9 @@ const SHORTCUTS: { group: string; items: [string[], string][] }[] = [
       [['R'], 'Reply'],
       [['N'], 'Add a note'],
       [['A'], 'Assign to me'],
+      [['S', 'then', 'C'], 'Close conversation'],
+      [['S', 'then', 'P'], 'Mark pending'],
+      [['S', 'then', 'A'], 'Mark active'],
       [['E'], 'Close conversation'],
       [['⌘', 'Enter'], 'Send'],
     ],
@@ -537,9 +540,15 @@ function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () => void }
                 <div key={label} className="flex h-8 items-center justify-between border-b border-line last:border-0">
                   <dt className="text-[13px]">{label}</dt>
                   <dd className="flex gap-1">
-                    {keys.map((k) => (
-                      <Kbd key={k}>{k}</Kbd>
-                    ))}
+                    {keys.map((k) =>
+                      k === 'then' ? (
+                        <span key={k} className="self-center px-0.5 text-xs text-fg-3">
+                          then
+                        </span>
+                      ) : (
+                        <Kbd key={k}>{k}</Kbd>
+                      ),
+                    )}
                   </dd>
                 </div>
               ))}
