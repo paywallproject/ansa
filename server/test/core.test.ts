@@ -549,3 +549,36 @@ test('a message too large for one database value is fitted: embedded pictures go
   assert.match(long, /too long to keep/)
   assert.equal(html.fitStored('<p>small</p>'), '<p>small</p>')
 })
+
+test('a reply to an email sent from Help Scout joins its imported conversation, quote folded, marker gone', async () => {
+  const conv = conversations.createConversation({ mailboxId, customerEmail: 'tim@itemlive.test', subject: 'Newsletter sign up form', bodyHtml: '<p>Original</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  run(`INSERT INTO import_map (source, external_id, conversation_id, external_number) VALUES ('helpscout', 'hs-1', ?, 85385)`, conv.id)
+  const html = '<div>Thanks for adding that.</div><div class="gmail_quote"><div>On Thu, Nov 12, 2026 at 6:57 AM Tyler &lt;support@acme.test&gt; wrote:</div><blockquote>Sure thing.<br>{#HS:3510997181-85385#}</blockquote></div>'
+  const result = await ingestRaw(mailboxId, eml({ From: 'Tim <tim@itemlive.test>', To: 'support@acme.test', Subject: 'Re: Newsletter sign up form', 'Message-ID': '<hs-reply-1@itemlive.test>', 'In-Reply-To': '<unknown-to-ansa@helpscout.net>' }, html, 'text/html'))
+  assert.equal(result?.conversationId, conv.id)
+  const thread = get<any>('SELECT body_html, body_full_html FROM threads WHERE message_id = ?', '<hs-reply-1@itemlive.test>')
+  assert.match(thread.body_html, /Thanks for adding that/)
+  assert.doesNotMatch(thread.body_html, /wrote:|Sure thing|#HS:/)
+  assert.match(thread.body_full_html, /Sure thing/)
+  assert.doesNotMatch(thread.body_full_html, /#HS:/)
+})
+
+test('a Help Scout marker does not file someone else into a conversation', async () => {
+  const conv = conversations.createConversation({ mailboxId, customerEmail: 'owner@itemlive.test', subject: 'Private', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  run(`INSERT INTO import_map (source, external_id, conversation_id, external_number) VALUES ('helpscout', 'hs-2', ?, 77777)`, conv.id)
+  const result = await ingestRaw(mailboxId, eml({ From: 'stranger@evil.test', To: 'support@acme.test', Subject: 'Hi', 'Message-ID': '<stranger-1@evil.test>' }, 'Let me in {#HS:1-77777#}'))
+  assert.notEqual(result?.conversationId, conv.id)
+})
+
+test('a new conversation folds quoted history, but a forward keeps it in view', async () => {
+  const quoted = '<div>Following up on this.</div><div class="gmail_quote"><div>On Mon, Nov 9, 2026 at 9:00 AM Someone &lt;a@b.test&gt; wrote:</div><blockquote>Older text</blockquote></div>'
+  await ingestRaw(mailboxId, eml({ From: 'new1@example.test', To: 'support@acme.test', Subject: 'Re: an old thread', 'Message-ID': '<new-quoted@example.test>' }, quoted, 'text/html'))
+  const reply = get<any>('SELECT body_html, body_full_html FROM threads WHERE message_id = ?', '<new-quoted@example.test>')
+  assert.doesNotMatch(reply.body_html, /Older text/)
+  assert.match(reply.body_full_html, /Older text/)
+
+  await ingestRaw(mailboxId, eml({ From: 'new2@example.test', To: 'support@acme.test', Subject: 'Fwd: an invoice', 'Message-ID': '<new-forward@example.test>' }, quoted, 'text/html'))
+  const forward = get<any>('SELECT body_html, body_full_html FROM threads WHERE message_id = ?', '<new-forward@example.test>')
+  assert.match(forward.body_html, /Older text/)
+  assert.equal(forward.body_full_html, null)
+})
