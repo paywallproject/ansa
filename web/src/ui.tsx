@@ -154,7 +154,22 @@ export function Switch({ checked, onChange, label, description, disabled }: { ch
 // Small display pieces
 // ---------------------------------------------------------------------------------------------
 
-export function Avatar({ name, color, size = 28, className }: { name: string; color?: string; size?: number; className?: string }) {
+export function Avatar({ name, color, src, size = 28, className }: { name: string; color?: string; src?: string | null; size?: number; className?: string }) {
+  const [failed, setFailed] = useState<string | null>(null)
+  if (src && failed !== src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        aria-hidden
+        width={size}
+        height={size}
+        onError={() => setFailed(src)}
+        className={cx('inline-block shrink-0 rounded-full bg-sunken object-cover select-none', className)}
+        style={{ width: size, height: size }}
+      />
+    )
+  }
   return (
     <span
       aria-hidden

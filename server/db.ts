@@ -303,6 +303,41 @@ const migrations: string[] = [
   -- 'replier' (the person who sent it) or 'choose' (picked in the composer at send time).
   ALTER TABLE mailboxes ADD COLUMN assign_after_reply TEXT NOT NULL DEFAULT 'replier';
   `,
+  `
+  -- Teammate photos. The image lives in blob storage; avatar_version is NULL when there is none.
+  ALTER TABLE users ADD COLUMN avatar_key TEXT;
+  ALTER TABLE users ADD COLUMN avatar_mime TEXT;
+  ALTER TABLE users ADD COLUMN avatar_version INTEGER;
+  -- Live chat: a widget on a website starts conversations in a mailbox. chat_key is the public id
+  -- in the embed code; chat_settings holds the widget's title, greeting, color and allowed websites.
+  ALTER TABLE mailboxes ADD COLUMN chat_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE mailboxes ADD COLUMN chat_key TEXT;
+  ALTER TABLE mailboxes ADD COLUMN chat_settings TEXT NOT NULL DEFAULT '{}';
+  CREATE UNIQUE INDEX mailboxes_chat_key ON mailboxes(chat_key);
+  -- A website visitor's hold on one chat conversation. The browser keeps the token; we keep its hash.
+  CREATE TABLE chat_visitors (
+    token_hash TEXT PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+  );
+  CREATE INDEX chat_visitors_conversation ON chat_visitors(conversation_id);
+  `,
+  `
+  -- A teammate's own live chat status: 'online' (available) or 'away'. They also need the app open to count.
+  ALTER TABLE users ADD COLUMN chat_status TEXT NOT NULL DEFAULT 'online';
+  `,
+  `
+  -- Mailbox access. A teammate with all_mailboxes = 1 sees every mailbox; otherwise only those listed in
+  -- mailbox_users. Admins always see every mailbox.
+  ALTER TABLE users ADD COLUMN all_mailboxes INTEGER NOT NULL DEFAULT 1;
+  CREATE TABLE mailbox_users (
+    mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (mailbox_id, user_id)
+  ) WITHOUT ROWID;
+  CREATE INDEX mailbox_users_user ON mailbox_users(user_id);
+  `,
 ]
 
 export function migrate() {

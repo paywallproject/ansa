@@ -1,8 +1,9 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
-import { get, run, now } from './db.ts'
+import { all, get, run, now } from './db.ts'
 import { config } from './config.ts'
 import { randomToken, sha256 } from './crypto.ts'
+import { markAgentSeen } from './events.ts'
 
 export interface User {
   id: number
@@ -15,6 +16,13 @@ export interface User {
   notifyReplies: boolean
   notifyMentions: boolean
   disabled: boolean
+  /** The teammate's photo, or null to show initials. Public, because the chat widget shows it. */
+  avatarUrl: string | null
+  /** Live chat: 'online' when available to chat, 'away' when not. */
+  chatStatus: 'online' | 'away'
+  /** 'all': every mailbox (always so for admins). 'some': only the mailboxes in mailboxIds. */
+  mailboxAccess: 'all' | 'some'
+  mailboxIds: number[]
   createdAt: number
 }
 
@@ -32,8 +40,19 @@ export function serializeUser(row: any): User {
     notifyReplies: !!row.notify_replies,
     notifyMentions: row.notify_mentions === undefined ? true : !!row.notify_mentions,
     disabled: !!row.disabled,
+    avatarUrl: avatarUrl(row.id, row.avatar_version),
+    chatStatus: row.chat_status === 'away' ? 'away' : 'online',
+    ...mailboxAccessOf(row),
     createdAt: row.created_at,
   }
+}
+
+/** Where a teammate's photo is served. The version changes with each upload, so the image can be cached for good. */
+export const avatarUrl = (userId: number, version: number | null | undefined) => (version ? `/api/avatars/${userId}?v=${version}` : null)
+
+function mailboxAccessOf(row: any): { mailboxAccess: 'all' | 'some'; mailboxIds: number[] } {
+  if (row.role === 'admin' || row.all_mailboxes === undefined || row.all_mailboxes) return { mailboxAccess: 'all', mailboxIds: [] }
+  return { mailboxAccess: 'some', mailboxIds: all<{ mailbox_id: number }>('SELECT mailbox_id FROM mailbox_users WHERE user_id = ? ORDER BY mailbox_id', row.id).map((r) => r.mailbox_id) }
 }
 
 const COOKIE = 'ansa_session'
@@ -96,6 +115,8 @@ export const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
   }
   c.set('user', user)
   c.set('via', 'web')
+  // A signed-in browser means this teammate has the app open: they can be counted as available for chat.
+  markAgentSeen(user.id)
   return next()
 }
 

@@ -16,7 +16,7 @@ import {
   USER_COLORS,
   type Env,
 } from './auth.ts'
-import { leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
+import { agentActive, leavePresence, subscribe, touchPresence, viewersOf } from './events.ts'
 import { ASSIGN_AFTER_REPLY, explainMailError, testSmtp, type MailboxRow } from './mail/outbound.ts'
 import { restartMailbox, syncMailboxNow, testImap } from './mail/imap.ts'
 import { cleanHtml } from './mail/html.ts'
@@ -51,6 +51,8 @@ import { brandName, getWorkspace, publicWorkspace, saveWorkspace } from './servi
 import { blobs } from './blobs.ts'
 import { cancelImport, connectHelpScout, importStatus, resumeImport, startImport } from './services/import-helpscout.ts'
 import { publish } from './events.ts'
+import { assertConversation, assertMailbox, assertThread, canSeeMailbox, scopeOf } from './services/access.ts'
+import { chatOnline, chatSettingsOf, cleanChatSettings, ensureChatKey, type ChatMailbox } from './services/chat.ts'
 
 export const api = new Hono<Env>()
 
@@ -127,6 +129,16 @@ api.get('/brand/manifest', (c) => {
   return new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' } })
 })
 
+// A teammate's photo. Public, because the live chat widget shows who is answering.
+api.get('/avatars/:id', (c) => {
+  const row = get<{ avatar_key: string | null; avatar_mime: string | null }>('SELECT avatar_key, avatar_mime FROM users WHERE id = ?', idParam(c.req.param('id')))
+  const data = row?.avatar_key ? blobs.get(row.avatar_key) : null
+  if (!row?.avatar_mime || !data) throw new AppError('No photo.', 404)
+  return new Response(data as Uint8Array<ArrayBuffer>, {
+    headers: { 'Content-Type': row.avatar_mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'cross-origin' },
+  })
+})
+
 api.post('/setup', async (c) => {
   if (hasUsers()) throw new AppError('Setup is already complete.', 409)
   const data = await body(c)
@@ -165,6 +177,29 @@ api.post('/logout', (c) => {
 // Everything below needs a signed-in user or an API token.
 api.use('*', requireAuth)
 const actorOf = (c: { get: (key: 'user' | 'via') => any }): Actor => ({ userId: c.get('user').id, via: c.get('via') })
+/** Load a conversation the way this teammate may see it. */
+const conversationFor = (c: { get: (key: 'user') => any }, id: number) => getConversation(id, { userId: c.get('user').id, mailboxIds: scopeOf(c.get('user')) })
+
+/** Mailbox access from the teammate form: 'all', or a list of mailbox ids. */
+function applyMailboxAccess(userId: number, data: Record<string, any>) {
+  if (data.mailboxAccess === undefined) return
+  if (data.mailboxAccess === 'all') {
+    run('UPDATE users SET all_mailboxes = 1 WHERE id = ?', userId)
+    run('DELETE FROM mailbox_users WHERE user_id = ?', userId)
+    return
+  }
+  if (data.mailboxAccess !== 'some') throw new AppError("mailboxAccess must be 'all' or 'some'.")
+  const ids: number[] = (Array.isArray(data.mailboxIds) ? data.mailboxIds : []).map(int).filter((id: number) => id > 0 && get('SELECT 1 FROM mailboxes WHERE id = ?', id))
+  run('UPDATE users SET all_mailboxes = 0 WHERE id = ?', userId)
+  run('DELETE FROM mailbox_users WHERE user_id = ?', userId)
+  for (const id of new Set(ids)) run('INSERT INTO mailbox_users (mailbox_id, user_id) VALUES (?, ?)', id, userId)
+  // They let go of conversations in mailboxes they no longer see. An admin keeps every mailbox regardless.
+  const role = get<{ role: string }>('SELECT role FROM users WHERE id = ?', userId)?.role
+  if (role !== 'admin') {
+    const keep = [...new Set(ids)]
+    run(`UPDATE conversations SET assignee_id = NULL WHERE assignee_id = ? ${keep.length ? `AND mailbox_id NOT IN (${keep.join(',')})` : ''}`, userId)
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Me and team
@@ -189,6 +224,10 @@ api.patch('/me', async (c) => {
   if (typeof data.notifyAssigned === 'boolean') run('UPDATE users SET notify_assigned = ? WHERE id = ?', data.notifyAssigned, user.id)
   if (typeof data.notifyReplies === 'boolean') run('UPDATE users SET notify_replies = ? WHERE id = ?', data.notifyReplies, user.id)
   if (typeof data.notifyMentions === 'boolean') run('UPDATE users SET notify_mentions = ? WHERE id = ?', data.notifyMentions, user.id)
+  if (data.chatStatus === 'online' || data.chatStatus === 'away') {
+    run('UPDATE users SET chat_status = ? WHERE id = ?', data.chatStatus, user.id)
+    publish({ type: 'refresh', scope: 'users' })
+  }
   if (data.newPassword !== undefined) {
     const row = get<any>('SELECT password_hash FROM users WHERE id = ?', user.id)
     if (typeof data.currentPassword !== 'string' || !verifyPassword(data.currentPassword, row.password_hash)) throw new AppError('Your current password is not correct.')
@@ -204,7 +243,10 @@ function signOutEverywhere(userId: number, c: Parameters<typeof startSession>[0]
   if (c.get('via') === 'web') startSession(c, userId)
 }
 
-api.get('/users', (c) => c.json({ users: all('SELECT * FROM users ORDER BY disabled, name').map(serializeUser) }))
+// chatAvailable: set to Available and has the app open right now, so live chat counts them.
+api.get('/users', (c) =>
+  c.json({ users: all('SELECT * FROM users ORDER BY disabled, name').map(serializeUser).map((u) => ({ ...u, chatAvailable: !u.disabled && u.chatStatus === 'online' && agentActive(u.id) })) }),
+)
 
 api.post('/users', requireAdmin, async (c) => {
   const data = await body(c)
@@ -224,6 +266,7 @@ api.post('/users', requireAdmin, async (c) => {
     USER_COLORS[count % USER_COLORS.length],
     now(),
   )
+  applyMailboxAccess(id, data)
   return c.json({ user: serializeUser(get('SELECT * FROM users WHERE id = ?', id)) }, 201)
 })
 
@@ -241,6 +284,10 @@ api.patch('/users/:id', requireAdmin, async (c) => {
     run('UPDATE users SET email = ? WHERE id = ?', normEmail(data.email), id)
   }
   if (data.role === 'admin' || data.role === 'agent') run('UPDATE users SET role = ? WHERE id = ?', data.role, id)
+  if (data.mailboxAccess !== undefined) {
+    tx(() => applyMailboxAccess(id, data))
+    publish({ type: 'refresh', scope: 'users' })
+  }
   if (data.password) {
     run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(checkPassword(data.password)), id)
     // An admin reset is used when an account may be compromised: cut every session and token.
@@ -259,6 +306,39 @@ api.patch('/users/:id', requireAdmin, async (c) => {
   return c.json({ user: serializeUser(get('SELECT * FROM users WHERE id = ?', id)) })
 })
 
+// The web app calls this every minute, so a teammate with the app open counts as available for chat.
+// Signing the request in (requireAuth) is what records it.
+api.post('/me/heartbeat', (c) => c.json({ ok: true }))
+
+// Photos: your own, or a teammate's for an admin. The web app crops and shrinks the image before upload.
+const AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const AVATAR_MAX_BYTES = 512 * 1024
+const avatarLimit = bodyLimit({ maxSize: AVATAR_MAX_BYTES + 64 * 1024, onError: (c) => c.json({ error: 'The photo can be up to 512 KB.' }, 413) })
+
+async function setAvatar(userId: number, file: unknown | null) {
+  const before = get<{ avatar_key: string | null }>('SELECT avatar_key FROM users WHERE id = ?', userId)
+  if (!before) throw new AppError('Teammate not found.', 404)
+  if (file === null) {
+    run('UPDATE users SET avatar_key = NULL, avatar_mime = NULL, avatar_version = NULL WHERE id = ?', userId)
+  } else {
+    if (!(file instanceof File)) throw new AppError('Choose an image.')
+    if (!AVATAR_TYPES.has(file.type)) throw new AppError('Use a PNG, JPG, WebP or GIF image.')
+    if (file.size > AVATAR_MAX_BYTES) throw new AppError('The photo can be up to 512 KB.', 413)
+    const key = `avatars/${userId}-${randomToken(8)}`
+    blobs.put(key, new Uint8Array(await file.arrayBuffer()))
+    run('UPDATE users SET avatar_key = ?, avatar_mime = ?, avatar_version = ? WHERE id = ?', key, file.type, now(), userId)
+  }
+  if (before.avatar_key) blobs.remove(before.avatar_key)
+  // Lists, conversations and open browsers show the new face.
+  publish({ type: 'refresh', scope: 'users' })
+  return serializeUser(get('SELECT * FROM users WHERE id = ?', userId))
+}
+
+api.post('/me/avatar', avatarLimit, async (c) => c.json({ user: await setAvatar(c.get('user').id, (await c.req.parseBody()).file ?? undefined) }))
+api.delete('/me/avatar', async (c) => c.json({ user: await setAvatar(c.get('user').id, null) }))
+api.post('/users/:id/avatar', requireAdmin, avatarLimit, async (c) => c.json({ user: await setAvatar(idParam(c.req.param('id')), (await c.req.parseBody()).file ?? undefined) }))
+api.delete('/users/:id/avatar', requireAdmin, async (c) => c.json({ user: await setAvatar(idParam(c.req.param('id')), null) }))
+
 // ---------------------------------------------------------------------------------------------
 // Mailboxes
 // ---------------------------------------------------------------------------------------------
@@ -276,6 +356,7 @@ function serializeMailbox(m: MailboxRow, admin: boolean) {
     syncError: m.sync_error,
     lastSyncAt: m.last_sync_at,
     assignAfterReply: m.assign_after_reply,
+    chatEnabled: !!(m as ChatMailbox).chat_enabled,
   }
   if (!admin) return base
   return {
@@ -291,10 +372,30 @@ function serializeMailbox(m: MailboxRow, admin: boolean) {
     imapSecurity: m.imap_security,
     imapUser: m.imap_user,
     imapPasswordSet: !!m.imap_pass_enc,
+    imapSameLogin: sameLogin(m),
     imapFolder: m.imap_folder,
     importExisting: !!m.import_existing,
     autoReplyEnabled: !!m.auto_reply_enabled,
     autoReplyBody: m.auto_reply_body,
+    chatKey: (m as ChatMailbox).chat_key,
+    /** Whether visitors see the chat as online right now. */
+    chatOnline: !!(m as ChatMailbox).chat_enabled && chatOnline(m as ChatMailbox),
+    chat: chatSettingsOf(m as ChatMailbox),
+  }
+}
+
+/**
+ * True when IMAP signs in with the SMTP login: same username (ignoring case and spaces) and same password,
+ * or no IMAP login saved yet. The form then opens with "Use the same username and password" on.
+ */
+function sameLogin(m: MailboxRow): boolean {
+  if (!m.imap_user && !m.imap_pass_enc) return true
+  if (m.imap_user.trim().toLowerCase() !== m.smtp_user.trim().toLowerCase()) return false
+  if (m.imap_pass_enc === m.smtp_pass_enc) return true
+  try {
+    return decrypt(m.imap_pass_enc) === decrypt(m.smtp_pass_enc)
+  } catch {
+    return false
   }
 }
 
@@ -332,6 +433,14 @@ function applyMailboxFields(id: number, data: Record<string, any>) {
   if (typeof data.importExisting === 'boolean') set('import_existing', data.importExisting)
   if (typeof data.autoReplyEnabled === 'boolean') set('auto_reply_enabled', data.autoReplyEnabled)
   if (typeof data.autoReplyBody === 'string') set('auto_reply_body', data.autoReplyBody.slice(0, 10_000))
+  if (typeof data.chatEnabled === 'boolean') {
+    set('chat_enabled', data.chatEnabled)
+    if (data.chatEnabled) ensureChatKey(id)
+  }
+  if (data.chat && typeof data.chat === 'object') {
+    const current = get<ChatMailbox>('SELECT * FROM mailboxes WHERE id = ?', id)!
+    set('chat_settings', JSON.stringify(cleanChatSettings(data.chat, chatSettingsOf(current))))
+  }
   if (data.assignAfterReply !== undefined) {
     if (!ASSIGN_AFTER_REPLY.includes(data.assignAfterReply)) throw new AppError(`assignAfterReply must be one of: ${ASSIGN_AFTER_REPLY.join(', ')}.`)
     set('assign_after_reply', data.assignAfterReply)
@@ -341,7 +450,7 @@ function applyMailboxFields(id: number, data: Record<string, any>) {
 api.get('/mailboxes', (c) => {
   const user = c.get('user')
   const counts = folderCounts(user.id)
-  const mailboxes = all<MailboxRow>('SELECT * FROM mailboxes ORDER BY name').map((m) => ({
+  const mailboxes = all<MailboxRow>('SELECT * FROM mailboxes ORDER BY name').filter((m) => canSeeMailbox(user, m.id)).map((m) => ({
     ...serializeMailbox(m, user.role === 'admin'),
     counts: counts.find((x) => x.mailboxId === m.id) ?? { mailboxId: m.id, unassigned: 0, mine: 0, assigned: 0, snoozed: 0, spam: 0 },
   }))
@@ -434,7 +543,9 @@ api.post('/mailboxes/test', requireAdmin, async (c) => {
 })
 
 api.post('/mailboxes/:id/sync', async (c) => {
-  await syncMailboxNow(idParam(c.req.param('id')))
+  const id = idParam(c.req.param('id'))
+  assertMailbox(c.get('user'), id)
+  await syncMailboxNow(id)
   return c.json({ ok: true })
 })
 
@@ -468,6 +579,7 @@ api.get('/conversations', (c) => {
       limit: q.limit ? int(q.limit) : undefined,
       offset: q.offset ? int(q.offset) : undefined,
       me: c.get('user').id,
+      mailboxIds: scopeOf(c.get('user')),
     }),
   )
 })
@@ -476,6 +588,7 @@ api.post('/conversations', async (c) => {
   const data = await body(c)
   const kind = data.kind === 'customer' || data.kind === 'note' ? data.kind : 'reply'
   if (!str(data.subject)) throw new AppError('Add a subject.')
+  assertMailbox(c.get('user'), int(data.mailboxId))
   const actor = actorOf(c)
   const created = createConversation(
     {
@@ -499,12 +612,14 @@ api.post('/conversations', async (c) => {
     const conv = getConversation(created.id)
     runWorkflows(created.id, conv.mailboxId, 'new', { subject: conv.subject, body: conv.preview, from: conv.customer.email, to: '', customer_name: conv.customer.name })
   }
-  return c.json({ conversation: getConversation(created.id, { userId: actor.userId ?? undefined }) }, 201)
+  return c.json({ conversation: conversationFor(c, created.id) }, 201)
 })
 
 api.post('/conversations/bulk', async (c) => {
   const data = await body(c)
   const ids: number[] = Array.isArray(data.ids) ? data.ids.map(int).filter((n: number) => n > 0).slice(0, 200) : []
+  for (const id of ids) assertConversation(c.get('user'), id)
+  if (data.patch?.mailboxId !== undefined) assertMailbox(c.get('user'), int(data.patch.mailboxId))
   const actor = actorOf(c)
   if (data.delete === true) {
     for (const id of ids) removeFiles(deleteConversation(id, actor))
@@ -530,22 +645,29 @@ function patchFrom(data: Record<string, any>): ConversationPatch {
 
 api.get('/conversations/:id', (c) => {
   const id = idParam(c.req.param('id'))
-  return c.json({ conversation: getConversation(id, { userId: c.get('user').id }), viewers: viewersOf(id) })
+  assertConversation(c.get('user'), id)
+  return c.json({ conversation: conversationFor(c, id), viewers: viewersOf(id) })
 })
 
 api.patch('/conversations/:id', async (c) => {
   const id = idParam(c.req.param('id'))
-  updateConversation(id, patchFrom(await body(c)), actorOf(c))
-  return c.json({ conversation: getConversation(id, { userId: c.get('user').id }) })
+  assertConversation(c.get('user'), id)
+  const patch = patchFrom(await body(c))
+  if (patch.mailboxId !== undefined) assertMailbox(c.get('user'), patch.mailboxId)
+  updateConversation(id, patch, actorOf(c))
+  return c.json({ conversation: conversationFor(c, id) })
 })
 
 api.delete('/conversations/:id', (c) => {
-  removeFiles(deleteConversation(idParam(c.req.param('id')), actorOf(c)))
+  const id = idParam(c.req.param('id'))
+  assertConversation(c.get('user'), id)
+  removeFiles(deleteConversation(id, actorOf(c)))
   return c.json({ ok: true })
 })
 
 api.post('/conversations/:id/reply', async (c) => {
   const id = idParam(c.req.param('id'))
+  assertConversation(c.get('user'), id)
   const data = await body(c)
   const threadId = addReply(
     id,
@@ -562,26 +684,30 @@ api.post('/conversations/:id/reply', async (c) => {
     },
     actorOf(c),
   )
-  return c.json({ threadId, conversation: getConversation(id, { userId: c.get('user').id }) }, 201)
+  return c.json({ threadId, conversation: conversationFor(c, id) }, 201)
 })
 
 api.post('/conversations/:id/note', async (c) => {
   const id = idParam(c.req.param('id'))
+  assertConversation(c.get('user'), id)
   const data = await body(c)
   const threadId = addNote(id, { bodyHtml: String(data.bodyHtml ?? ''), attachmentIds: Array.isArray(data.attachmentIds) ? data.attachmentIds.map(int) : undefined }, actorOf(c))
   if (data.status) updateConversation(id, { status: data.status }, actorOf(c))
-  return c.json({ threadId, conversation: getConversation(id, { userId: c.get('user').id }) }, 201)
+  return c.json({ threadId, conversation: conversationFor(c, id) }, 201)
 })
 
 api.post('/conversations/:id/merge', async (c) => {
   const id = idParam(c.req.param('id'))
   const data = await body(c)
+  assertConversation(c.get('user'), id)
+  assertConversation(c.get('user'), int(data.intoId))
   const merged = mergeConversations(id, int(data.intoId), actorOf(c))
-  return c.json({ conversation: getConversation(merged.id, { userId: c.get('user').id }) })
+  return c.json({ conversation: conversationFor(c, merged.id) })
 })
 
 api.put('/conversations/:id/draft', async (c) => {
   const data = await body(c)
+  assertConversation(c.get('user'), idParam(c.req.param('id')))
   saveDraft(idParam(c.req.param('id')), c.get('user').id, data.kind === 'note' ? 'note' : 'reply', String(data.bodyHtml ?? ''))
   return c.json({ ok: true })
 })
@@ -589,7 +715,8 @@ api.put('/conversations/:id/draft', async (c) => {
 api.post('/conversations/:id/presence', async (c) => {
   const user = c.get('user')
   const data = await body(c)
-  touchPresence(idParam(c.req.param('id')), { userId: user.id, name: user.name, color: user.color, state: data.state === 'replying' ? 'replying' : 'viewing' })
+  assertConversation(user, idParam(c.req.param('id')))
+  touchPresence(idParam(c.req.param('id')), { userId: user.id, name: user.name, color: user.color, avatarUrl: user.avatarUrl, state: data.state === 'replying' ? 'replying' : 'viewing' })
   return c.json({ ok: true })
 })
 
@@ -598,19 +725,25 @@ api.delete('/conversations/:id/presence', (c) => {
   return c.json({ ok: true })
 })
 
-api.get('/threads/:id/full', (c) => c.json({ html: getQuotedHtml(idParam(c.req.param('id'))) }))
+api.get('/threads/:id/full', (c) => {
+  assertThread(c.get('user'), idParam(c.req.param('id')))
+  return c.json({ html: getQuotedHtml(idParam(c.req.param('id'))) })
+})
 
 api.post('/threads/:id/retry', (c) => {
+  assertThread(c.get('user'), idParam(c.req.param('id')))
   retryDelivery(idParam(c.req.param('id')))
   return c.json({ ok: true })
 })
 
 // Send later: send a scheduled reply now, or take it back as a draft.
 api.post('/threads/:id/send-now', (c) => {
+  assertThread(c.get('user'), idParam(c.req.param('id')))
   sendScheduledNow(idParam(c.req.param('id')), actorOf(c))
   return c.json({ ok: true })
 })
 api.delete('/threads/:id/scheduled', (c) => {
+  assertThread(c.get('user'), idParam(c.req.param('id')))
   cancelScheduled(idParam(c.req.param('id')), actorOf(c))
   return c.json({ ok: true })
 })
@@ -631,6 +764,10 @@ api.post('/attachments', bodyLimit({ maxSize: config.maxAttachmentBytes + 1024 *
 const INLINE_SAFE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain'])
 
 api.get('/attachments/:id/:name?', (c) => {
+  // A file belongs to its message's mailbox. One not sent yet belongs to whoever uploaded it.
+  const owner = get<{ thread_id: number | null; uploaded_by: number | null }>('SELECT thread_id, uploaded_by FROM attachments WHERE id = ?', idParam(c.req.param('id')))
+  if (owner?.thread_id) assertThread(c.get('user'), owner.thread_id)
+  else if (owner && owner.uploaded_by !== c.get('user').id && c.get('user').mailboxAccess !== 'all') throw new AppError('File not found.', 404)
   const file = attachmentFile(idParam(c.req.param('id')))
   if (!file) throw new AppError('File not found.', 404)
   const inline = INLINE_SAFE.has(file.mime) && c.req.query('download') === undefined
@@ -670,7 +807,7 @@ api.get('/customers/lookup', (c) => {
 
 api.get('/customers/:id', (c) => {
   const id = idParam(c.req.param('id'))
-  return c.json({ customer: getCustomer(id), conversations: listConversations({ customerId: id, limit: 50 }).items })
+  return c.json({ customer: getCustomer(id), conversations: listConversations({ customerId: id, limit: 50, mailboxIds: scopeOf(c.get('user')) }).items })
 })
 
 api.patch('/customers/:id', async (c) => {
@@ -731,7 +868,8 @@ api.get('/saved-replies', (c) => {
   const rows = mailbox
     ? all('SELECT * FROM saved_replies WHERE mailbox_id IS NULL OR mailbox_id = ? ORDER BY name', int(mailbox))
     : all('SELECT * FROM saved_replies ORDER BY name')
-  return c.json({ savedReplies: rows.map(serializeSavedReply) })
+  // Replies kept for a mailbox are shown only to people who can see that mailbox.
+  return c.json({ savedReplies: rows.filter((r: any) => r.mailbox_id === null || canSeeMailbox(c.get('user'), r.mailbox_id)).map(serializeSavedReply) })
 })
 
 api.post('/saved-replies', async (c) => {
@@ -871,7 +1009,10 @@ api.get('/apps/:id/deliveries', requireAdmin, (c) => {
   getApp(id)
   return c.json({ deliveries: listDeliveries(id) })
 })
-api.get('/conversations/:id/apps', async (c) => c.json({ apps: await sidebarsFor(idParam(c.req.param('id'))) }))
+api.get('/conversations/:id/apps', async (c) => {
+  assertConversation(c.get('user'), idParam(c.req.param('id')))
+  return c.json({ apps: await sidebarsFor(idParam(c.req.param('id'))) })
+})
 
 api.get('/workflows', (c) => c.json({ workflows: all('SELECT * FROM workflows ORDER BY id').map(serializeWorkflow) }))
 
@@ -945,13 +1086,17 @@ api.get('/reports', (c) => {
   const to = Number(q.to) || now()
   const from = Number(q.from) || to - 30 * 86_400_000
   if (to <= from || to - from > 400 * 86_400_000) throw new AppError('Pick a date range of up to 400 days.')
-  return c.json(buildReport({ from, to, mailboxId: q.mailbox ? int(q.mailbox) : undefined, tzOffset: Number(q.tz) || 0 }))
+  if (q.mailbox) assertMailbox(c.get('user'), int(q.mailbox))
+  return c.json(buildReport({ from, to, mailboxId: q.mailbox ? int(q.mailbox) : undefined, mailboxIds: scopeOf(c.get('user')), tzOffset: Number(q.tz) || 0 }))
 })
 
 api.get('/events', (c) =>
   streamSSE(c, async (stream) => {
     let open = true
+    const user = c.get('user')
     const unsubscribe = subscribe((event) => {
+      // News about a conversation goes only to people who can see its mailbox.
+      if (event.type === 'conversation' && !canSeeMailbox(user, event.mailboxId)) return
       if (open) void stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {})
     })
     stream.onAbort(() => {

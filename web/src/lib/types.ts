@@ -12,6 +12,15 @@ export interface User {
   notifyReplies: boolean
   notifyMentions: boolean
   disabled: boolean
+  /** The teammate's photo, or null to show initials. */
+  avatarUrl: string | null
+  /** Live chat: available to chat, or away. */
+  chatStatus: 'online' | 'away'
+  /** In the team list only: available for live chat right now (Available, with the app open). */
+  chatAvailable?: boolean
+  /** 'all': every mailbox (always so for admins). 'some': only mailboxIds. */
+  mailboxAccess: 'all' | 'some'
+  mailboxIds: number[]
   createdAt: number
 }
 
@@ -39,6 +48,8 @@ export interface Mailbox {
   lastSyncAt: number | null
   /** Who a conversation goes to after a reply: leave as is, the person replying, or picked in the composer. */
   assignAfterReply: AssignAfterReply
+  /** Live chat is turned on for this mailbox. */
+  chatEnabled: boolean
   counts: FolderCounts
   // Admin-only fields
   signature?: string
@@ -52,10 +63,40 @@ export interface Mailbox {
   imapSecurity?: 'starttls' | 'ssl' | 'none'
   imapUser?: string
   imapPasswordSet?: boolean
+  /** IMAP signs in with the SMTP username and password. */
+  imapSameLogin?: boolean
   imapFolder?: string
   importExisting?: boolean
   autoReplyEnabled?: boolean
   autoReplyBody?: string
+  /** Whether visitors see the chat as online right now. */
+  chatOnline?: boolean
+  /** The public id in the widget's embed code. Set the first time chat is turned on. */
+  chatKey?: string | null
+  chat?: ChatSettings
+}
+
+export interface ChatSettings {
+  title: string
+  greeting: string
+  color: string
+  /** Websites allowed to show the widget. Empty: any. */
+  origins: string[]
+  /** When the chat shows as online: while a teammate is available, during office hours, or always. */
+  availability: ChatAvailability
+  hours: OfficeHours
+  awayMessage: string
+  hideWhenAway: boolean
+}
+
+export type ChatAvailability = 'team' | 'hours' | 'always'
+
+export interface OfficeHours {
+  /** 0 = Sunday … 6 = Saturday. */
+  days: number[]
+  start: string
+  end: string
+  timezone: string
 }
 
 export interface Tag {
@@ -90,7 +131,7 @@ export interface ConversationSummary {
   preview: string
   source: string
   customer: { id: number; name: string; email: string; company: string }
-  assignee: { id: number; name: string; color: string } | null
+  assignee: { id: number; name: string; color: string; avatarUrl: string | null } | null
   tags: Tag[]
   cc: string[]
   threadCount: number
@@ -115,7 +156,7 @@ export interface Attachment {
 
 export type Author =
   | { kind: 'customer'; id: number; name: string; email: string }
-  | { kind: 'user'; id: number; name: string; color: string }
+  | { kind: 'user'; id: number; name: string; color: string; avatarUrl: string | null }
   | { kind: 'system'; name: string }
 
 export interface Thread {
@@ -142,6 +183,8 @@ export interface Conversation extends Omit<ConversationSummary, 'customer'> {
   threads: Thread[]
   previousConversations: { id: number; subject: string; status: Status; updatedAt: number }[]
   draft: { kind: 'reply' | 'note'; bodyHtml: string } | null
+  /** Live chat only: true while the visitor has the chat open. Null for other conversations. */
+  visitorOnline: boolean | null
   url: string
 }
 
@@ -149,6 +192,7 @@ export interface Viewer {
   userId: number
   name: string
   color: string
+  avatarUrl: string | null
   state: 'viewing' | 'replying'
 }
 
@@ -208,6 +252,6 @@ export interface Report {
   days: { date: string; newConversations: number; repliesSent: number; closed: number }[]
   busiest: number[][]
   tags: { name: string; color: string; count: number }[]
-  team: { id: number; name: string; color: string; replies: number; closed: number; customers: number }[]
+  team: { id: number; name: string; color: string; avatarUrl: string | null; replies: number; closed: number; customers: number }[]
   open: { active: number; pending: number; unassigned: number }
 }

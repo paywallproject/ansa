@@ -1,4 +1,6 @@
 import { all, get } from '../db.ts'
+import { avatarUrl } from '../auth.ts'
+import { mailboxFilterSql } from './access.ts'
 
 const DAY = 86_400_000
 
@@ -6,6 +8,8 @@ export interface ReportOptions {
   from: number
   to: number
   mailboxId?: number
+  /** Only these mailboxes (a teammate with limited access). Null or left out: all. */
+  mailboxIds?: number[] | null
   /** Minutes to add to UTC to get the viewer's local time (e.g. 420 for UTC+7). */
   tzOffset?: number
 }
@@ -17,8 +21,8 @@ const median = (values: number[]) => {
   return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
 }
 
-function totals(from: number, to: number, mailboxId?: number) {
-  const mb = mailboxId ? 'AND c.mailbox_id = ?' : ''
+function totals(from: number, to: number, mailboxId?: number, scope = '') {
+  const mb = `${mailboxId ? 'AND c.mailbox_id = ?' : ''} ${scope}`
   const p = (...base: number[]) => (mailboxId ? [...base, mailboxId] : base)
   const count = (sql: string, ...base: number[]) => get<{ n: number }>(sql, ...p(...base))?.n ?? 0
   const firstResponses = all<{ ms: number }>(
@@ -62,7 +66,9 @@ function totals(from: number, to: number, mailboxId?: number) {
 export function buildReport(opts: ReportOptions) {
   const { from, to, mailboxId } = opts
   const tz = (opts.tzOffset ?? 0) * 60_000
-  const mb = mailboxId ? 'AND c.mailbox_id = ?' : ''
+  const scope = mailboxFilterSql(opts.mailboxIds)
+  const mb = `${mailboxId ? 'AND c.mailbox_id = ?' : ''} ${scope}`
+  const mbTeam = `${mailboxId ? 'AND c.mailbox_id = ?3' : ''} ${scope}`
   const p = (...base: number[]) => (mailboxId ? [...base, mailboxId] : base)
 
   const dayKey = (ts: number) => Math.floor((ts + tz) / DAY)
@@ -99,13 +105,13 @@ export function buildReport(opts: ReportOptions) {
   )
 
   const team = all<any>(
-    `SELECT u.id, u.name, u.color,
-       (SELECT COUNT(*) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.state != 'scheduled' AND t.created_at >= ?1 AND t.created_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS replies,
-       (SELECT COUNT(*) FROM conversations c WHERE c.closed_by = u.id AND c.status = 'closed' AND c.closed_at >= ?1 AND c.closed_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS closed,
-       (SELECT COUNT(DISTINCT c.customer_id) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.state != 'scheduled' AND t.created_at >= ?1 AND t.created_at < ?2 ${mailboxId ? 'AND c.mailbox_id = ?3' : ''}) AS customers
+    `SELECT u.id, u.name, u.color, u.avatar_version,
+       (SELECT COUNT(*) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.state != 'scheduled' AND t.created_at >= ?1 AND t.created_at < ?2 ${mbTeam}) AS replies,
+       (SELECT COUNT(*) FROM conversations c WHERE c.closed_by = u.id AND c.status = 'closed' AND c.closed_at >= ?1 AND c.closed_at < ?2 ${mbTeam}) AS closed,
+       (SELECT COUNT(DISTINCT c.customer_id) FROM threads t JOIN conversations c ON c.id = t.conversation_id WHERE t.user_id = u.id AND t.type = 'reply' AND t.state != 'scheduled' AND t.created_at >= ?1 AND t.created_at < ?2 ${mbTeam}) AS customers
      FROM users u WHERE u.disabled = 0 ORDER BY replies DESC, u.name`,
     ...p(from, to),
-  ).map((u) => ({ id: u.id as number, name: u.name as string, color: u.color as string, replies: u.replies as number, closed: u.closed as number, customers: u.customers as number }))
+  ).map((u) => ({ id: u.id as number, name: u.name as string, color: u.color as string, avatarUrl: avatarUrl(u.id, u.avatar_version), replies: u.replies as number, closed: u.closed as number, customers: u.customers as number }))
 
   const open = get<{ active: number; pending: number; unassigned: number }>(
     `SELECT COALESCE(SUM(c.status IN ('active', 'waiting')), 0) AS active, COALESCE(SUM(c.status = 'pending'), 0) AS pending,
@@ -117,8 +123,8 @@ export function buildReport(opts: ReportOptions) {
   return {
     from,
     to,
-    current: totals(from, to, mailboxId),
-    previous: totals(from - (to - from), from, mailboxId),
+    current: totals(from, to, mailboxId, scope),
+    previous: totals(from - (to - from), from, mailboxId, scope),
     days,
     busiest,
     tags,

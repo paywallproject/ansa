@@ -18,6 +18,7 @@ import {
 } from './services/conversations.ts'
 import { getCustomer, listCustomers, updateCustomer } from './services/customers.ts'
 import { buildReport } from './services/reports.ts'
+import { assertConversation, assertMailbox, canSeeMailbox, scopeOf } from './services/access.ts'
 
 const iso = (ts: number | null | undefined) => (ts ? new Date(ts).toISOString() : null)
 const toHtml = (body: string) => (/<(p|br|div|ul|ol|strong|em|a)\b[^>]*>/i.test(body) ? body : textToHtml(body))
@@ -40,8 +41,8 @@ const brief = (c: ConversationSummary) => ({
   url: `${config.appUrl}/c/${c.id}`,
 })
 
-function detail(id: number) {
-  const c = getConversation(id)
+function detail(id: number, mailboxIds: number[] | null) {
+  const c = getConversation(id, { mailboxIds })
   return {
     ...brief(c),
     customer: {
@@ -86,6 +87,12 @@ const STATUS = z.enum(['active', 'waiting', 'pending', 'closed', 'spam'])
 
 function buildServer(user: User) {
   const actor: Actor = { userId: user.id, via: 'mcp' }
+  // The assistant sees exactly the mailboxes its teammate sees.
+  const scope = scopeOf(user)
+  const mine = (id: number) => {
+    assertConversation(user, id)
+    return id
+  }
   const server = new McpServer(
     { name: 'ansa', version: '1.0.0' },
     {
@@ -102,7 +109,7 @@ function buildServer(user: User) {
     { title: 'List mailboxes', description: 'List the shared mailboxes with the count of conversations that need attention in each folder.', annotations: { readOnlyHint: true } },
     safe(() => {
       const counts = folderCounts(user.id)
-      return all<any>('SELECT id, name, email FROM mailboxes ORDER BY name').map((m) => {
+      return all<any>('SELECT id, name, email FROM mailboxes ORDER BY name').filter((m) => canSeeMailbox(user, m.id)).map((m) => {
         const c = counts.find((x) => x.mailboxId === m.id)
         return { id: m.id, name: m.name, email: m.email, needs_attention: { unassigned: c?.unassigned ?? 0, mine: c?.mine ?? 0, assigned: c?.assigned ?? 0 } }
       })
@@ -143,6 +150,7 @@ function buildServer(user: User) {
         limit: a.limit ?? 25,
         offset: a.offset,
         me: user.id,
+        mailboxIds: scope,
       })
       return { total: result.total, offset: result.offset, conversations: result.items.map(brief) }
     }),
@@ -156,7 +164,7 @@ function buildServer(user: User) {
       inputSchema: { id: z.number().int() },
       annotations: { readOnlyHint: true },
     },
-    safe((a) => detail(a.id)),
+    safe((a) => detail(mine(a.id), scope)),
   )
 
   server.registerTool(
@@ -178,7 +186,7 @@ function buildServer(user: User) {
       annotations: { destructiveHint: false, openWorldHint: true },
     },
     safe((a) => {
-      addReply(a.id, { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id }, actor)
+      addReply(mine(a.id), { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id }, actor)
       return { sent: true, conversation: brief(getConversation(a.id)) }
     }),
   )
@@ -192,7 +200,7 @@ function buildServer(user: User) {
       annotations: { destructiveHint: false },
     },
     safe((a) => {
-      addNote(a.id, { bodyHtml: toHtml(a.body) }, actor)
+      addNote(mine(a.id), { bodyHtml: toHtml(a.body) }, actor)
       return { saved: true, conversation: brief(getConversation(a.id)) }
     }),
   )
@@ -217,7 +225,7 @@ function buildServer(user: User) {
       const snoozedUntil = a.snooze_until === undefined ? undefined : a.snooze_until === null ? null : Date.parse(a.snooze_until)
       if (typeof snoozedUntil === 'number' && Number.isNaN(snoozedUntil)) throw new Error('snooze_until must be an ISO 8601 date and time.')
       return brief(
-        updateConversation(a.id, { status: a.status, assigneeId: a.assignee_id, addTags: a.add_tags, removeTags: a.remove_tags, subject: a.subject, snoozedUntil }, actor),
+        updateConversation(mine(a.id), { status: a.status, assigneeId: a.assignee_id, addTags: a.add_tags, removeTags: a.remove_tags, subject: a.subject, snoozedUntil }, actor),
       )
     }),
   )
@@ -241,6 +249,7 @@ function buildServer(user: User) {
       annotations: { destructiveHint: false, openWorldHint: true },
     },
     safe((a) => {
+      assertMailbox(user, a.mailbox_id)
       const kind = a.kind === 'email' ? 'reply' : a.kind === 'customer_message' ? 'customer' : 'note'
       const created = createConversation(
         {
@@ -284,7 +293,7 @@ function buildServer(user: User) {
       inputSchema: { id: z.number().int() },
       annotations: { readOnlyHint: true },
     },
-    safe((a) => ({ ...getCustomer(a.id), createdAt: undefined, updatedAt: undefined, conversations: listConversations({ customerId: a.id, limit: 25 }).items.map(brief) })),
+    safe((a) => ({ ...getCustomer(a.id), createdAt: undefined, updatedAt: undefined, conversations: listConversations({ customerId: a.id, limit: 25, mailboxIds: scope }).items.map(brief) })),
   )
 
   server.registerTool(
@@ -309,7 +318,7 @@ function buildServer(user: User) {
   server.registerTool(
     'list_saved_replies',
     { title: 'List saved replies', description: 'Reusable reply templates the team has written. Use them as a starting point for replies.', annotations: { readOnlyHint: true } },
-    safe(() => all<any>('SELECT id, name, body_html FROM saved_replies ORDER BY name').map((r) => ({ id: r.id, name: r.name, text: htmlToText(r.body_html) }))),
+    safe(() => all<any>('SELECT id, name, body_html, mailbox_id FROM saved_replies ORDER BY name').filter((r) => r.mailbox_id === null || canSeeMailbox(user, r.mailbox_id)).map((r) => ({ id: r.id, name: r.name, text: htmlToText(r.body_html) }))),
   )
 
   server.registerTool(
@@ -334,7 +343,8 @@ function buildServer(user: User) {
     },
     safe((a) => {
       const to = Date.now()
-      const report = buildReport({ from: to - (a.days ?? 30) * 86_400_000, to, mailboxId: a.mailbox_id })
+      if (a.mailbox_id) assertMailbox(user, a.mailbox_id)
+      const report = buildReport({ from: to - (a.days ?? 30) * 86_400_000, to, mailboxId: a.mailbox_id, mailboxIds: scope })
       const minutes = (ms: number | null) => (ms === null ? null : Math.round(ms / 60_000))
       const shape = (t: typeof report.current) => ({
         new_conversations: t.newConversations,

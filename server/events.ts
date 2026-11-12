@@ -5,11 +5,13 @@ export type AppEvent =
   | { type: 'presence'; conversationId: number; viewers: Viewer[] }
   | { type: 'mailbox'; id: number }
   | { type: 'refresh'; scope: string }
+  | { type: 'visitor'; conversationId: number; online: boolean }
 
 export interface Viewer {
   userId: number
   name: string
   color: string
+  avatarUrl: string | null
   state: 'viewing' | 'replying'
 }
 
@@ -71,5 +73,65 @@ export function prunePresence() {
     }
     if (entries.size === 0) presence.delete(conversationId)
     if (changed) publish({ type: 'presence', conversationId, viewers: viewersOf(conversationId) })
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Teammates with the app open
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * When each teammate's browser last talked to us. The web app sends a heartbeat every minute, even from a
+ * background tab, so a teammate with the app open anywhere counts as here. Closing it makes them away.
+ */
+const agentSeenAt = new Map<number, number>()
+const AGENT_TTL = 3 * 60_000
+
+export function markAgentSeen(userId: number) {
+  agentSeenAt.set(userId, Date.now())
+}
+
+export function agentActive(userId: number): boolean {
+  const seen = agentSeenAt.get(userId)
+  return seen !== undefined && Date.now() - seen < AGENT_TTL
+}
+
+// ---------------------------------------------------------------------------------------------
+// Live chat visitors
+// ---------------------------------------------------------------------------------------------
+
+/** Open widget streams per chat conversation, and when the last one closed. */
+const visitorStreams = new Map<number, number>()
+const visitorLeftAt = new Map<number, number>()
+/** Moving between pages of a website drops the stream for a moment. Count the visitor as present meanwhile. */
+const VISITOR_GRACE = 20_000
+
+export function visitorConnected(conversationId: number) {
+  const count = (visitorStreams.get(conversationId) ?? 0) + 1
+  visitorStreams.set(conversationId, count)
+  visitorLeftAt.delete(conversationId)
+  if (count === 1) publish({ type: 'visitor', conversationId, online: true })
+}
+
+export function visitorDisconnected(conversationId: number) {
+  const count = (visitorStreams.get(conversationId) ?? 1) - 1
+  if (count > 0) return void visitorStreams.set(conversationId, count)
+  visitorStreams.delete(conversationId)
+  visitorLeftAt.set(conversationId, Date.now())
+}
+
+/** True while the visitor has the chat open, or left only seconds ago. Replies then go to the chat, not by email. */
+export function visitorOnline(conversationId: number): boolean {
+  if (visitorStreams.has(conversationId)) return true
+  const left = visitorLeftAt.get(conversationId)
+  return left !== undefined && Date.now() - left < VISITOR_GRACE
+}
+
+/** Announce visitors whose grace period ran out. Runs with prunePresence. */
+export function pruneVisitors() {
+  for (const [conversationId, left] of visitorLeftAt) {
+    if (Date.now() - left < VISITOR_GRACE) continue
+    visitorLeftAt.delete(conversationId)
+    publish({ type: 'visitor', conversationId, online: false })
   }
 }

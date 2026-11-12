@@ -60,6 +60,15 @@ export function useLiveEvents() {
         } else if (event.type === 'refresh' && event.scope === 'workspace') {
           // An admin changed branding or features: reload them for everyone who is signed in.
           void client.invalidateQueries({ queryKey: ['bootstrap'] })
+        } else if (event.type === 'refresh' && event.scope === 'users') {
+          // A teammate changed their photo: it shows in lists, conversations and the top bar.
+          void client.invalidateQueries({ queryKey: ['users'] })
+          void client.invalidateQueries({ queryKey: ['bootstrap'] })
+          refreshLists()
+          void client.invalidateQueries({ queryKey: ['conversation'] })
+        } else if (event.type === 'visitor') {
+          // A live chat visitor opened or left the chat.
+          void client.invalidateQueries({ queryKey: ['conversation', event.conversationId] })
         } else if (event.type === 'hello') {
           refreshLists()
         }
@@ -97,6 +106,19 @@ export function useLiveEvents() {
       clearTimeout(pending)
     }
   }, [client])
+}
+
+/**
+ * Tell the server every minute that this teammate has the app open, so live chat can count them as
+ * available. Background tabs keep doing it (browsers slow timers to about once a minute, which is enough).
+ */
+export function useHeartbeat() {
+  useEffect(() => {
+    const beat = () => void api.post('/me/heartbeat').catch(() => {})
+    beat()
+    const timer = setInterval(beat, 60_000)
+    return () => clearInterval(timer)
+  }, [])
 }
 
 const isTyping = (target: EventTarget | null) => {
