@@ -56,6 +56,8 @@ export const Composer = forwardRef<
   const savedReplies = useSavedReplies()
   const [filter, setFilter] = useState('')
   const draftTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // Shown next to the trash button, as in Gmail, so it is clear the draft is kept.
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>(conversation.draft?.bodyHtml ? 'saved' : 'idle')
   const modeRef = useRef(mode)
   modeRef.current = mode
 
@@ -85,6 +87,7 @@ export const Composer = forwardRef<
       void client.invalidateQueries({ queryKey: ['conversations'] })
       void client.invalidateQueries({ queryKey: ['mailboxes'] })
       editor?.commands.clearContent()
+      setSaveState('idle')
       uploads.clear()
       setPickedAssignee(undefined)
       onTyping(false)
@@ -152,8 +155,15 @@ export const Composer = forwardRef<
     onChange: (html) => {
       onTyping(!!html && modeRef.current === 'reply')
       clearTimeout(draftTimer.current)
+      setSaveState(html ? 'saving' : 'idle')
       draftTimer.current = setTimeout(() => {
-        void api.put(`/conversations/${conversation.id}/draft`, { kind: modeRef.current, bodyHtml: html }).catch(() => {})
+        api
+          .put(`/conversations/${conversation.id}/draft`, { kind: modeRef.current, bodyHtml: html })
+          .then(() => {
+            setSaveState(html ? 'saved' : 'idle')
+            if (html) void client.invalidateQueries({ queryKey: ['conversations'] })
+          })
+          .catch(() => setSaveState('idle'))
       }, 700)
     },
   })
@@ -167,6 +177,7 @@ export const Composer = forwardRef<
       // A reply taken back from Send later, or one an assistant drafted (MCP draft_reply): a note stays a note.
       setMode(conversation.draft?.kind ?? 'reply')
       editor.commands.setContent(paragraphHtml(draftHtml))
+      setSaveState('saved')
       onOpenChange(true)
     }
     hadDraft.current = !!draftHtml
@@ -185,6 +196,7 @@ export const Composer = forwardRef<
   const discard = () => {
     clearTimeout(draftTimer.current)
     editor?.commands.clearContent()
+    setSaveState('idle')
     uploads.clear()
     onTyping(false)
     void api.put(`/conversations/${conversation.id}/draft`, { kind: mode, bodyHtml: '' }).catch(() => {})
@@ -390,6 +402,7 @@ export const Composer = forwardRef<
           <AttachButton onFiles={uploads.add} />
           <EditorToolbar editor={editor} />
           <span className="flex-1" />
+          <span aria-live="polite" className="mr-1 text-xs text-fg-3">{saveState === 'saved' ? 'Draft saved' : saveState === 'saving' ? 'Saving…' : ''}</span>
           <button type="button" aria-label="Discard draft" onClick={discard} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
             <Trash2 className="size-5" aria-hidden />
           </button>
@@ -486,6 +499,7 @@ export const Composer = forwardRef<
             </EditorToolbar>
 
             <div className="ml-auto flex items-center">
+              <span aria-live="polite" className="mr-1 text-xs text-fg-3">{saveState === 'saved' ? 'Draft saved' : saveState === 'saving' ? 'Saving…' : ''}</span>
               <button type="button" aria-label="Discard draft" title="Discard draft" onClick={discard} className={tool}>
                 <Trash2 className="size-4" aria-hidden />
               </button>
