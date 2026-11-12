@@ -1,5 +1,7 @@
 import { all, allNamed, get, run, tx, now, parseJson } from '../db.ts'
-import { publish } from '../events.ts'
+import { publish, visitorOnline } from '../events.ts'
+import { avatarUrl } from '../auth.ts'
+import { mailboxFilterSql, memberOf } from './access.ts'
 import { emitAppEvent, type AppEvent } from '../hooks.ts'
 import { cleanHtml, htmlToText, previewOf } from '../mail/html.ts'
 import { deliverThread, newMessageId, queueDelivery, type MailboxRow } from '../mail/outbound.ts'
@@ -18,7 +20,7 @@ export type Folder = 'unassigned' | 'mine' | 'mentioned' | 'assigned' | 'pending
 
 export interface Actor {
   userId: number | null
-  via: 'web' | 'api' | 'mcp' | 'workflow' | 'email' | 'system' | 'auto'
+  via: 'web' | 'api' | 'mcp' | 'workflow' | 'email' | 'system' | 'auto' | 'chat'
 }
 
 const OPEN = `c.status IN ('active', 'waiting', 'pending')`
@@ -47,7 +49,7 @@ function folderSql(folder: Folder): string | undefined {
 
 const BASE_SELECT = `
   SELECT c.*, cu.name AS customer_name, cu.email AS customer_email, cu.company AS customer_company,
-         u.name AS assignee_name, u.color AS assignee_color, m.name AS mailbox_name
+         u.name AS assignee_name, u.color AS assignee_color, u.avatar_version AS assignee_avatar, m.name AS mailbox_name
   FROM conversations c
   JOIN customers cu ON cu.id = c.customer_id
   JOIN mailboxes m ON m.id = c.mailbox_id
@@ -79,7 +81,9 @@ function serialize(row: any, tags: { id: number; name: string; color: string }[]
     preview: row.preview as string,
     source: row.source as string,
     customer: { id: row.customer_id as number, name: row.customer_name as string, email: row.customer_email as string, company: row.customer_company as string },
-    assignee: row.assignee_id ? { id: row.assignee_id as number, name: row.assignee_name as string, color: row.assignee_color as string } : null,
+    assignee: row.assignee_id
+      ? { id: row.assignee_id as number, name: row.assignee_name as string, color: row.assignee_color as string, avatarUrl: avatarUrl(row.assignee_id, row.assignee_avatar) }
+      : null,
     tags,
     cc: parseJson<string[]>(row.cc, []),
     threadCount: row.thread_count as number,
@@ -114,6 +118,8 @@ export interface ListOptions {
   limit?: number
   offset?: number
   me?: number
+  /** Only these mailboxes (a teammate with limited access). Null or left out: all. */
+  mailboxIds?: number[] | null
 }
 
 export function listConversations(opts: ListOptions) {
@@ -159,6 +165,8 @@ export function listConversations(opts: ListOptions) {
       where.push('0')
     }
   }
+  const scoped = mailboxFilterSql(opts.mailboxIds)
+  if (scoped) where.push(scoped.replace(/^AND /, ''))
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const order =
     opts.sort === 'oldest' ? 'c.updated_at ASC' : opts.sort === 'waiting' ? 'c.waiting_since IS NULL, c.waiting_since ASC, c.updated_at DESC' : 'c.updated_at DESC'
@@ -203,7 +211,7 @@ function serializeThread(t: any, attachments: any[]) {
       t.type === 'customer'
         ? { kind: 'customer' as const, id: t.customer_id as number, name: (t.customer_name as string) || t.from_addr, email: (t.customer_email as string) || t.from_addr }
         : t.user_id
-          ? { kind: 'user' as const, id: t.user_id as number, name: t.user_name as string, color: t.user_color as string }
+          ? { kind: 'user' as const, id: t.user_id as number, name: t.user_name as string, color: t.user_color as string, avatarUrl: avatarUrl(t.user_id, t.user_avatar) }
           : { kind: 'system' as const, name: t.via === 'auto' ? 'Auto reply' : t.via === 'workflow' ? 'Workflow' : brandName() },
     bodyHtml: t.body_html as string,
     hasQuoted: !!t.body_full_html,
@@ -232,7 +240,7 @@ export type ThreadView = ReturnType<typeof serializeThread>
 
 export function listThreads(conversationId: number): ThreadView[] {
   const threads = all<any>(
-    `SELECT t.*, u.name AS user_name, u.color AS user_color, c.name AS customer_name, c.email AS customer_email
+    `SELECT t.*, u.name AS user_name, u.color AS user_color, u.avatar_version AS user_avatar, c.name AS customer_name, c.email AS customer_email
      FROM threads t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN customers c ON c.id = t.customer_id
      WHERE t.conversation_id = ? ORDER BY t.created_at, t.id`,
     conversationId,
@@ -244,10 +252,10 @@ export function listThreads(conversationId: number): ThreadView[] {
   return threads.map((t) => serializeThread(t, attachments.filter((a) => a.thread_id === t.id)))
 }
 
-export function getConversation(id: number, opts: { userId?: number } = {}) {
+export function getConversation(id: number, opts: { userId?: number; mailboxIds?: number[] | null } = {}) {
   const summary = getSummary(id)
   const customer = getCustomer(summary.customer.id)
-  const previous = listConversations({ customerId: customer.id, limit: 8 }).items.filter((c) => c.id !== id)
+  const previous = listConversations({ customerId: customer.id, limit: 8, mailboxIds: opts.mailboxIds }).items.filter((c) => c.id !== id)
   const draft = opts.userId ? get<any>('SELECT kind, body_html FROM drafts WHERE conversation_id = ? AND user_id = ?', id, opts.userId) : undefined
   return {
     ...summary,
@@ -255,6 +263,8 @@ export function getConversation(id: number, opts: { userId?: number } = {}) {
     threads: listThreads(id),
     previousConversations: previous.map((c) => ({ id: c.id, subject: c.subject, status: c.status, updatedAt: c.updatedAt })),
     draft: draft ? { kind: draft.kind as 'reply' | 'note', bodyHtml: draft.body_html as string } : null,
+    /** Live chat only: the visitor has the chat open, so a reply reaches them there instead of by email. */
+    visitorOnline: summary.source === 'chat' ? visitorOnline(id) : null,
     url: `${config.appUrl}/c/${id}`,
   }
 }
@@ -373,7 +383,7 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
   const conv = get<any>('SELECT mailbox_id, thread_count, assignee_id FROM conversations WHERE id = ?', conversationId)
   touch(conversationId, conv.mailbox_id, conv.thread_count <= 1 ? 'created' : 'customer_reply', { userId: null, via: 'email' })
   emitAppEvent(conv.thread_count <= 1 ? 'conversation.created' : 'conversation.customer_replied', conversationId, { threadId, historical: input.historical })
-  if (conv.thread_count > 1 && conv.assignee_id && !input.historical) notifyCustomerReply(conversationId)
+  if (conv.thread_count > 1 && conv.assignee_id && !input.historical && input.via !== 'chat') notifyCustomerReply(conversationId)
   return threadId
 }
 
@@ -395,13 +405,21 @@ export interface ReplyInput {
   assigneeId?: number | null
 }
 
+/** A conversation can only be assigned to someone who can see its mailbox. */
+function assertMember(userId: number, mailboxId: number) {
+  if (memberOf(userId, mailboxId)) return
+  const name = get<{ name: string }>('SELECT name FROM users WHERE id = ?', userId)?.name ?? 'That teammate'
+  throw new AppError(`${name} does not have access to this mailbox. An admin can change that in Settings → Team.`)
+}
+
 /** Who owns a conversation after a reply: an explicit choice wins, otherwise the mailbox's setting decides. */
 function assigneeAfterReply(current: number | null, mailbox: MailboxRow, input: ReplyInput, actor: Actor): number | null {
   if (input.assigneeId !== undefined) {
     if (input.assigneeId !== null && !get('SELECT 1 FROM users WHERE id = ? AND disabled = 0', input.assigneeId)) throw new AppError('That teammate does not exist.', 404)
+    if (input.assigneeId !== null) assertMember(input.assigneeId, mailbox.id)
     return input.assigneeId
   }
-  if (mailbox.assign_after_reply === 'replier' && actor.userId) return actor.userId
+  if (mailbox.assign_after_reply === 'replier' && actor.userId && memberOf(actor.userId, mailbox.id)) return actor.userId
   return current
 }
 
@@ -442,6 +460,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
   const sendAt = input.sendAt && input.sendAt > now() + 30_000 && actor.via !== 'auto' ? input.sendAt : null
   if (sendAt && sendAt > now() + 366 * 86_400_000) throw new AppError('Choose a time within the next year.')
   let mailboxId = 0
+  let inChat = false
   const after: { assigned?: { from: number | null; to: number | null; toName: string | null } } = {}
   const threadId = tx(() => {
     const conv = get<any>('SELECT c.*, cu.email AS customer_email FROM conversations c JOIN customers cu ON cu.id = c.customer_id WHERE c.id = ?', conversationId)
@@ -455,6 +474,9 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     const refs = refsAfter(last)
     const status: Status = input.status && STATUSES.includes(input.status) ? input.status : 'closed'
     const assignee = actor.via === 'auto' ? conv.assignee_id : assigneeAfterReply(conv.assignee_id, mailbox, input, actor)
+    // A live chat reply reaches the visitor in the widget while they are there. Once they have left, it goes by email.
+    const channel = conv.source === 'chat' && !sendAt ? (visitorOnline(conversationId) ? 'chat' : 'email') : null
+    if (channel === 'chat') inChat = true
     const { id } = run(
       `INSERT INTO threads (conversation_id, type, user_id, body_html, body_text, from_addr, to_addrs, cc, bcc, message_id, in_reply_to, refs, state, event, via, created_at, send_at)
        VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -469,8 +491,8 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       newMessageId(mailbox.email),
       last?.message_id ?? null,
       refs,
-      sendAt ? 'scheduled' : input.skipDelivery || config.mailDisabled ? 'sent' : 'sending',
-      JSON.stringify(sendAt ? { status, ifNoReply: !!input.ifNoReply } : { status }),
+      sendAt ? 'scheduled' : input.skipDelivery || config.mailDisabled || channel === 'chat' ? 'sent' : 'sending',
+      JSON.stringify(sendAt ? { status, ifNoReply: !!input.ifNoReply } : channel ? { status, channel } : { status }),
       actor.via,
       at,
       sendAt,
@@ -511,7 +533,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
   }
   touch(conversationId, mailboxId, 'reply', actor)
   announceAgentThread('conversation.agent_replied', conversationId, threadId, input.createdAt !== undefined)
-  if (!input.skipDelivery && !config.mailDisabled) queueDelivery(threadId)
+  if (!input.skipDelivery && !config.mailDisabled && !inChat) queueDelivery(threadId)
   return threadId
 }
 
@@ -677,7 +699,9 @@ export function mergeCustomers(targetId: number, sourceId: number) {
 function recordMentions(conversationId: number, threadId: number, text: string, authorId: number | null): number[] {
   if (!text.includes('@')) return []
   const lower = text.toLowerCase()
-  const users = all<{ id: number; name: string }>('SELECT id, name FROM users WHERE disabled = 0')
+  const mailboxId = get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', conversationId)?.mailbox_id ?? 0
+  // Someone who cannot see the mailbox cannot be mentioned in it.
+  const users = all<{ id: number; name: string }>('SELECT id, name FROM users WHERE disabled = 0').filter((u) => memberOf(u.id, mailboxId))
   // Longest names first, so "@Ann Lee" is not also counted for a teammate called "Ann".
   const found = new Set<number>()
   let rest = lower
@@ -725,6 +749,7 @@ export function createConversation(input: CreateInput, actor: Actor): { id: numb
   if (!mailbox) throw new AppError('Mailbox not found.', 404)
   if (input.status !== undefined && !STATUSES.includes(input.status)) throw new AppError(`Status must be one of: ${STATUSES.join(', ')}.`)
   if (input.assigneeId != null && !get('SELECT 1 FROM users WHERE id = ? AND disabled = 0', input.assigneeId)) throw new AppError('That teammate does not exist.', 404)
+  if (input.assigneeId != null) assertMember(input.assigneeId, input.mailboxId)
   const at = input.createdAt ?? now()
   return tx(() => {
     const customer = findOrCreateCustomer(input.customerEmail, input.customerName)
@@ -831,6 +856,7 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
       if (patch.assigneeId !== null) {
         const user = get<{ name: string }>('SELECT name FROM users WHERE id = ? AND disabled = 0', patch.assigneeId)
         if (!user) throw new AppError('That teammate does not exist.', 404)
+        assertMember(patch.assigneeId, patch.mailboxId ?? conv.mailbox_id)
         name = user.name
         if (patch.assigneeId !== actor.userId) notify = patch.assigneeId
       }
@@ -855,6 +881,13 @@ export function updateConversation(id: number, patch: ConversationPatch, actor: 
       run('UPDATE conversations SET mailbox_id = ? WHERE id = ?', patch.mailboxId, id)
       mailboxIds.add(patch.mailboxId)
       addEvent(id, actor, { kind: 'moved', toName: target.name }, at)
+      // An assignee who cannot see the new mailbox lets go of the conversation.
+      const assignee = get<{ assignee_id: number | null }>('SELECT assignee_id FROM conversations WHERE id = ?', id)!.assignee_id
+      if (assignee && !memberOf(assignee, patch.mailboxId)) {
+        run('UPDATE conversations SET assignee_id = NULL WHERE id = ?', id)
+        addEvent(id, actor, { kind: 'assigned', to: null, toName: null }, at)
+        changes.push(['conversation.assigned', { from: assignee, to: null, toName: null }])
+      }
     }
 
     if (patch.customerId !== undefined && patch.customerId !== conv.customer_id) {
@@ -903,6 +936,8 @@ export function mergeConversations(sourceId: number, targetId: number, actor: Ac
   if (!source || !target) throw new AppError('Conversation not found.', 404)
   tx(() => {
     run('UPDATE threads SET conversation_id = ? WHERE conversation_id = ?', targetId, sourceId)
+    // A visitor still chatting in the merged conversation keeps chatting, now in the target.
+    if (run('UPDATE chat_visitors SET conversation_id = ? WHERE conversation_id = ?', targetId, sourceId).changes) run(`UPDATE conversations SET source = 'chat' WHERE id = ?`, targetId)
     run('INSERT OR IGNORE INTO conversation_tags (conversation_id, tag_id) SELECT ?, tag_id FROM conversation_tags WHERE conversation_id = ?', targetId, sourceId)
     addEvent(targetId, actor, { kind: 'merged', fromId: sourceId, fromSubject: source.subject })
     run(

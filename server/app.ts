@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { api } from './api.ts'
+import { chat } from './chat/routes.ts'
 import { userFromBearer, pruneSessions } from './auth.ts'
-import { prunePresence } from './events.ts'
+import { prunePresence, pruneVisitors } from './events.ts'
 import { handleMcp } from './mcp.ts'
 import { migrate, run } from './db.ts'
 import { dispatchScheduled, wakeSnoozed } from './services/conversations.ts'
@@ -21,7 +22,9 @@ export function createApp() {
 
   app.use('*', async (c, next) => {
     await next()
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.header(name, value)
+    // The chat window is made to sit in an iframe on other websites. Its own policy names which ones.
+    const framable = /frame-ancestors (?!'none')/.test(c.res.headers.get('Content-Security-Policy') || '')
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) if (!(framable && name === 'X-Frame-Options')) c.header(name, value)
     if (!c.res.headers.has('Content-Security-Policy')) c.header('Content-Security-Policy', CONTENT_SECURITY_POLICY)
   })
 
@@ -41,6 +44,8 @@ export function createApp() {
     return handleMcp(c.req.raw, user)
   })
 
+  // The live chat widget's public routes. Before /api, whose routes all need a signed-in user.
+  app.route('/api/chat', chat)
   app.route('/api', api)
   return app
 }
@@ -66,6 +71,7 @@ export function startTimers() {
     timer.unref?.()
   }
   every(15_000, prunePresence)
+  every(5_000, pruneVisitors)
   every(30_000, wakeSnoozed)
   every(10_000, () => void dispatchScheduled().catch((err) => console.error('[send later]', err)))
   every(3_600_000, pruneSessions)

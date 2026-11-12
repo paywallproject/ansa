@@ -125,7 +125,7 @@ export function ReportsPage() {
                       <tr key={u.id}>
                         <td className="px-5 py-2.5">
                           <span className="flex items-center gap-2.5">
-                            <Avatar name={u.name} color={u.color} size={24} />
+                            <Avatar name={u.name} color={u.color} src={u.avatarUrl} size={24} />
                             <span className="font-medium">{u.name}</span>
                           </span>
                         </td>

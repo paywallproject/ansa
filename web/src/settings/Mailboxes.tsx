@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, CircleAlert, CircleCheck, Mail, Plus, RefreshCw } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, CircleCheck, Copy, Mail, Plus, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
 import { brand } from '../lib/workspace'
 import { ago } from '../lib/format'
-import { useMailboxes } from '../lib/hooks'
-import type { AssignAfterReply, Mailbox } from '../lib/types'
+import { useMailboxes, useSession } from '../lib/hooks'
+import type { AssignAfterReply, ChatAvailability, Mailbox } from '../lib/types'
 import { Banner, Button, Card, EmptyState, Field, Input, PageHeader, Select, Spinner, Switch, Textarea, cx, useFeedback } from '../ui'
 import { RichField } from '../inbox/Editor'
 
@@ -34,6 +34,40 @@ interface FormState {
   autoReplyEnabled: boolean
   autoReplyBody: string
   assignAfterReply: AssignAfterReply
+  chatEnabled: boolean
+  chatTitle: string
+  chatGreeting: string
+  chatColor: string
+  /** One website per line. */
+  chatOrigins: string
+  chatAvailability: ChatAvailability
+  chatDays: number[]
+  chatStart: string
+  chatEnd: string
+  chatTimezone: string
+  chatAwayMessage: string
+  chatHideWhenAway: boolean
+}
+
+const AVAILABILITY_OPTIONS: { id: ChatAvailability; label: string; hint: string }[] = [
+  { id: 'team', label: 'When a teammate is available', hint: 'Online while at least one teammate is set to Available and has the app open. Each person switches between Available and Away in the account menu.' },
+  { id: 'hours', label: 'During office hours', hint: 'Online on the days and hours you set, whoever is signed in.' },
+  { id: 'always', label: 'Always online', hint: 'The chat never shows as away.' },
+]
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const browserZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+const allZones = (): string[] => {
+  try {
+    return (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone') ?? []
+  } catch {
+    return []
+  }
 }
 
 const ASSIGN_OPTIONS: { id: AssignAfterReply; label: string; hint: string }[] = [
@@ -67,11 +101,24 @@ const initial = (m?: Mailbox): FormState => ({
   imapPassword: '',
   imapFolder: m?.imapFolder ?? 'INBOX',
   importExisting: m?.importExisting ?? false,
-  sameLogin: m ? m.imapUser === m.smtpUser : true,
+  sameLogin: m ? (m.imapSameLogin ?? m.imapUser === m.smtpUser) : true,
   signature: m?.signature ?? '',
   autoReplyEnabled: m?.autoReplyEnabled ?? false,
   autoReplyBody: m?.autoReplyBody ?? '',
   assignAfterReply: m?.assignAfterReply ?? 'replier',
+  chatEnabled: m?.chatEnabled ?? false,
+  chatTitle: m?.chat?.title ?? 'Chat with us',
+  chatGreeting: m?.chat?.greeting ?? '',
+  chatColor: m?.chat?.color ?? COLORS[0],
+  chatOrigins: (m?.chat?.origins ?? []).join('\n'),
+  chatAvailability: m?.chat?.availability ?? 'team',
+  chatDays: m?.chat?.hours.days ?? [1, 2, 3, 4, 5],
+  chatStart: m?.chat?.hours.start ?? '09:00',
+  chatEnd: m?.chat?.hours.end ?? '17:00',
+  // Office hours not set up yet start in the admin's own time zone rather than UTC.
+  chatTimezone: m?.chat?.availability === 'hours' ? m.chat.hours.timezone : m?.chat?.hours.timezone && m.chat.hours.timezone !== 'UTC' ? m.chat.hours.timezone : browserZone(),
+  chatAwayMessage: m?.chat?.awayMessage ?? '',
+  chatHideWhenAway: m?.chat?.hideWhenAway ?? false,
 })
 
 function Section({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
@@ -131,6 +178,22 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
     imapPassword: form.sameLogin ? form.smtpPassword : form.imapPassword,
     // With a shared login and no new password typed, the server reuses the saved SMTP password.
     copySmtpPassword: form.sameLogin,
+    // Chat is set up on a saved mailbox; a new one keeps the defaults.
+    ...(mailbox
+      ? {
+          chat: {
+            title: form.chatTitle,
+            greeting: form.chatGreeting,
+            color: form.chatColor,
+            origins: form.chatOrigins,
+            availability: form.chatAvailability,
+            awayMessage: form.chatAwayMessage,
+            hideWhenAway: form.chatHideWhenAway,
+            // Office hours are checked only when they are used.
+            ...(form.chatAvailability === 'hours' ? { hours: { days: form.chatDays, start: form.chatStart, end: form.chatEnd, timezone: form.chatTimezone } } : {}),
+          },
+        }
+      : {}),
   })
 
   const save = useMutation({
@@ -311,6 +374,7 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
               ))}
             </div>
           </Section>
+          {mailbox && <LiveChatSection form={form} set={set} chatKey={mailbox.chatKey ?? null} savedEnabled={!!mailbox.chatEnabled} onlineNow={mailbox.chatOnline ?? false} />}
           <Section title="Auto reply" description="Send an automatic acknowledgement when a customer starts a new conversation.">
             <Switch checked={form.autoReplyEnabled} onChange={(v) => set('autoReplyEnabled', v)} label="Send an auto reply to new conversations" />
             {form.autoReplyEnabled && (
@@ -329,6 +393,172 @@ export function MailboxForm({ mailbox, onSaved, compact = false }: { mailbox?: M
         </Button>
       </div>
     </form>
+  )
+}
+
+function LiveChatSection({
+  form,
+  set,
+  chatKey,
+  savedEnabled,
+  onlineNow,
+}: {
+  form: FormState
+  set: <K extends keyof FormState>(key: K, value: FormState[K]) => void
+  chatKey: string | null
+  savedEnabled: boolean
+  onlineNow: boolean
+}) {
+  const zones = allZones()
+  const { appUrl } = useSession()
+  const [copied, setCopied] = useState(false)
+  const snippet = chatKey ? `<script src="${appUrl}/api/chat/widget.js?key=${chatKey}" async></script>` : ''
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(snippet)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* the snippet stays selectable */
+    }
+  }
+  return (
+    <Section
+      title="Live chat"
+      description="A chat button for your website. Each chat becomes a conversation in this mailbox. You answer it here, and the visitor sees your reply at once. If they left, it goes to them by email."
+    >
+      <Switch checked={form.chatEnabled} onChange={(v) => set('chatEnabled', v)} label="Turn on live chat for this mailbox" />
+      {form.chatEnabled && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Title" hint="At the top of the chat window.">
+              {(id) => <Input id={id} maxLength={60} value={form.chatTitle} onChange={(e) => set('chatTitle', e.target.value)} placeholder="Chat with us" />}
+            </Field>
+            <Field label="Color" hint="The button and the window's header.">
+              {(id) => (
+                <div className="flex h-9 items-center gap-1.5">
+                  {COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      aria-label={`Color ${color}`}
+                      aria-pressed={form.chatColor === color}
+                      onClick={() => set('chatColor', color)}
+                      className={cx('size-6 shrink-0 rounded-full ring-offset-2 ring-offset-surface transition-shadow', form.chatColor === color && 'ring-2 ring-fg')}
+                      style={{ background: color }}
+                    />
+                  ))}
+                  <input id={id} type="color" value={form.chatColor} onChange={(e) => set('chatColor', e.target.value)} aria-label="Custom color" className="size-7 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0" />
+                </div>
+              )}
+            </Field>
+          </div>
+          <Field label="Greeting" hint="The first message a visitor sees. Leave it empty for none.">
+            {(id) => <Textarea id={id} rows={2} maxLength={500} value={form.chatGreeting} onChange={(e) => set('chatGreeting', e.target.value)} placeholder="Hi there! Ask us anything. We usually reply within a few minutes." />}
+          </Field>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[13px] font-medium">When the chat is online</p>
+              {savedEnabled && (
+                <span className={cx('inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium', onlineNow ? 'bg-ok-soft text-ok' : 'bg-sunken text-fg-2')}>
+                  <span className={cx('size-1.5 rounded-full', onlineNow ? 'bg-ok' : 'bg-fg-3')} aria-hidden />
+                  {onlineNow ? 'Online now' : 'Away now'}
+                </span>
+              )}
+            </div>
+            <div role="radiogroup" aria-label="When the chat is online" className="flex flex-col gap-2">
+              {AVAILABILITY_OPTIONS.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.chatAvailability === o.id}
+                  onClick={() => set('chatAvailability', o.id)}
+                  className={cx('flex items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors', form.chatAvailability === o.id ? 'border-accent bg-accent-soft' : 'border-line-strong hover:bg-sunken')}
+                >
+                  <span className={cx('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border', form.chatAvailability === o.id ? 'border-accent' : 'border-line-strong')} aria-hidden>
+                    {form.chatAvailability === o.id && <span className="size-2 rounded-full bg-accent" />}
+                  </span>
+                  <span>
+                    <span className={cx('block text-[13px] font-medium', form.chatAvailability === o.id && 'text-accent-fg')}>{o.label}</span>
+                    <span className="block text-xs text-fg-3">{o.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.chatAvailability === 'hours' && (
+            <div className="flex flex-col gap-3 rounded-xl border border-line p-3">
+              <div role="group" aria-label="Open days" className="flex flex-wrap gap-1.5">
+                {DAYS.map((label, day) => {
+                  const on = form.chatDays.includes(day)
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => set('chatDays', on ? form.chatDays.filter((d) => d !== day) : [...form.chatDays, day].sort())}
+                      className={cx('h-8 min-w-12 rounded-lg border px-2 text-[13px] font-medium transition-colors', on ? 'border-accent bg-accent-soft text-accent-fg' : 'border-line-strong text-fg-2 hover:bg-sunken')}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="From">{(id) => <Input id={id} type="time" value={form.chatStart} onChange={(e) => set('chatStart', e.target.value)} />}</Field>
+                <Field label="To">{(id) => <Input id={id} type="time" value={form.chatEnd} onChange={(e) => set('chatEnd', e.target.value)} />}</Field>
+                <Field label="Time zone">
+                  {(id) => (
+                    <>
+                      <Input id={id} list={`${id}-zones`} value={form.chatTimezone} onChange={(e) => set('chatTimezone', e.target.value)} placeholder="Europe/Berlin" />
+                      <datalist id={`${id}-zones`}>
+                        {zones.map((zone) => (
+                          <option key={zone} value={zone} />
+                        ))}
+                      </datalist>
+                    </>
+                  )}
+                </Field>
+              </div>
+              <p className="text-xs text-fg-3">An end time before the start time runs past midnight.</p>
+            </div>
+          )}
+          {form.chatAvailability !== 'always' && (
+            <>
+              <Field label="Away message" hint="Shown instead of the greeting while the chat is away. Visitors can still write, and you reply by email.">
+                {(id) => <Textarea id={id} rows={2} maxLength={500} value={form.chatAwayMessage} onChange={(e) => set('chatAwayMessage', e.target.value)} placeholder="We're away right now. Leave a message and we'll reply by email." />}
+              </Field>
+              <Switch
+                checked={form.chatHideWhenAway}
+                onChange={(v) => set('chatHideWhenAway', v)}
+                label="Hide the chat button while away"
+                description="Visitors who are already in a chat still see it."
+              />
+            </>
+          )}
+          <Field label="Websites that can show the chat" hint="One per line, such as https://example.com or https://*.example.com. Leave it empty to allow any website.">
+            {(id) => <Textarea id={id} rows={2} value={form.chatOrigins} onChange={(e) => set('chatOrigins', e.target.value)} placeholder="https://example.com" className="font-mono text-[13px]" />}
+          </Field>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[13px] font-medium">Embed code</p>
+            {chatKey && savedEnabled ? (
+              <>
+                <div className="flex items-start gap-2">
+                  <code className="min-w-0 flex-1 rounded-lg border border-line-strong bg-sunken px-3 py-2 font-mono text-xs break-all text-fg-2 select-all">{snippet}</code>
+                  <Button icon={copied ? <Check /> : <Copy />} onClick={() => void copy()}>
+                    {copied ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+                <p className="text-[13px] text-fg-3">Paste it before the closing &lt;/body&gt; tag on every page that should show the chat button. Open it from your own button with <code className="font-mono text-xs">AnsaChat.open()</code>.</p>
+              </>
+            ) : (
+              <p className="text-[13px] text-fg-3">Save changes to get the code for your website.</p>
+            )}
+          </div>
+        </>
+      )}
+    </Section>
   )
 }
 

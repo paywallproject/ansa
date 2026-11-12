@@ -24,9 +24,11 @@ import {
   UserRound,
   X,
   Clock,
+  MessageCircle,
 } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { fileSize, fullTime, messageTime, STATUS_LABEL } from '../lib/format'
+import { canSee } from '../lib/access'
 import { useDebounced, useDocumentTitle, useHotkeys, useMailboxes, useSession, useTags, useUsers } from '../lib/hooks'
 import type { Attachment, Conversation, ConversationSummary, Status, Thread, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
@@ -311,13 +313,25 @@ function Header({
           <div className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-warn-soft py-0.5 pr-2.5 pl-1 text-xs font-medium text-warn" role="status">
             <span className="flex -space-x-1.5">
               {viewers.slice(0, 3).map((v) => (
-                <Avatar key={v.userId} name={v.name} color={v.color} size={20} className="ring-2 ring-warn-soft" />
+                <Avatar key={v.userId} name={v.name} color={v.color} src={v.avatarUrl} size={20} className="ring-2 ring-warn-soft" />
               ))}
             </span>
             <span className="hidden sm:inline">
               {viewers.length === 1 ? viewers[0].name.split(' ')[0] : `${viewers.length} people`} {viewers.some((v) => v.state === 'replying') ? 'replying' : 'viewing'}
             </span>
           </div>
+        )}
+
+        {c.visitorOnline !== null && (
+          <span
+            className={cx('flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium', c.visitorOnline ? 'bg-ok-soft text-ok' : 'bg-sunken text-fg-2')}
+            role="status"
+            title={c.visitorOnline ? 'The visitor has the chat open. Replies appear there at once.' : 'The visitor left the chat. Replies go to them by email.'}
+          >
+            <MessageCircle className="size-3.5" aria-hidden />
+            <span className="hidden sm:inline">{c.visitorOnline ? 'In chat now' : 'Left chat'}</span>
+            {c.visitorOnline && <span className="size-1.5 rounded-full bg-ok" aria-hidden />}
+          </span>
         )}
 
         <SnoozeMenu snoozedUntil={c.snoozedUntil} onSnooze={(until) => onPatch({ snoozedUntil: until })} />
@@ -356,7 +370,7 @@ function Header({
           trigger={({ ref, ...props }) => (
             <button ref={ref} type="button" {...props} className={cx(pill, 'pl-1.5')} aria-label={`Assignee: ${c.assignee?.name ?? 'nobody'}`}>
               {c.assignee ? (
-                <Avatar name={c.assignee.name} color={c.assignee.color} size={20} />
+                <Avatar name={c.assignee.name} color={c.assignee.color} src={c.assignee.avatarUrl} size={20} />
               ) : (
                 <span className="flex size-5 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3">
                   <UserRound className="size-3" aria-hidden />
@@ -370,11 +384,11 @@ function Header({
           {(close) => (
             <>
               {(users.data ?? [])
-                .filter((u) => !u.disabled)
+                .filter((u) => !u.disabled && canSee(u, c.mailboxId))
                 .map((u) => (
                   <MenuItem
                     key={u.id}
-                    icon={<Avatar name={u.name} color={u.color} size={20} />}
+                    icon={<Avatar name={u.name} color={u.color} src={u.avatarUrl} size={20} />}
                     checked={c.assignee?.id === u.id}
                     onSelect={() => {
                       close()
@@ -800,6 +814,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
   const color = thread.author.kind === 'user' ? thread.author.color : isCustomer ? CUSTOMER_COLOR : undefined
+  const photo = thread.author.kind === 'user' ? thread.author.avatarUrl : null
   const files = thread.attachments.filter((a) => !a.inline)
   const text = useMemo(() => (folded ? stripTags(thread.bodyHtml) : ''), [folded, thread.bodyHtml])
   const html = useMemo(() => trimBlankEdges(showQuoted && quoted.data ? quoted.data : thread.bodyHtml), [showQuoted, quoted.data, thread.bodyHtml])
@@ -811,7 +826,22 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   if (thread.type === 'reply' && thread.to.length > 0) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
   if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
   if (isNote) meta.push(<>Only your team sees this</>)
-  const channel = thread.type === 'reply' ? (thread.via === 'auto' ? 'Auto reply' : thread.via === 'email' ? 'Replied by email' : thread.via === 'mcp' || thread.via === 'api' ? 'Sent through the API' : '') : ''
+  const channel =
+    thread.type === 'reply'
+      ? thread.via === 'auto'
+        ? 'Auto reply'
+        : thread.event?.channel === 'chat'
+          ? 'Sent in live chat'
+          : thread.event?.channel === 'email'
+            ? 'Emailed, the visitor had left the chat'
+            : thread.via === 'email'
+              ? 'Replied by email'
+              : thread.via === 'mcp' || thread.via === 'api'
+                ? 'Sent through the API'
+                : ''
+      : isCustomer && thread.via === 'chat'
+        ? 'In live chat'
+        : ''
   if (channel) meta.push(<>{channel}</>)
   // What the message did to the conversation at that moment: a customer message makes it active,
   // a reply sets the status the teammate chose when sending. An auto reply changes nothing.
@@ -822,7 +852,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
     <li className="relative md:px-14">
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
-      <Avatar name={name} color={color} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
+      <Avatar name={name} color={color} src={photo} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
@@ -838,7 +868,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         {!isCustomer && <span className={cx('absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
         <header>
           <div className="flex items-center gap-2.5">
-            <Avatar name={name} color={color} size={24} className="md:hidden" />
+            <Avatar name={name} color={color} src={photo} size={24} className="md:hidden" />
             <button type="button" onClick={onToggle} aria-expanded={!folded} className="flex min-w-0 flex-1 items-baseline rounded text-left">
               <span className="truncate text-sm font-semibold">{name}</span>
             </button>

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, ChevronDown, Inbox, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Check, ChevronDown, Inbox, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
+import { canSee } from '../lib/access'
 import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers } from '../lib/hooks'
 import type { ConversationSummary, Folder } from '../lib/types'
 import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback, MenuDivider, MenuLabel } from '../ui'
@@ -173,13 +174,13 @@ export function InboxPage({ search = false }: { search?: boolean }) {
                 <>
                   <MenuLabel>Assign to</MenuLabel>
                   {(users.data ?? [])
-                    .filter((u) => !u.disabled)
+                    .filter((u) => !u.disabled && canSee(u, mailboxId))
                     // Yourself first: it is the most common choice.
                     .sort((x, y) => Number(y.id === user.id) - Number(x.id === user.id))
                     .map((u) => (
                       <MenuItem
                         key={u.id}
-                        icon={<Avatar name={u.name} color={u.color} size={20} />}
+                        icon={<Avatar name={u.name} color={u.color} src={u.avatarUrl} size={20} />}
                         onSelect={() => {
                           close()
                           bulk.mutate({ patch: { assigneeId: u.id } })
@@ -353,6 +354,7 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
         <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg-2')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
+            {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
             <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
@@ -368,7 +370,7 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
         </span>
         <span className="hidden items-center justify-end gap-2 md:flex">
           {c.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-fg-3" aria-label="Has attachments" />}
-          {showAssignee && <Avatar name={c.assignee!.name} color={c.assignee!.color} size={20} />}
+          {showAssignee && <Avatar name={c.assignee!.name} color={c.assignee!.color} src={c.assignee!.avatarUrl} size={20} />}
           {c.threadCount > 1 && (
             <span className="flex h-5 min-w-6 shrink-0 items-center justify-center rounded border border-line-strong px-1 text-xs font-medium text-fg-2 tabular-nums" title={plural(c.threadCount, 'message')}>
               {c.threadCount}

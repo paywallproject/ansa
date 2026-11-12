@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Building, Download, KeyRound, Mail, Plus, Puzzle, Tag as TagIcon, Trash2, UserRound, Users, Workflow as WorkflowIcon } from 'lucide-react'
 import { api } from '../lib/api'
 import { plural } from '../lib/format'
-import { useDocumentTitle, useSession, useTags, useUsers } from '../lib/hooks'
+import { useDocumentTitle, useMailboxes, useSession, useTags, useUsers } from '../lib/hooks'
 import type { Tag, User } from '../lib/types'
 import { Avatar, Banner, Button, Card, EmptyState, Field, IconButton, Input, Modal, PageHeader, Popover, Select, Spinner, Switch, cx, useFeedback } from '../ui'
 import { RichField } from '../inbox/Editor'
@@ -15,6 +15,7 @@ import { AppsSettings } from './Apps'
 import { WorkspaceSettings } from './Workspace'
 import { ImportSettings } from './Import'
 import { workspace } from '../lib/workspace'
+import { PhotoPicker } from './PhotoPicker'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -86,6 +87,7 @@ export function SettingsPage() {
 
 function ProfileSettings() {
   const { user, refresh } = useSession()
+  const client = useQueryClient()
   const { toast } = useFeedback()
   const [form, setForm] = useState({ name: user.name, email: user.email, signature: user.signature, notifyAssigned: user.notifyAssigned, notifyReplies: user.notifyReplies, notifyMentions: user.notifyMentions })
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '' })
@@ -111,7 +113,18 @@ function ProfileSettings() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Profile" description="Your name, signature and notifications." />
+      <PageHeader title="Profile" description="Your photo, name, signature and notifications." />
+      <Card className="p-5">
+        <h2 className="mb-4 text-[15px] font-semibold">Photo</h2>
+        <PhotoPicker
+          user={user}
+          path="/me/avatar"
+          onChange={() => {
+            refresh()
+            void client.invalidateQueries({ queryKey: ['users'] })
+          }}
+        />
+      </Card>
       <Card className="p-5">
         <form
           className="flex flex-col gap-4"
@@ -183,6 +196,8 @@ function TeamSettings() {
   const users = useUsers()
   const [editing, setEditing] = useState<User | 'new' | null>(null)
   const admin = me.role === 'admin'
+  const mailboxes = useMailboxes()
+  const chat = mailboxes.data?.some((m) => m.chatEnabled) ?? false
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
@@ -202,7 +217,7 @@ function TeamSettings() {
         <Card className="divide-y divide-line">
           {users.data?.map((u) => (
             <div key={u.id} className={cx('flex items-center gap-3 px-5 py-3', u.disabled && 'opacity-60')}>
-              <Avatar name={u.name} color={u.color} size={32} />
+              <Avatar name={u.name} color={u.color} src={u.avatarUrl} size={32} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {u.name}
@@ -210,7 +225,24 @@ function TeamSettings() {
                 </p>
                 <p className="truncate text-[13px] text-fg-3">{u.email}</p>
               </div>
-              <span className="text-[13px] text-fg-2">{u.disabled ? 'Deactivated' : u.role === 'admin' ? 'Admin' : 'Agent'}</span>
+              {chat && !u.disabled && (
+                <span
+                  className={cx('hidden h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium sm:inline-flex', u.chatAvailable ? 'bg-ok-soft text-ok' : 'bg-sunken text-fg-3')}
+                  title={u.chatAvailable ? 'Available for live chat' : u.chatStatus === 'away' ? 'Set to away' : 'Available, but does not have the app open'}
+                >
+                  <span className={cx('size-1.5 rounded-full', u.chatAvailable ? 'bg-ok' : 'bg-fg-3')} aria-hidden />
+                  {u.chatAvailable ? 'Available' : 'Away'}
+                </span>
+              )}
+              <span className="text-[13px] text-fg-2">
+                {u.disabled ? 'Deactivated' : u.role === 'admin' ? 'Admin' : 'Agent'}
+                {!u.disabled && u.mailboxAccess === 'some' && (
+                  <span className="text-fg-3" title={(mailboxes.data ?? []).filter((m) => u.mailboxIds.includes(m.id)).map((m) => m.name).join(', ')}>
+                    {' · '}
+                    {plural(u.mailboxIds.length, 'mailbox', 'mailboxes')}
+                  </span>
+                )}
+              </span>
               {admin && (
                 <Button size="sm" onClick={() => setEditing(u)}>
                   Edit
@@ -228,7 +260,20 @@ function TeamSettings() {
 function TeammateForm({ user, isSelf, onClose }: { user: User | null; isSelf: boolean; onClose: () => void }) {
   const client = useQueryClient()
   const { toast } = useFeedback()
-  const [form, setForm] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: user?.role ?? 'agent', password: '' })
+  const { refresh } = useSession()
+  // The photo changes while the dialog is open, so read it from the live list.
+  const users = useUsers()
+  const live = user ? (users.data?.find((u) => u.id === user.id) ?? user) : null
+  const [form, setForm] = useState({
+    name: user?.name ?? '',
+    email: user?.email ?? '',
+    role: user?.role ?? 'agent',
+    password: '',
+    mailboxAccess: user?.mailboxAccess ?? ('all' as 'all' | 'some'),
+    mailboxIds: user?.mailboxIds ?? ([] as number[]),
+  })
+  const allMailboxes = useMailboxes().data ?? []
+  const limited = form.role !== 'admin' && form.mailboxAccess === 'some'
   const [error, setError] = useState<string | null>(null)
   const done = (message: string) => {
     void client.invalidateQueries({ queryKey: ['users'] })
@@ -236,7 +281,10 @@ function TeammateForm({ user, isSelf, onClose }: { user: User | null; isSelf: bo
     onClose()
   }
   const save = useMutation({
-    mutationFn: () => (user ? api.patch(`/users/${user.id}`, { ...form, password: form.password || undefined }) : api.post('/users', form)),
+    mutationFn: () => {
+      if (limited && form.mailboxIds.length === 0) throw new Error('Pick at least one mailbox, or give access to all of them.')
+      return user ? api.patch(`/users/${user.id}`, { ...form, password: form.password || undefined }) : api.post('/users', form)
+    },
     onSuccess: () => done(user ? 'Teammate saved' : 'Teammate added'),
     onError: (err: Error) => setError(err.message),
   })
@@ -273,6 +321,16 @@ function TeammateForm({ user, isSelf, onClose }: { user: User | null; isSelf: bo
         }}
       >
         {error && <Banner kind="danger">{error}</Banner>}
+        {live && (
+          <PhotoPicker
+            user={live}
+            path={`/users/${live.id}/avatar`}
+            onChange={() => {
+              void client.invalidateQueries({ queryKey: ['users'] })
+              if (isSelf) refresh()
+            }}
+          />
+        )}
         <Field label="Name">{(id) => <Input id={id} required autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />}</Field>
         <Field label="Email">{(id) => <Input id={id} type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />}</Field>
         <Field label="Role" hint="Admins can also manage mailboxes, teammates and workflows.">
@@ -283,6 +341,54 @@ function TeammateForm({ user, isSelf, onClose }: { user: User | null; isSelf: bo
             </Select>
           )}
         </Field>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1.5 text-[13px] font-medium">Mailboxes</legend>
+          {form.role === 'admin' ? (
+            <p className="text-[13px] text-fg-3">Admins can see every mailbox.</p>
+          ) : (
+            <>
+              <div role="radiogroup" aria-label="Mailbox access" className="flex gap-1 rounded-lg bg-sunken p-1">
+                {(['all', 'some'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={form.mailboxAccess === value}
+                    onClick={() => setForm({ ...form, mailboxAccess: value })}
+                    className={cx('h-7 flex-1 rounded-md text-[13px] font-medium transition-colors', form.mailboxAccess === value ? 'bg-surface text-fg shadow-card' : 'text-fg-2 hover:text-fg')}
+                  >
+                    {value === 'all' ? 'All mailboxes' : 'Only some'}
+                  </button>
+                ))}
+              </div>
+              {form.mailboxAccess === 'all' ? (
+                <p className="text-[13px] text-fg-3">Includes mailboxes you add later.</p>
+              ) : (
+                <>
+                  <div className="flex flex-col rounded-lg border border-line-strong">
+                    {allMailboxes.map((m) => {
+                      const on = form.mailboxIds.includes(m.id)
+                      return (
+                        <label key={m.id} className="flex cursor-pointer items-center gap-2.5 border-b border-line px-3 py-2 last:border-b-0 hover:bg-sunken">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => setForm({ ...form, mailboxIds: on ? form.mailboxIds.filter((id) => id !== m.id) : [...form.mailboxIds, m.id] })}
+                            className="size-4 accent-[var(--accent)]"
+                          />
+                          <span className="size-2 shrink-0 rounded-full" style={{ background: m.color }} aria-hidden />
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{m.name}</span>
+                          <span className="truncate text-xs text-fg-3">{m.email}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[13px] text-fg-3">They see only these mailboxes: their conversations, customers' history in them, reports and live chats. Conversations assigned to them in other mailboxes become unassigned.</p>
+                </>
+              )}
+            </>
+          )}
+        </fieldset>
         <Field label={user ? 'New password' : 'Password'} hint={user ? 'Leave blank to keep their current password.' : 'At least 8 characters.'}>
           {(id) => <Input id={id} type="password" autoComplete="new-password" required={!user} minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />}
         </Field>

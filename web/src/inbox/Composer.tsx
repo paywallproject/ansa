@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, ChevronDown, Clock, Send, StickyNote, Trash2, UserRound, X } from 'lucide-react'
 import { api } from '../lib/api'
+import { canSee } from '../lib/access'
 import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
@@ -40,7 +41,9 @@ export const Composer = forwardRef<
   const client = useQueryClient()
   const { toast } = useFeedback()
   const [mode, setMode] = useState<'reply' | 'note'>(conversation.draft?.kind ?? 'reply')
-  const [storedStatus, setSendStatus] = useLocalState<SendStatus>('ansa-send-status', 'closed')
+  // A live chat goes back and forth, so closing it on every reply would be wrong. Chats keep their own choice.
+  const isChat = conversation.source === 'chat'
+  const [storedStatus, setSendStatus] = useLocalState<SendStatus>(isChat ? 'ansa-chat-send-status' : 'ansa-send-status', isChat ? 'active' : 'closed')
   // A remembered choice can be one the workspace no longer offers.
   const sendStatus: SendStatus = (statusOptions() as SendStatus[]).includes(storedStatus) ? storedStatus : 'closed'
   const [showCc, setShowCc] = useState(conversation.cc.length > 0)
@@ -105,7 +108,7 @@ export const Composer = forwardRef<
   const teammates = useUsers()
   const [mention, setMention] = useState<{ from: number; to: number; query: string; left: number; bottom: number } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
-  const candidates: User[] = mention ? (teammates.data ?? []).filter((u) => !u.disabled && u.id !== me.id && u.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6) : []
+  const candidates: User[] = mention ? (teammates.data ?? []).filter((u) => !u.disabled && u.id !== me.id && canSee(u, conversation.mailboxId) && u.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6) : []
   const trackMention = (ed: NonNullable<typeof editor>) => {
     const { $from, empty } = ed.state.selection
     const match = empty && modeRef.current === 'note' ? /(?:^|\s)@([^\s@]*(?: [^\s@]*)?)$/.exec($from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')) : null
@@ -224,7 +227,7 @@ export const Composer = forwardRef<
                 onMouseEnter={() => setMentionIndex(index)}
                 className={cx('flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]', index === mentionIndex ? 'bg-accent-soft text-accent-fg' : 'text-fg')}
               >
-                <Avatar name={person.name} color={person.color} size={20} />
+                <Avatar name={person.name} color={person.color} src={person.avatarUrl} size={20} />
                 <span className="truncate">{person.name}</span>
               </button>
             </li>
@@ -374,7 +377,7 @@ export const Composer = forwardRef<
                       </>
                     )}
                   </Popover>
-                  {chooseAssignee && <AssignPicker assigneeId={sendAssignee} meId={me.id} users={teammates.data ?? []} onPick={setPickedAssignee} />}
+                  {chooseAssignee && <AssignPicker assigneeId={sendAssignee} meId={me.id} users={(teammates.data ?? []).filter((u) => canSee(u, conversation.mailboxId))} onPick={setPickedAssignee} />}
                   <button
                     type="button"
                     aria-label="Send later"
@@ -431,7 +434,7 @@ function AssignPicker({ assigneeId, meId, users, onPick }: { assigneeId: number 
           title="Assign after sending"
           className="ml-1.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-surface pr-2 pl-1 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
         >
-          {current ? <Avatar name={current.name} color={current.color} size={22} /> : <NobodyIcon size={22} />}
+          {current ? <Avatar name={current.name} color={current.color} src={current.avatarUrl} size={22} /> : <NobodyIcon size={22} />}
           <span className="hidden max-w-24 truncate sm:inline">{label}</span>
           <ChevronDown className="size-3.5 opacity-60" aria-hidden />
         </button>
@@ -443,7 +446,7 @@ function AssignPicker({ assigneeId, meId, users, onPick }: { assigneeId: number 
           {active.map((u) => (
             <MenuItem
               key={u.id}
-              icon={<Avatar name={u.name} color={u.color} size={20} />}
+              icon={<Avatar name={u.name} color={u.color} src={u.avatarUrl} size={20} />}
               checked={assigneeId === u.id}
               onSelect={() => {
                 onPick(u.id)

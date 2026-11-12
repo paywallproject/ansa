@@ -88,6 +88,14 @@ function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?
     await api.post('/logout')
     refresh()
   }
+  // Live chat availability. Only shown once a mailbox has chat turned on.
+  const chat = mailboxes.some((m) => m.chatEnabled)
+  const available = user.chatStatus === 'online'
+  const setChatStatus = async (chatStatus: 'online' | 'away') => {
+    if (chatStatus === user.chatStatus) return
+    await api.patch('/me', { chatStatus })
+    refresh()
+  }
   const inInbox = location.pathname.startsWith('/m/') || location.pathname.startsWith('/search')
 
   return (
@@ -175,8 +183,15 @@ function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?
         align="end"
         width={232}
         trigger={({ ref, ...props }) => (
-          <button ref={ref} type="button" {...props} aria-label="Account menu" className="ml-1 flex size-8 shrink-0 items-center justify-center rounded-full focus-visible:outline-white">
-            <Avatar name={user.name} color={user.color} size={28} />
+          <button
+            ref={ref}
+            type="button"
+            {...props}
+            aria-label={chat ? `Account menu. Live chat: ${available ? 'available' : 'away'}` : 'Account menu'}
+            className="relative ml-1 flex size-8 shrink-0 items-center justify-center rounded-full focus-visible:outline-white"
+          >
+            <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={28} />
+            {chat && <span className={cx('absolute right-0 bottom-0 size-2.5 rounded-full ring-2 ring-nav', available ? 'bg-ok' : 'bg-fg-3')} aria-hidden />}
           </button>
         )}
       >
@@ -192,6 +207,18 @@ function TopBar({ mailboxes, current, onMenu }: { mailboxes: Mailbox[]; current?
                 <p className="truncate text-xs text-fg-3">{user.email}</p>
               </div>
               <MenuDivider />
+              {chat && (
+                <>
+                  <MenuLabel>Live chat</MenuLabel>
+                  <MenuItem icon={<span className="size-2 rounded-full bg-ok" />} checked={available} onSelect={() => void setChatStatus('online')}>
+                    Available
+                  </MenuItem>
+                  <MenuItem icon={<span className="size-2 rounded-full bg-fg-3" />} checked={!available} onSelect={() => void setChatStatus('away')}>
+                    Away
+                  </MenuItem>
+                  <MenuDivider />
+                </>
+              )}
               <MenuItem icon={<UserRound />} onSelect={() => go('/settings/profile')}>
                 Your profile
               </MenuItem>

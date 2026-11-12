@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Mail, StickyNote } from 'lucide-react'
 import { api, qs } from '../lib/api'
+import { canSee } from '../lib/access'
 import { useDebounced, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Customer, Mailbox } from '../lib/types'
 import { Banner, Button, Field, Input, Modal, Select, cx } from '../ui'
@@ -122,7 +123,7 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
             {(id) => (
               <Select id={id} value={assigneeId ?? ''} onChange={(e) => setAssigneeId(e.target.value ? Number(e.target.value) : null)}>
                 {(users.data ?? [])
-                  .filter((u) => !u.disabled)
+                  .filter((u) => !u.disabled && canSee(u, mailboxId))
                   .map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.id === me.id ? `${u.name} (you)` : u.name}

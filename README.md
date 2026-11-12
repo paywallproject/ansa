@@ -43,6 +43,8 @@ services, queues or caches.
 Each mailbox is an email address your team answers together. Conversations sort into Unassigned,
 Mine, Assigned, Snoozed, Closed and Spam. Assign a conversation, tag it, snooze it until later, merge
 two into one, or move it to another mailbox. Select several to change them at once.
+Choose which mailboxes each teammate can see: everything else stays out of their inbox, search,
+reports and AI assistant.
 
 ![The Unassigned folder: six conversations with their tags and how long each customer has waited](docs/screenshots/inbox.png)
 
@@ -66,6 +68,19 @@ person had with you. One customer can have several email addresses.
 Light, dark, or whatever your system says.
 
 ![The same conversation view in dark mode](docs/screenshots/dark.png)
+
+### Live chat on your website
+
+Turn on live chat for a mailbox and paste one line of code into your site. Visitors get a chat button
+in your color, with your team's photos and a greeting. Each chat is a conversation in that mailbox: you
+answer it from the inbox, the visitor sees your reply and when you're typing, and a chat counts in your
+reports like any other conversation. If the visitor has left by the time you reply, the reply goes to them
+by email. You can limit which websites are allowed to show the chat.
+
+Choose when the chat is online: while a teammate is available, during office hours in your time zone, or
+always. Each teammate switches between Available and Away from their account menu, and closing the app
+counts as away. While nobody is there, visitors see your away message and can leave one of their own, or
+the chat button hides until you're back.
 
 ### Answer faster
 
@@ -151,7 +166,8 @@ listed them in November 2026.
 | | Ansa | Help Scout |
 |---|---|---|
 | **Knowledge base** | — | ✅ Docs |
-| **Live chat and a help widget** | — | ✅ Beacon |
+| **Live chat** | ✅ a chat button for your website | ✅ Beacon |
+| **Help widget with articles** | — | ✅ Beacon with Docs |
 | **Built-in AI** | — bring your own assistant through MCP | ✅ AI answers, drafts and summaries |
 | **Satisfaction ratings** | — | ✅ |
 | **Custom fields** | — | ✅ |
@@ -160,7 +176,7 @@ listed them in November 2026.
 | **Single sign-on** | — | ✅ on higher plans |
 | **Support** | GitHub issues | ✅ a support team |
 
-If your team needs a knowledge base, live chat and ready-made integrations, Help Scout earns its
+If your team needs a knowledge base and ready-made integrations, Help Scout earns its
 price. If you want a fast, calm shared inbox that you own outright, Ansa is built for you.
 
 ## What it costs
