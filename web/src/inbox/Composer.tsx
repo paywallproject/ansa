@@ -1,6 +1,6 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, ChevronDown, Clock, Send, StickyNote, Trash2, UserRound, X } from 'lucide-react'
+import { Bookmark, ChevronDown, Clock, KeyboardOff, Send, StickyNote, Trash2, UserRound, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { canSee } from '../lib/access'
 import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
@@ -191,6 +191,8 @@ export const Composer = forwardRef<
   }
 
   const drop = useFileDrop(uploads.add)
+  const phone = useIsPhone()
+  const [phoneCc, setPhoneCc] = useState(false)
   const isNote = mode === 'note'
   const matching = (savedReplies.data ?? []).filter((r) => (!r.mailboxId || r.mailboxId === conversation.mailboxId) && r.name.toLowerCase().includes(filter.toLowerCase()))
   const rowButton = 'h-7 rounded-md px-2 text-[13px] font-medium text-fg-3 transition-colors hover:bg-sunken hover:text-fg'
@@ -215,10 +217,51 @@ export const Composer = forwardRef<
     </div>
   )
 
-  return (
-    // On a phone the composer is a sheet across the bottom, resting on the keyboard; on a computer, a card.
-    <div className={cx('shrink-0 md:px-6 md:pb-5', !open && 'hidden')}>
-      {mention && candidates.length > 0 && open && (
+
+  // Shared by the computer layout and the phone sheet.
+  const savedRepliesMenu = (close: () => void) => (
+                  <>
+                    <div className="p-1">
+                      <Input autoFocus className="h-8" aria-label="Find a saved reply" placeholder="Find a saved reply" value={filter} onChange={(e) => setFilter(e.target.value)} />
+                    </div>
+                    {matching.length === 0 ? (
+                      <p className="px-3 py-4 text-center text-[13px] text-fg-3">
+                        {savedReplies.data?.length ? 'No saved reply matches.' : 'No saved replies yet. Add them in Settings → Saved replies.'}
+                      </p>
+                    ) : (
+                      matching.map((reply) => (
+                        <MenuItem
+                          key={reply.id}
+                          onSelect={() => {
+                            editor?.chain().focus().insertContent(fillSavedReply(reply.bodyHtml, conversation, agentName)).run()
+                            close()
+                          }}
+                        >
+                          {reply.name}
+                        </MenuItem>
+                      ))
+                    )}
+                  </>
+                )
+  const statusMenu = (close: () => void) => (
+                      <>
+                        <MenuLabel>After sending</MenuLabel>
+                        {(statusOptions() as SendStatus[]).map((status) => (
+                          <MenuItem
+                            key={status}
+                            icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
+                            checked={sendStatus === status}
+                            onSelect={() => {
+                              setSendStatus(status)
+                              close()
+                            }}
+                          >
+                            {STATUS_LABEL[status]}
+                          </MenuItem>
+                        ))}
+                      </>
+                    )
+  const mentionList = mention && candidates.length > 0 && open && (
         <ul role="listbox" aria-label="Mention a teammate" className="animate-pop fixed z-50 w-60 rounded-lg bg-surface p-1 shadow-pop" style={{ left: Math.max(8, Math.min(mention.left, window.innerWidth - 248)), bottom: mention.bottom }}>
           {candidates.map((person, index) => (
             <li key={person.id} role="option" aria-selected={index === mentionIndex}>
@@ -236,7 +279,140 @@ export const Composer = forwardRef<
             </li>
           ))}
         </ul>
-      )}
+      )
+
+  /**
+   * On a phone: a full-screen sheet, as in Help Scout's app. ✕ keeps the draft, Send sits top right, the options
+   * are rows (To, Status, Assign, Cc/Bcc, Send later), and the tools sit on the keyboard.
+   */
+  const phoneSheet = () => {
+    const row = 'flex min-h-12 w-full items-center gap-3 border-b border-line px-4 text-left text-[15px]'
+    return (
+      <div className={cx('sheet-safe fixed inset-x-0 top-0 z-40 flex flex-col', isNote ? 'bg-note' : 'bg-surface', !open && 'hidden')} style={{ height: 'var(--app-height, 100dvh)' }} role="dialog" aria-label={isNote ? 'Note' : 'Reply'}>
+        {mentionList}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-2">
+          <button type="button" aria-label="Close. Your draft is kept." onClick={() => onOpenChange(false)} className="flex size-11 items-center justify-center rounded-full text-fg-2">
+            <X className="size-6" aria-hidden />
+          </button>
+          <h2 className="flex-1 text-center text-[17px] font-semibold">{isNote ? 'Note' : 'Reply'}</h2>
+          <Button variant="primary" size="lg" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="mr-1 rounded-xl">
+            {isNote ? 'Save' : 'Send'}
+          </Button>
+        </header>
+        {!isNote && (
+          <div className="shrink-0">
+            <div className={row}>
+              <span className="text-fg-3">To:</span>
+              <span className="min-w-0 truncate">
+                {customerName}
+                {conversation.customer.name && <span className="text-fg-3"> · {conversation.customer.email}</span>}
+              </span>
+            </div>
+            <Popover
+              align="end"
+              width={230}
+              trigger={({ ref: triggerRef, ...props }) => (
+                <button ref={triggerRef} type="button" {...props} className={row}>
+                  <span className="flex-1 text-fg-3">Status</span>
+                  <span className={cx('size-2 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
+                  <span>{STATUS_LABEL[sendStatus]}</span>
+                </button>
+              )}
+            >
+              {statusMenu}
+            </Popover>
+            {chooseAssignee && (
+              <div className={row}>
+                <span className="flex-1 text-fg-3">Assign</span>
+                <AssignPicker assigneeId={sendAssignee} meId={me.id} users={(teammates.data ?? []).filter((u) => canSee(u, conversation.mailboxId))} onPick={setPickedAssignee} />
+              </div>
+            )}
+            {phoneCc || showCc || showBcc ? (
+              <div className="divide-y divide-line border-b border-line px-4">
+                {addressRow('Cc', cc, setCc, () => {
+                  setShowCc(false)
+                  setCc('')
+                })}
+                {addressRow('Bcc', bcc, setBcc, () => {
+                  setShowBcc(false)
+                  setBcc('')
+                })}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={row}
+                onClick={() => {
+                  setPhoneCc(true)
+                  setShowCc(true)
+                  setShowBcc(true)
+                }}
+              >
+                <span className="text-fg-3">Cc/Bcc</span>
+              </button>
+            )}
+            <button type="button" className={row} disabled={send.isPending || uploads.busy} onClick={() => (hasContent() ? setLater(true) : toast('Write a reply first.', { kind: 'error' }))}>
+              <span className="flex-1 text-fg-3">Send later</span>
+              <Clock className="size-5 text-fg-3" aria-hidden />
+            </button>
+          </div>
+        )}
+        {othersReplying.length > 0 && !isNote && (
+          <div className="shrink-0 px-4 pt-2">
+            <Banner kind="warn">
+              {othersReplying.map((v) => v.name).join(' and ')} {othersReplying.length === 1 ? 'is' : 'are'} writing a reply right now.
+            </Banner>
+          </div>
+        )}
+        <div {...drop.handlers} className="min-h-0 flex-1 overflow-y-auto">
+          <EditorArea editor={editor} className="min-h-full px-4 pt-3 pb-4 text-[16px]" />
+          {uploads.uploads.length > 0 && (
+            <div className="px-4 pb-3">
+              <UploadList uploads={uploads.uploads} onRemove={uploads.remove} />
+            </div>
+          )}
+        </div>
+        {/* The tools ride on the keyboard. */}
+        <div className="flex shrink-0 items-center gap-1 border-t border-line bg-canvas px-2 py-1.5">
+          <Popover
+            side="top"
+            width={300}
+            onOpenChange={(isOpen) => isOpen && setFilter('')}
+            trigger={({ ref: triggerRef, ...props }) => (
+              <button ref={triggerRef} type="button" {...props} aria-label="Insert a saved reply" className="flex size-11 items-center justify-center rounded-lg text-fg-2">
+                <Bookmark className="size-5" aria-hidden />
+              </button>
+            )}
+          >
+            {savedRepliesMenu}
+          </Popover>
+          <AttachButton onFiles={uploads.add} />
+          <EditorToolbar editor={editor} />
+          <span className="flex-1" />
+          <button type="button" aria-label="Discard draft" onClick={discard} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
+            <Trash2 className="size-5" aria-hidden />
+          </button>
+          <button type="button" aria-label="Hide keyboard" onClick={() => editor?.commands.blur()} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
+            <KeyboardOff className="size-5" aria-hidden />
+          </button>
+        </div>
+        <SendLaterDialog
+          open={later}
+          onClose={() => setLater(false)}
+          onPick={(sendAt, ifNoReply) => {
+            setLater(false)
+            send.mutate({ status: sendStatus, sendAt, ifNoReply })
+          }}
+        />
+      </div>
+    )
+  }
+  if (phone) return phoneSheet()
+
+  return (
+    // On a computer, a card under the conversation. A phone gets a full-screen sheet instead (phoneSheet).
+    <div className={cx('shrink-0 md:px-6 md:pb-5', !open && 'hidden')}>
+      {mentionList}
       <div className="mx-auto max-w-[860px] md:px-14">
         {othersReplying.length > 0 && !isNote && (
           <div className="mb-2">
@@ -304,30 +480,7 @@ export const Composer = forwardRef<
                   </button>
                 )}
               >
-                {(close) => (
-                  <>
-                    <div className="p-1">
-                      <Input autoFocus className="h-8" aria-label="Find a saved reply" placeholder="Find a saved reply" value={filter} onChange={(e) => setFilter(e.target.value)} />
-                    </div>
-                    {matching.length === 0 ? (
-                      <p className="px-3 py-4 text-center text-[13px] text-fg-3">
-                        {savedReplies.data?.length ? 'No saved reply matches.' : 'No saved replies yet. Add them in Settings → Saved replies.'}
-                      </p>
-                    ) : (
-                      matching.map((reply) => (
-                        <MenuItem
-                          key={reply.id}
-                          onSelect={() => {
-                            editor?.chain().focus().insertContent(fillSavedReply(reply.bodyHtml, conversation, agentName)).run()
-                            close()
-                          }}
-                        >
-                          {reply.name}
-                        </MenuItem>
-                      ))
-                    )}
-                  </>
-                )}
+                {savedRepliesMenu}
               </Popover>
             </EditorToolbar>
 
@@ -361,24 +514,7 @@ export const Composer = forwardRef<
                       </button>
                     )}
                   >
-                    {(close) => (
-                      <>
-                        <MenuLabel>After sending</MenuLabel>
-                        {(statusOptions() as SendStatus[]).map((status) => (
-                          <MenuItem
-                            key={status}
-                            icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
-                            checked={sendStatus === status}
-                            onSelect={() => {
-                              setSendStatus(status)
-                              close()
-                            }}
-                          >
-                            {STATUS_LABEL[status]}
-                          </MenuItem>
-                        ))}
-                      </>
-                    )}
+                    {statusMenu}
                   </Popover>
                   {chooseAssignee && <AssignPicker assigneeId={sendAssignee} meId={me.id} users={(teammates.data ?? []).filter((u) => canSee(u, conversation.mailboxId))} onPick={setPickedAssignee} />}
                   <button
@@ -411,6 +547,19 @@ export const Composer = forwardRef<
     </div>
   )
 })
+
+/** A phone-width screen, tracked live (a tablet turning round can cross the line). */
+const PHONE = '(max-width: 767px)'
+function useIsPhone() {
+  return useSyncExternalStore(
+    (notify) => {
+      const query = window.matchMedia(PHONE)
+      query.addEventListener('change', notify)
+      return () => query.removeEventListener('change', notify)
+    },
+    () => window.matchMedia(PHONE).matches,
+  )
+}
 
 const NobodyIcon = ({ size = 20 }: { size?: number }) => (
   <span className="flex shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3" style={{ width: size, height: size }}>

@@ -346,3 +346,13 @@
     background: var(--surface);
   }
 }
+
+/* The phone reply sheet covers the whole screen, outside #root: its own clearance for the clock and the home
+   bar, without the home-bar padding while the keyboard is up (it covers the home bar). */
+.sheet-safe {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.keyboard-open .sheet-safe {
+  padding-bottom: 0;
+}
