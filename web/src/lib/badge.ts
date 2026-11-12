@@ -11,6 +11,10 @@ const KEY = 'ansa-app-badge'
 type BadgeNavigator = Navigator & { setAppBadge?: (count?: number) => Promise<void>; clearAppBadge?: () => Promise<void> }
 const nav = () => navigator as BadgeNavigator
 
+/** Running as an installed app (home screen, Dock), the only place an icon can show a count. */
+export const runningAsApp = () =>
+  typeof window !== 'undefined' && (window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true)
+
 export const badgeSupported = () => typeof navigator !== 'undefined' && typeof nav().setAppBadge === 'function'
 
 /** On for this device? Off until turned on in Profile, since iOS needs a notification permission for it. */
