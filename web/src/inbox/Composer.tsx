@@ -216,7 +216,8 @@ export const Composer = forwardRef<
   )
 
   return (
-    <div className={cx('shrink-0 px-4 pb-5 md:px-6', !open && 'hidden')}>
+    // On a phone the composer is a sheet across the bottom, resting on the keyboard; on a computer, a card.
+    <div className={cx('shrink-0 md:px-6 md:pb-5', !open && 'hidden')}>
       {mention && candidates.length > 0 && open && (
         <ul role="listbox" aria-label="Mention a teammate" className="animate-pop fixed z-50 w-60 rounded-lg bg-surface p-1 shadow-pop" style={{ left: Math.max(8, Math.min(mention.left, window.innerWidth - 248)), bottom: mention.bottom }}>
           {candidates.map((person, index) => (
@@ -247,8 +248,8 @@ export const Composer = forwardRef<
         <div
           {...drop.handlers}
           className={cx(
-            'rounded-xl border shadow-[0_1px_2px_rgba(24,24,29,0.06)] transition-colors',
-            isNote ? 'border-note-line bg-note' : 'border-line-strong bg-surface focus-within:border-accent',
+            'border-t shadow-[0_-6px_20px_rgba(24,24,29,0.08)] transition-colors md:rounded-xl md:border md:shadow-[0_1px_2px_rgba(24,24,29,0.06)]',
+            isNote ? 'border-note-line bg-note' : 'border-line-strong bg-surface md:focus-within:border-accent',
             drop.over && 'border-accent ring-3 ring-accent/20',
           )}
         >
@@ -279,7 +280,7 @@ export const Composer = forwardRef<
             </div>
           )}
 
-          <EditorArea editor={editor} className={cx('max-h-[38vh] min-h-[78px] px-3 pt-3 pb-1', !isNote && 'border-t border-line')} />
+          <EditorArea editor={editor} className={cx('max-h-[30vh] min-h-[56px] px-3 pt-3 pb-1 md:max-h-[38vh] md:min-h-[78px]', !isNote && 'border-t border-line')} />
 
           {uploads.uploads.length > 0 && (
             <div className="px-3 pb-2">
