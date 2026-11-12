@@ -240,7 +240,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
           </div>
         </div>
       ) : (
-        <div className="flex h-14 shrink-0 items-center gap-2 px-2 md:border-b md:border-line md:px-5">
+        <div className="flex h-11 shrink-0 items-center gap-2 px-2 md:h-14 md:border-b md:border-line md:px-5">
           {/* Phone: the logo opens the drawer (inboxes, search, settings), as in Help Scout's app. */}
           {!search && (
             <button type="button" aria-label="Open menu" onClick={shell.openDrawer} className="flex size-10 shrink-0 items-center justify-center rounded-lg md:hidden">
@@ -326,7 +326,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto max-md:pb-[env(safe-area-inset-bottom)]">
         {list.isPending && list.fetchStatus !== 'idle' ? (
           <div className="flex justify-center py-10">
             <Spinner />
