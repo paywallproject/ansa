@@ -60,6 +60,11 @@ export function leavePresence(conversationId: number, userId: number) {
   publish({ type: 'presence', conversationId, viewers: viewersOf(conversationId) })
 }
 
+/** Everyone viewing any conversation right now: what the conversation list shows on its rows. */
+export function allPresence(): { conversationId: number; viewers: Viewer[] }[] {
+  return [...presence.keys()].map((conversationId) => ({ conversationId, viewers: viewersOf(conversationId) })).filter((p) => p.viewers.length > 0)
+}
+
 /** Forget viewers who stopped sending heartbeats. The platform calls this every few seconds. */
 export function prunePresence() {
   const cutoff = Date.now() - PRESENCE_TTL

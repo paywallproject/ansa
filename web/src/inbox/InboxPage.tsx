@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Check, ChevronDown, Clock, Inbox, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Check, ChevronDown, Clock, Eye, Inbox, PenLine, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
 import { canSee } from '../lib/access'
-import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers } from '../lib/hooks'
-import type { ConversationSummary, Folder } from '../lib/types'
+import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers, useViewers } from '../lib/hooks'
+import type { ConversationSummary, Folder, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback, MenuDivider, MenuLabel } from '../ui'
 import { FOLDERS } from '../Shell'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
@@ -347,10 +347,32 @@ function CheckBox({ checked, mixed, label, onClick }: { checked: boolean; mixed?
   )
 }
 
+/** Teammates in this conversation right now. A pencil means one of them is writing a reply. */
+function ViewersBadge({ viewers }: { viewers: Viewer[] }) {
+  const replying = viewers.filter((v) => v.state === 'replying')
+  const first = (v: Viewer) => v.name.split(' ')[0]
+  const label = replying.length
+    ? `${replying.map(first).join(', ')} ${replying.length === 1 ? 'is' : 'are'} replying`
+    : `${viewers.map(first).join(', ')} ${viewers.length === 1 ? 'is' : 'are'} viewing`
+  return (
+    <span className={cx('inline-flex h-5 shrink-0 items-center gap-1 rounded-full pr-1.5 pl-0.5 text-xs font-medium', replying.length ? 'bg-warn-soft text-warn' : 'bg-accent-soft text-accent-fg')} title={label} role="status" aria-label={label}>
+      <span className="flex -space-x-1">
+        {viewers.slice(0, 3).map((v) => (
+          <Avatar key={v.userId} name={v.name} color={v.color} src={v.avatarUrl} size={16} className={cx('ring-2', replying.length ? 'ring-warn-soft' : 'ring-accent-soft')} />
+        ))}
+      </span>
+      {replying.length ? <PenLine className="size-3" aria-hidden /> : <Eye className="size-3" aria-hidden />}
+      <span className="hidden lg:inline">{replying.length ? first(replying[0]) : first(viewers[0])}</span>
+    </span>
+  )
+}
+
 function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { conversation: ConversationSummary; to: string; checked: boolean; onCheck: () => void; showMailbox: boolean; folder: Folder | null }) {
   const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
   // Waiting on the customer: shown quieter, so the conversations that need us stand out.
   const pending = c.status === 'pending'
+  const { user: me } = useSession()
+  const viewers = useViewers(c.id, me.id)
   const openFolder = folder === 'unassigned' || folder === 'mine' || folder === 'assigned' || folder === 'mentioned'
   const showStatus = folder === null || folder === 'all' || ((c.status === 'pending' || (c.status === 'waiting' && workspace().fourStatuses)) && folder !== 'closed' && folder !== 'pending') || folder === 'snoozed'
   const showAssignee = c.assignee && folder !== 'mine'
@@ -366,6 +388,7 @@ function Row({ conversation: c, to, checked, onCheck, showMailbox, folder }: { c
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
+            {viewers.length > 0 && <ViewersBadge viewers={viewers} />}
             <span className={cx('truncate text-[13px]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
