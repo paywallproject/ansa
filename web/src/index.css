@@ -342,6 +342,12 @@
     .bare body::before {
       background: var(--surface);
     }
+    /* The list and the conversation run under the home bar, as in Help Scout's app; their own bottom padding
+       keeps the last row and the action bar clear of it. */
+    .bare #root,
+    .reading #root {
+      padding-bottom: 0;
+    }
   }
   /* The app may be sized to the real screen, a little taller than iOS reports: the page itself never scrolls. */
   html,
