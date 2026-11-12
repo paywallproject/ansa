@@ -434,7 +434,10 @@ export function Shell() {
   const match = useMatch('/m/:mailboxId/*')
   const current = list.find((m) => m.id === Number(match?.params.mailboxId))
   // A conversation is open: on a phone it takes the whole screen, without the top bar.
-  const inConversation = !!useMatch('/m/:mailboxId/:folder/:conversationId') || !!useMatch('/search/:conversationId')
+  // Both hooks run on every render (React needs the same hooks each time): no short-circuit between them.
+  const inMailboxConversation = useMatch('/m/:mailboxId/:folder/:conversationId')
+  const inSearchConversation = useMatch('/search/:conversationId')
+  const inConversation = !!inMailboxConversation || !!inSearchConversation
   useEffect(() => {
     const root = document.documentElement
     root.classList.toggle('reading', inConversation)
