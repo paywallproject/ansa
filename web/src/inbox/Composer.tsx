@@ -255,7 +255,7 @@ export const Composer = forwardRef<
         >
           {!isNote && (
             <div className="divide-y divide-line px-3">
-              <div className="flex min-h-10 items-center gap-2 py-1.5">
+              <div className="flex min-h-9 items-center gap-2 py-1 md:min-h-10 md:py-1.5">
                 <span className="w-8 shrink-0 text-[13px] text-fg-3">To</span>
                 <span className="flex h-6 min-w-0 items-center gap-1.5 rounded-full bg-sunken pr-2 pl-0.5 text-[13px]">
                   <Avatar name={customerName} color="#6fa3e8" size={20} />
@@ -289,7 +289,7 @@ export const Composer = forwardRef<
           )}
 
           {/* On a narrow screen the send controls drop to their own line instead of running off the edge. */}
-          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 px-2 pt-1 pb-2">
+          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 px-1.5 pt-1 pb-2 md:px-2">
             <EditorToolbar editor={editor}>
               <span className="mx-1.5 h-4 w-px bg-line" aria-hidden />
               <AttachButton onFiles={uploads.add} />
@@ -353,11 +353,11 @@ export const Composer = forwardRef<
                         {...props}
                         aria-label={`Status after sending: ${STATUS_LABEL[sendStatus]}`}
                         title="Status after sending"
-                        className="ml-1.5 flex h-8 shrink-0 items-center gap-2 rounded-full border border-line-strong bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken"
+                        className="ml-1 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-surface pr-2.5 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:bg-sunken aria-expanded:bg-sunken md:ml-1.5 md:gap-2 md:pr-2"
                       >
                         <span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
                         {STATUS_LABEL[sendStatus]}
-                        <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                        <ChevronDown className="size-3.5 opacity-60 max-md:hidden" aria-hidden />
                       </button>
                     )}
                   >

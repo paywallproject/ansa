@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Bold, FileText, Italic, Link as LinkIcon, List, ListOrdered, Paperclip, TextQuote, X } from 'lucide-react'
+import { Bold, FileText, Italic, Link as LinkIcon, List, ListOrdered, Paperclip, TextQuote, Type, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { fileSize } from '../lib/format'
 import type { Attachment } from '../lib/types'
@@ -114,6 +114,7 @@ export function EditorToolbar({ editor, children }: { editor: Editor | null; chi
     selector: ({ editor: e }) =>
       e ? { bold: e.isActive('bold'), italic: e.isActive('italic'), bullet: e.isActive('bulletList'), ordered: e.isActive('orderedList'), quote: e.isActive('blockquote') } : null,
   })
+  const [formatting, setFormatting] = useState(false)
   if (!editor || !state) return null
   const tools: { label: string; icon: ReactNode; active: boolean; run: () => void }[] = [
     { label: 'Bold', icon: <Bold className="size-4" />, active: state.bold, run: () => editor.chain().focus().toggleBold().run() },
@@ -124,14 +125,20 @@ export function EditorToolbar({ editor, children }: { editor: Editor | null; chi
   ]
   return (
     <div className="flex items-center gap-0.5" role="toolbar" aria-label="Formatting">
+      {/* On a phone the formatting buttons fold behind "Aa", so the send controls fit on the same line. */}
+      <IconButton label={formatting ? 'Hide formatting' : 'Formatting'} size="sm" active={formatting} aria-expanded={formatting} onClick={() => setFormatting((open) => !open)} className="md:hidden">
+        <Type className="size-4" />
+      </IconButton>
       {tools.slice(0, 2).map((t) => (
-        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run}>
+        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className={cx(!formatting && 'max-md:hidden')}>
           {t.icon}
         </IconButton>
       ))}
-      <LinkButton editor={editor} />
+      <span className={cx('contents', !formatting && 'max-md:hidden')}>
+        <LinkButton editor={editor} />
+      </span>
       {tools.slice(2).map((t) => (
-        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className="hidden sm:inline-flex">
+        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className={cx(!formatting && 'max-md:hidden')}>
           {t.icon}
         </IconButton>
       ))}
