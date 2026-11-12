@@ -373,3 +373,9 @@ test('open tracking: the image is in the email that goes out', async () => {
     nodemailer.createTransport = realCreate
   }
 })
+
+test('an example APP_URL left from .env.example is not used for links', async () => {
+  const { isPlaceholderUrl } = await import('../config.ts')
+  for (const url of ['https://help.example.com', 'https://example.com', 'https://support.example.org/', 'http://ansa.test', 'https://your-domain', 'not a url']) assert.equal(isPlaceholderUrl(url), true, url)
+  for (const url of ['https://help.newsletterglue.com', 'https://ansa.acme.workers.dev', 'http://localhost:3000', 'https://examples.com']) assert.equal(isPlaceholderUrl(url), false, url)
+})
