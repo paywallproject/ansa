@@ -17,7 +17,7 @@ import { ImportSettings } from './Import'
 import { workspace } from '../lib/workspace'
 import { PhotoPicker } from './PhotoPicker'
 import { allZones, browserZone, validZone } from '../lib/timezone'
-import { badgeEnabled, badgeSupported, setBadgeEnabled } from '../lib/badge'
+import { badgeEnabled, badgeSupported, runningAsApp, setBadgeEnabled } from '../lib/badge'
 
 const NAV: { to: string; label: string; icon: ReactNode; admin?: boolean }[] = [
   { to: 'profile', label: 'Profile', icon: <UserRound /> },
@@ -187,7 +187,8 @@ function ProfileSettings() {
             <Switch checked={form.notifyReplies} onChange={(v) => setForm({ ...form, notifyReplies: v })} label="A customer replies to my conversation" />
             <Switch checked={form.notifyMentions} onChange={(v) => setForm({ ...form, notifyMentions: v })} label="A teammate mentions me in a note" />
           </div>
-          <AppBadgeSwitch />
+          {/* Only an installed app has an icon to put a count on; in a browser tab the switch would do nothing. */}
+          {runningAsApp() && <AppBadgeSwitch />}
           <div className="flex justify-end">
             <Button type="submit" variant="primary" loading={save.isPending}>
               Save changes
