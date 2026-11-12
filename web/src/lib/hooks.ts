@@ -275,9 +275,25 @@ export function useDebounced<T>(value: T, delay = 250): T {
   return debounced
 }
 
+/** The page's own title, and the Unassigned count shown in front of it in the browser tab: "(2) Unassigned · Ansa". */
+let baseTitle = typeof document === 'undefined' ? '' : document.title
+let titleCount = 0
+const applyTitle = () => {
+  document.title = titleCount > 0 ? `(${titleCount}) ${baseTitle}` : baseTitle
+}
+
 export function useDocumentTitle(title: string) {
   const name = brand()
   useEffect(() => {
-    document.title = title ? `${title} · ${name}` : name
+    baseTitle = title ? `${title} · ${name}` : name
+    applyTitle()
   }, [title, name])
+}
+
+/** Show this count in front of the tab title, as Help Scout does. 0 hides it. */
+export function useTitleCount(count: number) {
+  useEffect(() => {
+    titleCount = count
+    applyTitle()
+  }, [count])
 }
