@@ -297,6 +297,15 @@
     transform: translateY(-8px);
   }
 }
+@keyframes spokes {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* The iOS activity spinner turns in steps, one spoke at a time. */
+.animate-spokes {
+  animation: spokes 0.8s steps(8) infinite;
+}
 .animate-pop {
   animation: pop-in 0.12s ease-out;
 }
