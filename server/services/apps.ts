@@ -12,6 +12,7 @@ import { APP_EVENTS, onAppEvent, type AppEvent, type AppEventDetail } from '../h
 import { cleanHtml, escapeHtml, textToHtml } from '../mail/html.ts'
 import { AppError } from './customers.ts'
 import { getConversation, listThreads } from './conversations.ts'
+import { isSlackWebhook, slackMessage, type SlackInput } from './slack.ts'
 
 export type SidebarMode = 'none' | 'static' | 'dynamic'
 const SIDEBAR_MODES: SidebarMode[] = ['none', 'static', 'dynamic']
@@ -214,6 +215,12 @@ async function post(url: string, secret: string, event: string, payload: unknown
 // ---------------------------------------------------------------------------------------------
 
 async function deliver(app: ReturnType<typeof serializeApp>, event: string, conversationId: number | null, payload: unknown) {
+  // A Slack incoming webhook gets a message formatted for Slack instead of Ansa's JSON.
+  if (isSlackWebhook(app.webhookUrl)) {
+    const message = slackMessage(payload as SlackInput, app.events)
+    if (!message) return { ok: true, status: null, detail: 'Skipped: Slack already has a message for this.', durationMs: 0, text: '', contentType: '' }
+    payload = message
+  }
   let result = await post(app.webhookUrl, app.secret, event, payload)
   // One more try for a hiccup on the app's side. Answers like 400 or 404 are final.
   if (!result.ok && (result.status === null || result.status >= 500)) {

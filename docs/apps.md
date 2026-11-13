@@ -151,6 +151,12 @@ Good to know:
 - "Send and close" sends `conversation.agent_replied` only. Read the new status from `conversation.status`.
 - Imported old mail does not send events.
 
+## Post to a Slack channel
+
+No code needed. In Slack, create an app with an **Incoming Webhook** for the channel (api.slack.com/apps → Create New App → Incoming Webhooks → Add New Webhook to Workspace) and copy its URL. In Ansa, go to **Settings → Apps**, add an app, paste the URL into **Webhook URL**, and choose the events. *New conversation* and *Customer replied* are a good start.
+
+When the webhook URL is on `hooks.slack.com`, Ansa sends a Slack message instead of its own JSON: a line that says what happened with a link to the conversation, then the subject, the message and the customer. Choose a mailbox on the app to post only that mailbox's conversations, or add one app per channel. Press **Test** to post a sample message.
+
 ## Check that a request comes from Ansa
 
 Every request has two headers:

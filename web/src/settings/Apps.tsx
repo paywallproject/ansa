@@ -314,7 +314,7 @@ function AppEditor({ app, events, onBack, onSaved }: { app: App | null; events: 
       </Section>
 
       <Section title="Events (webhook)" description={`${brand()} sends a message to your address when these things happen. Leave the address empty if you do not need this.`}>
-        <Field label="Webhook URL">{(id) => <Input id={id} type="url" value={form.webhookUrl} onChange={(e) => set('webhookUrl', e.target.value)} placeholder="https://your-app.example.com/webhook" />}</Field>
+        <Field label="Webhook URL" hint="To post to a Slack channel, paste a Slack incoming webhook URL (https://hooks.slack.com/…). Messages are then formatted for Slack, with a link to each conversation.">{(id) => <Input id={id} type="url" value={form.webhookUrl} onChange={(e) => set('webhookUrl', e.target.value)} placeholder="https://your-app.example.com/webhook" />}</Field>
         {form.webhookUrl.trim() !== '' && (
           <fieldset>
             <legend className="mb-2 text-[13px] font-medium">Send when</legend>
