@@ -202,7 +202,8 @@ class MailboxWorker {
             run('UPDATE mailboxes SET imap_last_uid = ? WHERE id = ?', uid, this.mailboxId)
           }
         }
-        this.setStatus('ok')
+        // A check that was stopped for taking too long must not report success when it finally returns.
+        if (!this.stopped) this.setStatus('ok')
       } finally {
         lock.release()
       }
@@ -238,11 +239,36 @@ export async function restartMailbox(mailboxId: number) {
   else void worker.start()
 }
 
+/** How long one mailbox check may take before it is stopped. A server that stops answering must not hold up the next check. */
+export const POLL_LIMIT_MS = 2 * 60_000
+
 /** Poll-only platforms call this on a schedule: check every connected mailbox once. */
-export async function pollAllMailboxes() {
+export async function pollAllMailboxes(limitMs = POLL_LIMIT_MS) {
   if (config.mailDisabled) return
   const ids = all<{ id: number }>(`SELECT id FROM mailboxes WHERE imap_enabled = 1 AND imap_host != ''`).map((m) => m.id)
-  await Promise.allSettled(ids.map((id) => restartMailbox(id)))
+  await Promise.allSettled(ids.map((id) => checkWithLimit(id, limitMs)))
+}
+
+async function checkWithLimit(mailboxId: number, limitMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), limitMs)
+  })
+  try {
+    const result = await Promise.race([restartMailbox(mailboxId).then(() => 'done' as const), timedOut])
+    if (result !== 'timeout') return
+    // Close the connection so the stuck check gives up, and say so on the mailbox.
+    const worker = workers.get(mailboxId)
+    if (worker) {
+      await worker.stop()
+      if (workers.get(mailboxId) === worker) workers.delete(mailboxId)
+    }
+    console.error(`[imap] mail check for mailbox ${mailboxId} took longer than ${Math.round(limitMs / 1000)}s and was stopped`)
+    run(`UPDATE mailboxes SET sync_status = 'error', sync_error = ? WHERE id = ?`, 'The mail server stopped answering. Ansa tries again at the next check.', mailboxId)
+    publish({ type: 'mailbox', id: mailboxId })
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export function startAllMailboxes() {

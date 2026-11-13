@@ -105,12 +105,45 @@ export class AnsaStore extends DurableObject<Env> {
     this.learnUrl(request)
     const response = await this.app.fetch(request)
     await this.scheduleAlarm()
+    await this.watchdog()
     const out = new Response(response.body, response)
     out.headers.set(CODE_HEADER, String(mine))
     return out
   }
 
-  private lastPoll = 0
+  private pollEveryMs = () => Math.max(10, config.imapPollSeconds) * 1000
+  /** When mail was last checked. Kept in storage so a restart does not hide a long gap. */
+  private lastPoll = () => this.ctx.storage.kv.get<number>('lastPollAt') ?? 0
+  private polling: Promise<void> | null = null
+
+  private hasMailToCheck = () => !config.mailDisabled && !!get(`SELECT 1 FROM mailboxes WHERE imap_enabled = 1 AND imap_host != '' LIMIT 1`)
+
+  /** Check every mailbox once. Only one check runs at a time. */
+  private checkMail(): Promise<void> {
+    if (!this.polling) {
+      this.ctx.storage.kv.put('lastPollAt', Date.now())
+      this.polling = (async () => {
+        wakeSnoozed()
+        pruneSessions()
+        await pollAllMailboxes()
+      })().finally(() => {
+        this.polling = null
+      })
+    }
+    return this.polling
+  }
+
+  /**
+   * The alarm can stop firing (a check that never returned held it up). When a visitor arrives and mail has not been
+   * checked for three intervals, check now and set a fresh alarm, so mail never waits for someone to notice.
+   */
+  private async watchdog() {
+    if (this.polling || importIsRunning() || !this.hasMailToCheck()) return
+    if (Date.now() - this.lastPoll() < 3 * this.pollEveryMs()) return
+    console.error('[watchdog] mail was not checked on schedule; checking now and resetting the alarm')
+    this.ctx.waitUntil(this.checkMail().catch((err) => console.error('[watchdog]', err)))
+    await this.ctx.storage.setAlarm(Date.now() + this.pollEveryMs())
+  }
 
   /** The alarm is the only thing that wakes this object without a visitor, so keep one set while there is work. */
   private async scheduleAlarm() {
@@ -127,23 +160,18 @@ export class AnsaStore extends DurableObject<Env> {
       const current = await this.ctx.storage.getAlarm()
       if (current === null || current > at) await this.ctx.storage.setAlarm(at)
     }
-    const polling = !config.mailDisabled && get(`SELECT 1 FROM mailboxes WHERE imap_enabled = 1 AND imap_host != '' LIMIT 1`)
     const snoozed = get('SELECT 1 FROM conversations WHERE snoozed_until IS NOT NULL LIMIT 1')
-    if (!polling && !snoozed) return
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + Math.max(10, config.imapPollSeconds) * 1000)
+    if (!this.hasMailToCheck() && !snoozed) return
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + this.pollEveryMs())
   }
 
   async alarm() {
     try {
-      await importStep()
-      await dispatchScheduled()
+      // Each step on its own: one that fails must not stop the others, least of all the mail check.
+      await importStep().catch((err) => console.error('[alarm] import', err))
+      await dispatchScheduled().catch((err) => console.error('[alarm] send later', err))
       // Mail is checked on its own schedule, however often the alarm fires.
-      if (Date.now() - this.lastPoll >= Math.max(10, config.imapPollSeconds) * 1000 - 500) {
-        this.lastPoll = Date.now()
-        wakeSnoozed()
-        pruneSessions()
-        await pollAllMailboxes()
-      }
+      if (Date.now() - this.lastPoll() >= this.pollEveryMs() - 500) await this.checkMail()
     } catch (err) {
       console.error('[alarm]', err)
     } finally {

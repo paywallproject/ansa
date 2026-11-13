@@ -359,7 +359,16 @@ api.delete('/users/:id/avatar', requireAdmin, async (c) => c.json({ user: await 
 // Mailboxes
 // ---------------------------------------------------------------------------------------------
 
+/** A mailbox still marked "ok" whose last good check is this old has stopped being checked: say so instead. */
+function syncState(m: MailboxRow): { status: string; error: string | null } {
+  const staleAfter = Math.max(10 * 60_000, 5 * config.imapPollSeconds * 1000)
+  const stale = m.imap_enabled && m.sync_status === 'ok' && m.last_sync_at && Date.now() - m.last_sync_at > staleAfter
+  if (!stale) return { status: m.sync_status, error: m.sync_error }
+  return { status: 'error', error: `Mail has not been checked since ${new Date(m.last_sync_at!).toISOString().replace('T', ' ').slice(0, 16)} UTC.` }
+}
+
 function serializeMailbox(m: MailboxRow, admin: boolean) {
+  const sync = syncState(m)
   const base = {
     id: m.id,
     name: m.name,
@@ -368,8 +377,8 @@ function serializeMailbox(m: MailboxRow, admin: boolean) {
     color: m.color,
     imapEnabled: !!m.imap_enabled,
     smtpConfigured: !!m.smtp_host,
-    syncStatus: m.sync_status,
-    syncError: m.sync_error,
+    syncStatus: sync.status,
+    syncError: sync.error,
     lastSyncAt: m.last_sync_at,
     assignAfterReply: m.assign_after_reply,
     chatEnabled: !!(m as ChatMailbox).chat_enabled,
