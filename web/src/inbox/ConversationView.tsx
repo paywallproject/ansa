@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Download,
   Ellipsis,
@@ -252,7 +254,26 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           <div className="fixed inset-0 z-30 flex items-end bg-black/40 md:hidden" onClick={() => setDetails(false)}>
             <div className="sheet-safe w-full rounded-t-2xl bg-surface pt-2 shadow-pop" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Conversation details">
               <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line-strong" aria-hidden />
-              {header}
+              <PhoneDetails
+                conversation={conversation}
+                onPatch={(patch) => update.mutate(patch)}
+                onStatus={(status) => {
+                  setStatus(status)
+                  setDetails(false)
+                }}
+                onDelete={() => {
+                  setDetails(false)
+                  void remove()
+                }}
+                onMerge={() => {
+                  setDetails(false)
+                  setMerging(true)
+                }}
+                onCustomer={() => {
+                  setDetails(false)
+                  setPanel(true)
+                }}
+              />
             </div>
           </div>
         )}
@@ -582,6 +603,225 @@ function Header({
         </button>
       </div>
     </header>
+  )
+}
+
+/**
+ * Phone: the conversation's details as a sheet, as in Help Scout's app. Big cards for Status, Assigned to and
+ * Tags, each opening a full-width list, and the other actions as rows under them.
+ */
+function PhoneDetails({
+  conversation: c,
+  onPatch,
+  onStatus,
+  onDelete,
+  onMerge,
+  onCustomer,
+}: {
+  conversation: Conversation
+  onPatch: (patch: Patch) => void
+  onStatus: (status: Status) => void
+  onDelete: () => void
+  onMerge: () => void
+  onCustomer: () => void
+}) {
+  const users = useUsers()
+  const tags = useTags()
+  const mailboxes = useMailboxes()
+  const { user } = useSession()
+  const [view, setView] = useState<'main' | 'status' | 'assignee' | 'tags' | 'snooze' | 'move'>('main')
+  const [filter, setFilter] = useState('')
+  const otherMailboxes = (mailboxes.data ?? []).filter((m) => m.id !== c.mailboxId)
+  const customerName = c.customer.name || c.customer.email
+  const card = 'flex w-full flex-col gap-2 rounded-2xl bg-sunken px-4 py-3.5 text-left active:bg-hover'
+  const cardLabel = 'text-[14px] font-medium text-fg-3'
+  const cardValue = 'flex min-w-0 items-center gap-3 text-[17px]'
+  const row = 'flex min-h-14 w-full items-center gap-3.5 px-1 text-left text-[17px] active:bg-sunken'
+  const unassignedIcon = (
+    <span className="flex size-7 shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-fg-3 text-fg-2">
+      <UserRound className="size-4" aria-hidden />
+    </span>
+  )
+  const back = (title: string) => (
+    <div className="mb-1 flex h-12 items-center gap-1">
+      <button type="button" aria-label="Back" onClick={() => setView('main')} className="-ml-2 flex size-11 items-center justify-center rounded-full text-fg-2 active:bg-sunken">
+        <ChevronLeft className="size-6" aria-hidden />
+      </button>
+      <h2 className="text-[19px] font-semibold">{title}</h2>
+    </div>
+  )
+  const option = (key: string | number, label: ReactNode, icon: ReactNode, checked: boolean, onSelect: () => void) => (
+    <button key={key} type="button" onClick={onSelect} className={cx(row, 'border-b border-line last:border-b-0')}>
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {checked && <Check className="size-5 shrink-0 text-accent" aria-hidden />}
+    </button>
+  )
+  const pick = (patch: Patch) => {
+    onPatch(patch)
+    setView('main')
+  }
+
+  return (
+    <div className="max-h-[82dvh] overflow-y-auto overscroll-contain px-5 pt-2 pb-4">
+      {view === 'main' && (
+        <>
+          <p className="text-[15px] text-fg-3 tabular-nums">{c.id}</p>
+          <h2 className="mt-0.5 text-[24px] leading-tight font-bold tracking-tight">{c.subject || '(no subject)'}</h2>
+          <button type="button" onClick={onCustomer} className="mt-4 flex w-full items-center gap-3.5 border-t border-line py-4 text-left">
+            <Avatar name={customerName} size={48} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[18px] font-semibold">{customerName}</span>
+              <span className="block truncate text-[15px] text-fg-3">{c.customer.email}</span>
+            </span>
+            <ChevronRight className="size-5 shrink-0 text-fg-2" aria-hidden />
+          </button>
+          <div className="flex flex-col gap-3">
+            <button type="button" className={card} onClick={() => setView('status')}>
+              <span className={cardLabel}>Status</span>
+              <span className={cardValue}>
+                <span className={cx('flex size-7 shrink-0 items-center justify-center rounded-full', STATUS_PILL[c.status])}>
+                  <span className={cx('size-3 rounded-full', STATUS_DOT[c.status])} aria-hidden />
+                </span>
+                {STATUS_LABEL[c.status]}
+              </span>
+            </button>
+            <button type="button" className={card} onClick={() => setView('assignee')}>
+              <span className={cardLabel}>Assigned to</span>
+              <span className={cardValue}>
+                {c.assignee ? <Avatar name={c.assignee.name} color={c.assignee.color} src={c.assignee.avatarUrl} size={28} /> : unassignedIcon}
+                <span className="truncate">{c.assignee ? c.assignee.name : 'Unassigned'}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={card}
+              onClick={() => {
+                setFilter('')
+                setView('tags')
+              }}
+            >
+              <span className={cardLabel}>Tags</span>
+              {c.tags.length > 0 ? (
+                <span className="flex flex-wrap gap-1.5">
+                  {c.tags.map((t) => (
+                    <span key={t.id} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-surface px-2.5 text-[15px] font-medium text-fg-2">
+                      <span className="size-2 rounded-full" style={{ background: t.color }} aria-hidden />
+                      {t.name}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                <span className={cardValue}>
+                  <TagIcon className="size-6 shrink-0 text-fg-2" aria-hidden />
+                  Add tags…
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-col">
+            <button type="button" className={cx(row, 'border-b border-line')} onClick={() => setView('snooze')}>
+              <AlarmClock className="size-6 shrink-0 text-fg-2" aria-hidden />
+              <span className="flex-1">{c.snoozedUntil ? `Snoozed until ${messageTime(c.snoozedUntil)}` : 'Snooze'}</span>
+              <ChevronRight className="size-5 text-fg-3" aria-hidden />
+            </button>
+            <button type="button" className={cx(row, 'border-b border-line')} onClick={onMerge}>
+              <Merge className="size-6 shrink-0 text-fg-2" aria-hidden />
+              Merge into another
+            </button>
+            {otherMailboxes.length > 0 && (
+              <button type="button" className={cx(row, 'border-b border-line')} onClick={() => setView('move')}>
+                <FolderInput className="size-6 shrink-0 text-fg-2" aria-hidden />
+                <span className="flex-1">Move to mailbox</span>
+                <ChevronRight className="size-5 text-fg-3" aria-hidden />
+              </button>
+            )}
+            <button type="button" className={cx(row, 'border-b border-line')} onClick={() => onStatus(c.status === 'spam' ? 'active' : 'spam')}>
+              {c.status === 'spam' ? <ShieldCheck className="size-6 shrink-0 text-fg-2" aria-hidden /> : <ShieldAlert className="size-6 shrink-0 text-fg-2" aria-hidden />}
+              {c.status === 'spam' ? 'Not spam' : 'Mark as spam'}
+            </button>
+            <button type="button" className={cx(row, 'text-danger')} onClick={onDelete}>
+              <Trash2 className="size-6 shrink-0" aria-hidden />
+              Delete conversation
+            </button>
+          </div>
+        </>
+      )}
+      {view === 'status' && (
+        <>
+          {back('Status')}
+          {statusOptions().map((status) =>
+            option(
+              status,
+              <>
+                {STATUS_LABEL[status]} <span className="text-[15px] text-fg-3">{(workspace().fourStatuses ? STATUS_HINT_FOUR : STATUS_HINT)[status]}</span>
+              </>,
+              <span className={cx('size-3.5 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />,
+              c.status === status,
+              () => onStatus(status),
+            ),
+          )}
+        </>
+      )}
+      {view === 'assignee' && (
+        <>
+          {back('Assign to')}
+          {option('none', 'Unassigned', unassignedIcon, !c.assignee, () => pick({ assigneeId: null }))}
+          {(users.data ?? [])
+            .filter((u) => !u.disabled && canSee(u, c.mailboxId))
+            .map((u) =>
+              option(
+                u.id,
+                <>
+                  {u.name} {u.id === user.id && <span className="text-[15px] text-fg-3">you</span>}
+                </>,
+                <Avatar name={u.name} color={u.color} src={u.avatarUrl} size={28} />,
+                c.assignee?.id === u.id,
+                () => pick({ assigneeId: u.id }),
+              ),
+            )}
+        </>
+      )}
+      {view === 'tags' &&
+        (() => {
+          const current = c.tags.map((t) => t.name)
+          const clean = filter.trim().toLowerCase().replace(/\s+/g, '-')
+          const options = (tags.data ?? []).filter((t) => t.name.includes(clean))
+          const canCreate = clean && !(tags.data ?? []).some((t) => t.name === clean)
+          const toggle = (name: string) => onPatch(current.includes(name) ? { removeTags: [name] } : { addTags: [name] })
+          return (
+            <>
+              {back('Tags')}
+              <Input
+                aria-label="Find or create a tag"
+                placeholder="Find or create a tag"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="mb-1 h-11 text-[16px]"
+              />
+              {canCreate &&
+                option('create', `Create “${clean}”`, <Plus className="size-6 shrink-0 text-fg-2" aria-hidden />, false, () => {
+                  onPatch({ addTags: [clean] })
+                  setFilter('')
+                })}
+              {options.map((t) => option(t.id, t.name, <span className="size-3 shrink-0 rounded-full" style={{ background: t.color }} aria-hidden />, current.includes(t.name), () => toggle(t.name)))}
+            </>
+          )
+        })()}
+      {view === 'snooze' && (
+        <>
+          {back('Snooze until')}
+          {snoozePresets().map((p) => option(p.label, <>{p.label} <span className="text-[15px] text-fg-3">{p.hint}</span></>, <AlarmClock className="size-6 shrink-0 text-fg-2" aria-hidden />, false, () => pick({ snoozedUntil: p.at })))}
+          {c.snoozedUntil && option('wake', 'Unsnooze now', <X className="size-6 shrink-0 text-fg-2" aria-hidden />, false, () => pick({ snoozedUntil: null }))}
+        </>
+      )}
+      {view === 'move' && (
+        <>
+          {back('Move to mailbox')}
+          {otherMailboxes.map((m) => option(m.id, m.name, <FolderInput className="size-6 shrink-0 text-fg-2" aria-hidden />, false, () => pick({ mailboxId: m.id })))}
+        </>
+      )}
+    </div>
   )
 }
 
