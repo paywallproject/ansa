@@ -50,7 +50,7 @@ import { useSheetDrag } from '../lib/sheetDrag'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
 
-export function ConversationView({ id, onBack, onDone }: { id: number; onBack: () => void; onDone: () => void }) {
+export function ConversationView({ id, onBack, onDone }: { id: number; onBack: () => void; onDone: (message: string) => void }) {
   const { user } = useSession()
   const client = useQueryClient()
   const navigate = useNavigate()
@@ -132,8 +132,9 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
       { status },
       {
         onSuccess: () => {
-          toast(`Marked as ${STATUS_LABEL[status].toLowerCase()}`, { action: { label: 'Undo', run: () => update.mutate({ status: previous }) } })
-          if (status === 'closed' || status === 'spam' || (status === 'pending' && workspace().fourStatuses)) onDone()
+          // The conversation leaves this folder, so go back to the list.
+          if (status === 'closed' || status === 'spam' || (status === 'pending' && workspace().fourStatuses)) onDone('Status updated')
+          else toast(`Marked as ${STATUS_LABEL[status].toLowerCase()}`, { action: { label: 'Undo', run: () => update.mutate({ status: previous }) } })
         },
       },
     )
@@ -299,8 +300,10 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           onTyping={setTyping}
           onSent={(status) => {
             setComposing(false)
-            // The conversation leaves this folder, so move on to the next one.
-            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone()
+            if (!status) return
+            // The conversation leaves this folder, so go back to the list.
+            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone('Reply sent')
+            else toast('Reply sent')
           }}
         />
       </div>

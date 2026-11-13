@@ -479,7 +479,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const toast = useCallback<Feedback['toast']>((message, options) => {
     const id = nextId.current++
     setToasts((list) => [...list.slice(-2), { id, message, kind: options?.kind ?? 'ok', action: options?.action }])
-    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), options?.kind === 'error' ? 7000 : 4000)
+    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), options?.kind === 'error' ? 7000 : options?.action ? 6000 : 4000)
   }, [])
   const confirm = useCallback<Feedback['confirm']>((options) => new Promise((resolve) => setPending({ ...options, resolve })), [])
   const answer = (ok: boolean) => {
@@ -508,13 +508,23 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       {createPortal(
         <div className="safe-shift pointer-events-none fixed inset-x-0 top-16 z-[60] flex flex-col items-center gap-2 px-4" aria-live="polite">
           {toasts.map((t) => (
-            <div key={t.id} role={t.kind === 'error' ? 'alert' : 'status'} className="animate-toast pointer-events-auto flex max-w-md items-center gap-2.5 rounded-xl bg-fg py-2.5 pr-3 pl-3.5 text-[13px] font-medium text-surface shadow-pop">
-              {t.kind === 'error' ? <CircleAlert className="size-4 shrink-0 text-danger" aria-hidden /> : <CircleCheck className="size-4 shrink-0 text-ok" aria-hidden />}
-              <span>{t.message}</span>
+            // As in Help Scout: a soft green (or red) card with a round icon, an outlined action and a close button.
+            <div
+              key={t.id}
+              role={t.kind === 'error' ? 'alert' : 'status'}
+              className={cx(
+                'animate-toast pointer-events-auto flex max-w-md items-center gap-3 rounded-2xl border py-2 pr-2 pl-3 text-[15px] text-fg shadow-pop',
+                t.kind === 'error' ? 'border-danger/60 bg-danger-soft' : 'border-ok/60 bg-ok-soft',
+              )}
+            >
+              <span className={cx('flex size-7 shrink-0 items-center justify-center rounded-full text-white', t.kind === 'error' ? 'bg-danger' : 'bg-ok')} aria-hidden>
+                {t.kind === 'error' ? <span className="text-[15px] leading-none font-bold">!</span> : <Check className="size-4" strokeWidth={3.5} />}
+              </span>
+              <span className="min-w-0 py-1">{t.message}</span>
               {t.action && (
                 <button
                   type="button"
-                  className="ml-1 rounded px-1.5 py-0.5 font-semibold underline underline-offset-2"
+                  className={cx('shrink-0 rounded-lg border bg-surface px-3 py-1 text-[14px] font-semibold transition-colors', t.kind === 'error' ? 'border-danger/60 hover:bg-danger-soft' : 'border-ok/60 hover:bg-ok-soft')}
                   onClick={() => {
                     t.action!.run()
                     setToasts((list) => list.filter((x) => x.id !== t.id))
@@ -523,6 +533,9 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
                   {t.action.label}
                 </button>
               )}
+              <button type="button" aria-label="Dismiss" className="flex size-8 shrink-0 items-center justify-center rounded-lg text-fg-3 transition-colors hover:text-fg" onClick={() => setToasts((list) => list.filter((x) => x.id !== t.id))}>
+                <X className="size-4" aria-hidden />
+              </button>
             </div>
           ))}
         </div>,

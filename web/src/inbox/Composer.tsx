@@ -108,7 +108,8 @@ export const Composer = forwardRef<
       uploads.clear()
       setPickedAssignee(undefined)
       onTyping(false)
-      toast(mode === 'note' ? 'Note added' : sendAt ? `Reply scheduled for ${zonedLabel(sendAt, zone)}` : 'Reply sent')
+      // The conversation says "Reply sent" itself, since it may go back to the list.
+      if (mode === 'note' || sendAt) toast(mode === 'note' ? 'Note added' : `Reply scheduled for ${zonedLabel(sendAt!, zone)}`)
       // A scheduled reply changes nothing yet, so the conversation stays open in front of you.
       onSent(mode === 'reply' && !sendAt ? status : null)
     },

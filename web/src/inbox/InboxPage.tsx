@@ -83,11 +83,11 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     const next = items[index === -1 ? 0 : Math.min(items.length - 1, Math.max(0, index + delta))]
     if (next && next.id !== selectedId) open(next.id)
   }
-  /** After closing a conversation, move to the next one in the list. */
-  const advance = () => {
-    const index = items.findIndex((c) => c.id === selectedId)
-    const next = items[index + 1] ?? items[index - 1]
-    open(next && ['unassigned', 'mine', 'assigned'].includes(folder) && !search ? next.id : null)
+  /** After closing a conversation, go back to the list, as in Help Scout, with a way to look at it again. */
+  const done = (message: string) => {
+    const id = selectedId
+    open(null)
+    toast(message, { action: id ? { label: 'View', run: () => open(id) } : undefined })
   }
   useHotkeys({ j: () => step(1), k: () => step(-1), escape: () => selectedId && !document.querySelector('[role=dialog], [role=menu]') && open(null) })
 
@@ -149,7 +149,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const needsMail = !search && mailbox && !mailbox.imapEnabled && total === 0 && folder === 'unassigned'
 
   if (selectedId) {
-    return <ConversationView key={selectedId} id={selectedId} onBack={() => open(null)} onDone={advance} />
+    return <ConversationView key={selectedId} id={selectedId} onBack={() => open(null)} onDone={done} />
   }
 
   const openFolder = !search && ['unassigned', 'mine', 'mentioned', 'assigned'].includes(folder)
