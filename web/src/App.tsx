@@ -16,6 +16,7 @@ import { CustomersPage } from './pages/Customers'
 import { ReportsPage } from './pages/Reports'
 import { SettingsPage } from './settings/SettingsPage'
 import { Welcome } from './pages/Welcome'
+import { Dashboard } from './pages/Dashboard'
 
 interface Bootstrap {
   setupRequired: boolean
@@ -91,6 +92,8 @@ function Home() {
   if (mailboxes.isPending) return <Splash />
   const list = mailboxes.data ?? []
   if (list.length === 0) return <Welcome />
+  // With several mailboxes, the logo opens a dashboard of them on a computer. A phone opens straight into the last mailbox.
+  if (list.length > 1 && !window.matchMedia('(max-width: 767px)').matches) return <Dashboard mailboxes={list} />
   // Home (and the logo) open the mailbox you were last in, not always the first one.
   const first = list.find((m) => m.id === lastMailbox()) ?? list[0]
   return <Navigate to={`/m/${first.id}/${first.counts.unassigned === 0 && first.counts.mine > 0 && user ? 'mine' : 'unassigned'}`} replace />
