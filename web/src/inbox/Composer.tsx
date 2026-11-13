@@ -95,7 +95,7 @@ export const Composer = forwardRef<
       const bodyHtml = lineHtml(editorHtml(editor))
       clearTimeout(draftTimer.current)
       return mode === 'reply'
-        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, ...(chooseAssignee ? { assigneeId: sendAssignee } : {}) })
+        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, ...(chooseAssignee || pickedAssignee !== undefined ? { assigneeId: sendAssignee } : {}) })
         : api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
     },
     onSuccess: (data, { status, sendAt }) => {
@@ -104,6 +104,7 @@ export const Composer = forwardRef<
       void client.invalidateQueries({ queryKey: ['mailboxes'] })
       editor?.commands.clearContent()
       setSaveState('idle')
+      setFilled(false)
       lastSaved.current = ''
       uploads.clear()
       setPickedAssignee(undefined)
@@ -122,6 +123,8 @@ export const Composer = forwardRef<
     send.mutate({ status: sendStatus })
   }
   const hasContent = () => !!editorHtml(editor) || uploads.ids.length > 0
+  // Whether there is anything to send, for the phone's Send button, which stays pale until there is.
+  const [filled, setFilled] = useState(!!conversation.draft?.bodyHtml)
   const submitRef = useRef(submit)
   submitRef.current = submit
 
@@ -181,6 +184,7 @@ export const Composer = forwardRef<
     onCaret: (ed) => trackMention(ed),
     onChange: (html) => {
       onTyping(!!html && modeRef.current === 'reply')
+      setFilled(!!html)
       clearTimeout(draftTimer.current)
       setSaveState(html ? 'saving' : 'idle')
       draftTimer.current = setTimeout(() => void saveNow(html, modeRef.current), 700)
@@ -197,6 +201,7 @@ export const Composer = forwardRef<
     if (open && !editor.isEmpty) return
     setMode(conversation.draft?.kind ?? 'reply')
     editor.commands.setContent(paragraphHtml(draftHtml), { emitUpdate: false })
+    setFilled(!!draftHtml)
     setSaveState(draftHtml ? 'saved' : 'idle')
   }, [draftHtml, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -226,6 +231,7 @@ export const Composer = forwardRef<
     clearTimeout(draftTimer.current)
     editor?.commands.clearContent()
     setSaveState('idle')
+    setFilled(false)
     uploads.clear()
     onTyping(false)
     void saveNow('', mode)
@@ -235,6 +241,13 @@ export const Composer = forwardRef<
   const drop = useFileDrop(uploads.add)
   const phone = useIsPhone()
   const [phoneCc, setPhoneCc] = useState(false)
+  // On a phone, ✕ on a reply with something in it asks what to do with it, as in Help Scout's app.
+  const [askClose, setAskClose] = useState(false)
+  const closePhone = () => {
+    if (!hasContent()) return saveAndClose()
+    editor?.commands.blur()
+    setAskClose(true)
+  }
   const isNote = mode === 'note'
   const matching = (savedReplies.data ?? []).filter((r) => (!r.mailboxId || r.mailboxId === conversation.mailboxId) && r.name.toLowerCase().includes(filter.toLowerCase()))
   const rowButton = 'h-7 rounded-md px-2 text-[13px] font-medium text-fg-3 transition-colors hover:bg-sunken hover:text-fg'
@@ -328,16 +341,17 @@ export const Composer = forwardRef<
    * are rows (To, Status, Assign, Cc/Bcc, Send later), and the tools sit on the keyboard.
    */
   const phoneSheet = () => {
-    const row = 'flex min-h-12 w-full items-center gap-3 border-b border-line px-4 text-left text-[15px]'
+    const row = 'flex min-h-13 w-full items-center gap-3 border-b border-line px-4 text-left text-[17px]'
+    const value = 'flex items-center gap-2 text-[16px] text-fg-3'
     return (
       <div className={cx('sheet-safe fixed inset-x-0 top-0 z-40 flex flex-col', isNote ? 'bg-note' : 'bg-surface', !open && 'hidden')} style={{ height: 'var(--app-height, 100dvh)' }} role="dialog" aria-label={isNote ? 'Note' : 'Reply'}>
         {mentionList}
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-2">
-          <button type="button" aria-label="Close. Your draft is kept." onClick={saveAndClose} className="flex size-11 items-center justify-center rounded-full text-fg-2">
+          <button type="button" aria-label="Close" onClick={closePhone} className="flex size-11 items-center justify-center rounded-full text-fg-2">
             <X className="size-6" aria-hidden />
           </button>
           <h2 className="flex-1 text-center text-[17px] font-semibold">{isNote ? 'Note' : 'Reply'}</h2>
-          <Button variant="primary" size="lg" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="mr-1 rounded-xl">
+          <Button variant="primary" size="lg" loading={send.isPending} disabled={uploads.busy} onClick={submit} className={cx('mr-1 rounded-xl transition-opacity', !filled && uploads.ids.length === 0 && 'opacity-45')}>
             {isNote ? 'Save' : 'Send'}
           </Button>
         </header>
@@ -356,19 +370,20 @@ export const Composer = forwardRef<
               trigger={({ ref: triggerRef, ...props }) => (
                 <button ref={triggerRef} type="button" {...props} className={row}>
                   <span className="flex-1 text-fg-3">Status</span>
-                  <span className={cx('size-2 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
-                  <span>{STATUS_LABEL[sendStatus]}</span>
+                  <span className={value}>
+                    <span className={cx('size-2 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
+                    {STATUS_LABEL[sendStatus]}
+                  </span>
                 </button>
               )}
             >
               {statusMenu}
             </Popover>
-            {chooseAssignee && (
-              <div className={row}>
-                <span className="flex-1 text-fg-3">Assign</span>
-                <AssignPicker assigneeId={sendAssignee} meId={me.id} users={(teammates.data ?? []).filter((u) => canSee(u, conversation.mailboxId))} onPick={setPickedAssignee} />
-              </div>
-            )}
+            {/* Always offered on a phone, as in Help Scout's app. Left alone, the mailbox's own rule decides. */}
+            <div className={row}>
+              <span className="flex-1 text-fg-3">Assign</span>
+              <AssignPicker plain assigneeId={sendAssignee} meId={me.id} users={(teammates.data ?? []).filter((u) => canSee(u, conversation.mailboxId))} onPick={setPickedAssignee} />
+            </div>
             {phoneCc || showCc || showBcc ? (
               <div className="divide-y divide-line border-b border-line px-4">
                 {addressRow('Cc', cc, setCc, () => {
@@ -407,7 +422,7 @@ export const Composer = forwardRef<
           </div>
         )}
         <div {...drop.handlers} className="min-h-0 flex-1 overflow-y-auto">
-          <EditorArea editor={editor} className="min-h-full px-4 pt-3 pb-4 text-[16px]" />
+          <EditorArea editor={editor} className="composer-phone min-h-full px-4 pt-3 pb-4" />
           {uploads.uploads.length > 0 && (
             <div className="px-4 pb-3">
               <UploadList uploads={uploads.uploads} onRemove={uploads.remove} />
@@ -431,9 +446,6 @@ export const Composer = forwardRef<
           <AttachButton onFiles={uploads.add} />
           <EditorToolbar editor={editor} />
           <span className="flex-1" />
-          <button type="button" aria-label="Discard draft" onClick={discard} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
-            <Trash2 className="size-5" aria-hidden />
-          </button>
           <button type="button" aria-label="Hide keyboard" onClick={() => editor?.commands.blur()} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
             <KeyboardOff className="size-5" aria-hidden />
           </button>
@@ -446,6 +458,39 @@ export const Composer = forwardRef<
             send.mutate({ status: sendStatus, sendAt, ifNoReply })
           }}
         />
+        {askClose && (
+          // An iOS action sheet: what to do with the reply, with Cancel apart at the bottom.
+          <div className="animate-fade fixed inset-0 z-50 flex flex-col justify-end bg-black/35 px-2 pb-[calc(var(--safe-bottom)+8px)]" onClick={() => setAskClose(false)}>
+            <div className="animate-sheet" role="alertdialog" aria-label={isNote ? 'Save your note as draft?' : 'Save your reply as draft?'} onClick={(e) => e.stopPropagation()}>
+              <div className="overflow-hidden rounded-2xl bg-surface">
+                <p className="px-4 py-3.5 text-center text-[13px] text-fg-3">{isNote ? 'Save your note as draft?' : 'Save your reply as draft?'}</p>
+                <button
+                  type="button"
+                  className="h-14 w-full border-t border-line text-[19px] text-accent active:bg-sunken"
+                  onClick={() => {
+                    setAskClose(false)
+                    saveAndClose()
+                  }}
+                >
+                  Save Draft
+                </button>
+                <button
+                  type="button"
+                  className="h-14 w-full border-t border-line text-[19px] text-danger active:bg-sunken"
+                  onClick={() => {
+                    setAskClose(false)
+                    discard()
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+              <button type="button" className="mt-2 h-14 w-full rounded-2xl bg-surface text-[19px] font-semibold text-accent active:bg-sunken" onClick={() => setAskClose(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -620,7 +665,7 @@ const NobodyIcon = ({ size = 20 }: { size?: number }) => (
 )
 
 /** Who the conversation is assigned to once this reply is sent. */
-function AssignPicker({ assigneeId, meId, users, onPick }: { assigneeId: number | null; meId: number; users: User[]; onPick: (id: number | null) => void }) {
+function AssignPicker({ assigneeId, meId, users, onPick, plain }: { assigneeId: number | null; meId: number; users: User[]; onPick: (id: number | null) => void; plain?: boolean }) {
   const active = users.filter((u) => !u.disabled)
   const current = active.find((u) => u.id === assigneeId) ?? null
   const label = current ? (current.id === meId ? 'Me' : current.name.split(' ')[0]) : 'Unassigned'
@@ -629,7 +674,14 @@ function AssignPicker({ assigneeId, meId, users, onPick }: { assigneeId: number 
       align="end"
       side="top"
       width={230}
-      trigger={({ ref: triggerRef, ...props }) => (
+      trigger={({ ref: triggerRef, ...props }) =>
+        plain ? (
+          // A phone sheet row's value: plain text, as in Help Scout's app.
+          <button ref={triggerRef} type="button" {...props} aria-label={`Assign after sending: ${current?.name ?? 'Anyone'}`} className="-mr-1 flex h-11 items-center gap-2 px-1 text-[16px] text-fg-3">
+            {current && <Avatar name={current.name} color={current.color} src={current.avatarUrl} size={22} />}
+            {current ? label : 'Anyone'}
+          </button>
+        ) : (
         <button
           ref={triggerRef}
           type="button"
@@ -642,7 +694,8 @@ function AssignPicker({ assigneeId, meId, users, onPick }: { assigneeId: number 
           <span className="hidden max-w-24 truncate sm:inline">{label}</span>
           <ChevronDown className="size-3.5 opacity-60" aria-hidden />
         </button>
-      )}
+        )
+      }
     >
       {(close) => (
         <>
