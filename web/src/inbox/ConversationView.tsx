@@ -46,6 +46,7 @@ import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { LightboxProvider, isImageType, useLightbox, type LightboxImage } from './Lightbox'
 import { useZone, zonedLabel } from '../lib/timezone'
 import { CustomerPanel } from './CustomerPanel'
+import { useSheetDrag } from '../lib/sheetDrag'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
 
@@ -60,6 +61,7 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
   const [merging, setMerging] = useState(false)
   // Phone: the sheet with status, assignee, tags and more, opened from the card at the bottom.
   const [details, setDetails] = useState(false)
+  const sheetDrag = useSheetDrag(() => setDetails(false))
   // The composer stays closed until someone asks to write. An unsent draft reopens it.
   const [composing, setComposing] = useState(false)
   const openComposer = (mode: 'reply' | 'note') => {
@@ -252,7 +254,16 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
         )}
         {details && (
           <div className="fixed inset-0 z-30 flex items-end bg-black/40 md:hidden" onClick={() => setDetails(false)}>
-            <div className="sheet-safe w-full rounded-t-2xl bg-surface pt-2 shadow-pop" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Conversation details">
+            <div
+              ref={sheetDrag.ref}
+              onTouchStart={sheetDrag.onTouchStart}
+              onTouchMove={sheetDrag.onTouchMove}
+              onTouchEnd={sheetDrag.onTouchEnd}
+              className="sheet-safe w-full rounded-t-2xl bg-surface pt-2 shadow-pop"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-label="Conversation details"
+            >
               <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line-strong" aria-hidden />
               <PhoneDetails
                 conversation={conversation}
