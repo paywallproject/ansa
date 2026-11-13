@@ -430,7 +430,6 @@ export const Composer = forwardRef<
           <AttachButton onFiles={uploads.add} />
           <EditorToolbar editor={editor} />
           <span className="flex-1" />
-          <span aria-live="polite" className="mr-1 text-xs text-fg-3">{saveState === 'saved' ? 'Draft saved' : saveState === 'saving' ? 'Saving…' : ''}</span>
           <button type="button" aria-label="Discard draft" onClick={discard} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
             <Trash2 className="size-5" aria-hidden />
           </button>
@@ -466,13 +465,23 @@ export const Composer = forwardRef<
         <div
           {...drop.handlers}
           className={cx(
-            'border-t shadow-[0_-6px_20px_rgba(24,24,29,0.08)] transition-colors md:rounded-xl md:border md:shadow-[0_1px_2px_rgba(24,24,29,0.06)]',
+            'relative border-t shadow-[0_-6px_20px_rgba(24,24,29,0.08)] transition-colors md:rounded-xl md:border md:shadow-[0_1px_2px_rgba(24,24,29,0.06)]',
             isNote ? 'border-note-line bg-note' : 'border-line-strong bg-surface md:focus-within:border-accent',
             drop.over && 'border-accent ring-3 ring-accent/20',
           )}
         >
+          {/* Close, as in Help Scout: the draft is kept and shows in the conversation. */}
+          <button
+            type="button"
+            onClick={saveAndClose}
+            aria-label="Close. Your draft is kept."
+            title="Close (Esc). Your draft is kept."
+            className="absolute -top-4 right-4 z-10 flex size-8 items-center justify-center rounded-full border border-line-strong bg-surface text-fg-2 shadow-[0_2px_6px_rgba(24,24,29,0.10)] transition-colors hover:text-fg max-md:hidden"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
           {!isNote && (
-            <div className="divide-y divide-line px-3">
+            <div className="divide-y divide-line px-3 md:pr-14 md:pl-5">
               <div className="flex min-h-9 items-center gap-2 py-1 md:min-h-10 md:py-1.5">
                 <span className="w-8 shrink-0 text-[13px] text-fg-3">To</span>
                 <span className="flex h-6 min-w-0 items-center gap-1.5 rounded-full bg-sunken pr-2 pl-0.5 text-[13px]">
@@ -498,16 +507,16 @@ export const Composer = forwardRef<
             </div>
           )}
 
-          <EditorArea editor={editor} className={cx('max-h-[30vh] min-h-[56px] px-3 pt-3 pb-1 md:max-h-[38vh] md:min-h-[78px]', !isNote && 'border-t border-line')} />
+          <EditorArea editor={editor} className={cx('max-h-[30vh] min-h-[56px] px-3 pt-3 pb-1 md:max-h-[38vh] md:min-h-[96px] md:px-5 md:pt-4 md:pb-2', !isNote && 'border-t border-line')} />
 
           {uploads.uploads.length > 0 && (
-            <div className="px-3 pb-2">
+            <div className="px-3 pb-2 md:px-5">
               <UploadList uploads={uploads.uploads} onRemove={uploads.remove} />
             </div>
           )}
 
           {/* On a narrow screen the send controls drop to their own line instead of running off the edge. */}
-          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 px-1.5 pt-1 pb-2 md:px-2">
+          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 px-1.5 pt-1 pb-2 md:px-3.5 md:pt-2 md:pb-3.5">
             <EditorToolbar editor={editor}>
               <span className="mx-1.5 h-4 w-px bg-line" aria-hidden />
               <AttachButton onFiles={uploads.add} />
@@ -527,9 +536,6 @@ export const Composer = forwardRef<
             </EditorToolbar>
 
             <div className="ml-auto flex items-center">
-              <button type="button" onClick={saveAndClose} title="Save the draft and close (Esc)" className="mr-1 h-8 rounded-md px-2 text-[13px] font-medium text-fg-2 transition-colors hover:bg-black/5 hover:text-fg dark:hover:bg-white/10">
-                {saveState === 'saving' ? 'Saving…' : 'Save draft'}
-              </button>
               <button type="button" aria-label="Discard draft" title="Discard draft" onClick={discard} className={tool}>
                 <Trash2 className="size-4" aria-hidden />
               </button>
