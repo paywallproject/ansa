@@ -7,13 +7,13 @@
   --surface: #ffffff;
   --sunken: #f1f1f4;
   --hover: #ececf0;
-  /* Help Scout's text colours, measured from its app: #354250 for text, #818d9c for secondary text, and a step
-     between for fg-2. fg-3 is soft (3.4:1 on white), as Help Scout's is. */
+  /* Text is near black, as in Gmail, for easier reading (Help Scout's softer #354250 was too light).
+     fg-2 is Gmail's grey for secondary text; fg-3 still passes 4.5:1 on white. */
   --line: #e4e9ef;
   --line-strong: #d2d9e1;
-  --fg: #354250;
-  --fg-2: #5b6878;
-  --fg-3: #818d9c;
+  --fg: #1f2329;
+  --fg-2: #444b55;
+  --fg-3: #6b7480;
   --nav: #221f5c;
   --accent: #5448e2;
   --accent-hover: #4639cf;
