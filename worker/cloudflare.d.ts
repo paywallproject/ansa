@@ -14,6 +14,8 @@ interface SqlCursor {
 interface DurableObjectState {
   /** Stop this object now. The next request starts a fresh one with the latest code. Always throws. */
   abort(reason?: string): never
+  /** Keep the object alive until this work finishes, after the response has gone. */
+  waitUntil(promise: Promise<unknown>): void
   storage: {
     sql: { exec(query: string, ...bindings: unknown[]): SqlCursor }
     kv: { get<T = unknown>(key: string): T | undefined; put(key: string, value: unknown): void }
