@@ -484,7 +484,7 @@ function Row({
   selecting: boolean
 }) {
   const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
-  // Waiting on the customer: shown quieter, so the conversations that need us stand out.
+  // Waiting on the customer: regular weight instead of bold, as in Help Scout. Still dark enough to read.
   const pending = c.status === 'pending'
   const { user: me } = useSession()
   const viewers = useViewers(c.id, me.id)
@@ -509,13 +509,13 @@ function Row({
         </Link>
       )}
       <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2 pr-4 outline-offset-[-2px] md:py-1.5 md:pr-5')}>
-        <span className={cx('truncate text-[16px] leading-snug md:text-sm md:leading-normal', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-3' : 'font-medium text-fg-2 max-md:font-semibold max-md:text-fg')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
+        <span className={cx('truncate text-[16px] leading-snug md:text-sm md:leading-normal', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2 max-md:text-fg' : 'font-medium text-fg-2 max-md:font-semibold max-md:text-fg')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         {/* Two lines, as in Help Scout: the subject, then the preview in lighter text under it. */}
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
             {viewers.length > 0 && <ViewersBadge viewers={viewers} />}
-            <span className={cx('truncate text-[15px] leading-snug md:text-sm md:leading-[1.35]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2' : 'font-medium text-fg')}>{c.subject || '(no subject)'}</span>
+            <span className={cx('truncate text-[15px] leading-snug md:text-sm md:leading-[1.35]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg-2 max-md:text-fg' : 'font-medium text-fg max-md:font-semibold')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
             {c.hasDraft && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-amber-50 px-1.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">Draft</span>}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
@@ -527,7 +527,7 @@ function Row({
             ))}
             {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 md:inline">+{c.tags.length - 3}</span>}
           </span>
-          <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]', pending ? 'text-fg-3/75' : 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]', 'text-fg-3')}>{c.preview || 'No message text'}</span>
           {/* On a phone, tags get a line of their own, under the preview. */}
           {c.tags.length > 0 && (
             <span className="mt-1.5 flex flex-wrap gap-1 md:hidden">
