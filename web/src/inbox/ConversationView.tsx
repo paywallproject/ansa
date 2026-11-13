@@ -994,6 +994,10 @@ function TagMenu({ current, hiddenCount, onAdd, onRemove }: { current: string[];
 
 const CUSTOMER_COLOR = '#6fa3e8'
 const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+const dateThisYear = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+const dateOtherYear = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+/** A message's date and time, as in Help Scout: "Nov 11, 4:33 PM" (with the year when it is not this year). */
+const messageDate = (ts: number) => (new Date(ts).getFullYear() === new Date().getFullYear() ? dateThisYear : dateOtherYear).format(ts)
 const dayKey = (ts: number) => new Date(ts).toDateString()
 function dayLabel(ts: number): string {
   const date = new Date(ts)
@@ -1389,7 +1393,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
             {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
             {scheduled && <span className="shrink-0 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-fg">{thread.sendAt ? 'Scheduled' : 'On hold'}</span>}
             <time className={cx('shrink-0 text-[13px] tabular-nums md:text-xs', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
-              {timeOnly.format(thread.createdAt)}
+              {messageDate(thread.createdAt)}
             </time>
             {((isCustomer && thread.via === 'email') || canDelete) && (
               <Popover
