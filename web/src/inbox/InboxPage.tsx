@@ -45,6 +45,8 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const q = searchParams.get('q') ?? ''
   const [draftQuery, setDraftQuery] = useState(q)
   const shell = useShell()
+  // Phone: the folder list dropped down from the title, or null. The number is where it starts (under the header).
+  const [folderPanel, setFolderPanel] = useState<number | null>(null)
   // On a phone the checkboxes hide until you choose Select, as in Help Scout's app.
   const [selecting, setSelecting] = useState(false)
   const debouncedQuery = useDebounced(draftQuery, 300)
@@ -270,37 +272,56 @@ export function InboxPage({ search = false }: { search?: boolean }) {
               {/* On a phone: the folder, its count and a switcher, centred, as in Help Scout's app. */}
               {mailbox && (
                 <div className="flex min-w-0 flex-1 justify-center md:hidden">
-                  <Popover
-                    align="start"
-                    width={240}
-                    trigger={({ ref, ...props }) => (
-                      <button ref={ref} type="button" {...props} className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[17px] font-semibold">
-                        <span className="truncate">{folderInfo?.label ?? 'All conversations'}</span>
-                        {folderInfo?.countKey && mailbox.counts[folderInfo.countKey] > 0 && <span className="font-normal text-fg-3 tabular-nums">({mailbox.counts[folderInfo.countKey]})</span>}
-                        <ChevronDown className="size-4 shrink-0 text-fg-3" aria-hidden />
-                      </button>
-                    )}
+                  <button
+                    type="button"
+                    aria-expanded={folderPanel !== null}
+                    onClick={(e) => setFolderPanel(folderPanel === null ? (e.currentTarget.closest('div.flex.h-11')?.getBoundingClientRect().bottom ?? 56) : null)}
+                    className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[17px] font-semibold"
                   >
-                    {(close) =>
-                      visibleFolders().map((f) => {
-                        const count = f.countKey ? mailbox.counts[f.countKey] : 0
-                        return (
-                          <MenuItem
-                            key={f.id}
-                            icon={<f.icon />}
-                            checked={f.id === folder}
-                            hint={count > 0 && f.id !== 'spam' ? <span className="text-xs font-semibold tabular-nums">{count}</span> : undefined}
-                            onSelect={() => {
-                              close()
-                              navigate(`/m/${mailbox.id}/${f.id}`)
-                            }}
-                          >
-                            {f.label}
-                          </MenuItem>
-                        )
-                      })
-                    }
-                  </Popover>
+                    <span className="truncate">{folderInfo?.label ?? 'All conversations'}</span>
+                    {folderInfo?.countKey && mailbox.counts[folderInfo.countKey] > 0 && <span className="font-normal text-fg-3 tabular-nums">({mailbox.counts[folderInfo.countKey]})</span>}
+                    <ChevronDown className={cx('size-4 shrink-0 text-fg-3 transition-transform', folderPanel !== null && 'rotate-180')} aria-hidden />
+                  </button>
+                  {/* The folders drop down over the list, full width, as in Help Scout's app. */}
+                  {folderPanel !== null && (
+                    <div className="animate-fade fixed inset-x-0 bottom-0 z-30 flex flex-col bg-surface" style={{ top: folderPanel }} role="dialog" aria-label="Folders">
+                      <p className="pt-2 pb-5 text-center text-[14px] text-fg-3">{mailbox.name}</p>
+                      <nav className="min-h-0 flex-1 overflow-y-auto">
+                        {visibleFolders().map((f) => {
+                          const count = f.countKey ? mailbox.counts[f.countKey] : 0
+                          const active = f.id === folder
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => {
+                                setFolderPanel(null)
+                                navigate(`/m/${mailbox.id}/${f.id}`)
+                              }}
+                              className={cx('flex h-[52px] w-full items-center gap-4 px-5 text-left text-[18px] active:bg-sunken', active ? 'font-semibold text-accent' : 'text-fg')}
+                            >
+                              <f.icon className="size-6 shrink-0" aria-hidden />
+                              <span className="flex-1">{f.label}</span>
+                              {count > 0 && f.id !== 'spam' && <span className={cx('text-[17px] tabular-nums', active ? 'font-semibold text-accent' : 'text-fg-3')}>{count}</span>}
+                            </button>
+                          )
+                        })}
+                      </nav>
+                      <div className="px-4 pt-3 pb-[calc(1rem+var(--safe-bottom))]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFolderPanel(null)
+                            shell.compose({ mailboxId: mailbox.id })
+                          }}
+                          className="flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-sunken text-[17px] font-medium text-accent active:bg-hover"
+                        >
+                          <PenLine className="size-5" aria-hidden />
+                          New conversation
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>
