@@ -595,3 +595,25 @@ test('signatures are marked so the app can fold them: Gmail, Help Scout, Outlook
   assert.match(text, /<div class="ansa-signature">.*Tim Noyes/s)
   assert.doesNotMatch(html.textToHtmlWithSignature('No signature here'), /ansa-signature/)
 })
+
+test('show original: encryption is read from the hop where the email reached your provider, never guessed', async () => {
+  const { deliveredOverTls } = await import('../mail/original.ts')
+  // Gmail: an internal hop first, then the sender's server into mx.google.com.
+  assert.equal(deliveredOverTls([
+    'by 2002:a05:7108:1:b0:1 with SMTP id x; Fri, 13 Nov 2026 17:40:26 -0800 (PST)',
+    'from NAM10-DM6.outbound.protection.outlook.com (mail-dm6nam10on2100.outbound.protection.outlook.com. [40.107.93.100]) by mx.google.com with ESMTPS id d75 for <support@acme.test> (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256); Fri, 13 Nov 2026 09:40:25 -0800 (PST)',
+  ]), true)
+  // Google to Google.
+  assert.equal(deliveredOverTls(['from mail-sor-f41.google.com (mail-sor-f41.google.com. [209.85.220.41]) by mx.google.com with SMTPS id a1 for <support@acme.test> (Google Transport Security); Fri, 13 Nov 2026 09:40:25 -0800']), true)
+  // Dovecot delivery and a Postfix hand-off from localhost come before the hop that matters.
+  assert.equal(deliveredOverTls([
+    'from mx1.provider.test ([10.0.0.5]) by imap.provider.test with LMTP id abc; Fri, 13 Nov 2026 17:40:27 +0000',
+    'from mx1.provider.test (localhost [127.0.0.1]) by mx1.provider.test (Postfix) with ESMTP id 1; Fri, 13 Nov 2026 17:40:26 +0000',
+    'from mail.sender.test (mail.sender.test [192.0.2.1]) by mx1.provider.test (Postfix) with ESMTPS id 2 (using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384); Fri, 13 Nov 2026 17:40:25 +0000',
+  ]), true)
+  // Plain SMTP from the sender's server.
+  assert.equal(deliveredOverTls(['from mail.sender.test (mail.sender.test [192.0.2.1]) by mx1.provider.test (Postfix) with ESMTP id 2; Fri, 13 Nov 2026 17:40:25 +0000']), false)
+  // Nothing says: no warning.
+  assert.equal(deliveredOverTls(['from mail.sender.test by mx.provider.test with Microsoft SMTP Server id 15.20']), null)
+  assert.equal(deliveredOverTls([]), null)
+})
