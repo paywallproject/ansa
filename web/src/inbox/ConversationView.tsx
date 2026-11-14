@@ -232,7 +232,7 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* On a phone the email gets the screen: the header's controls live in a sheet opened from the card below. */}
-        <div className="max-md:hidden">{header}</div>
+        <div className="phone:hidden">{header}</div>
         <LightboxProvider images={images}>
           <ThreadList key={conversation.id} conversation={conversation} composing={composing} onCompose={openComposer} />
         </LightboxProvider>
@@ -1161,7 +1161,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
         </ol>
       </div>
       {!composing && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center gap-2.5 max-md:hidden">
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center gap-2.5 phone:hidden">
           <button type="button" onClick={() => onCompose('reply')} className="pointer-events-auto flex h-11 min-w-[124px] items-center justify-center gap-2.5 rounded-[10px] bg-accent pr-3 pl-5 text-sm font-semibold text-white shadow-[0_6px_16px_-4px_rgba(34,31,92,0.45)] transition-colors hover:bg-accent-hover">
             Reply
             <kbd className="flex size-[22px] items-center justify-center rounded-md bg-white/20 font-sans text-xs font-semibold">R</kbd>
@@ -1428,7 +1428,7 @@ function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdi
   }
   return (
     <li className="relative md:px-14">
-      <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} className="absolute top-4 right-9 z-10 ring-4 ring-surface max-md:hidden" />
+      <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} className="absolute top-4 right-9 z-10 ring-4 ring-surface phone:hidden" />
       <article aria-label={isNote ? 'Draft note' : 'Draft reply'} className={cx('relative rounded-[20px] border px-4 pt-4 pb-5 shadow-card md:rounded-xl md:px-12 md:pt-5 md:pb-6 md:shadow-none lg:px-20', isNote ? 'border-note-line bg-note' : 'border-line bg-surface')}>
         <span className="absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full bg-accent" aria-hidden />
         <header className="flex items-center gap-2.5 border-b border-line pb-3">
@@ -1548,7 +1548,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
       {original && <OriginalDialog thread={thread} onClose={() => setOriginal(false)} />}
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
-      <Avatar name={name} color={color} src={photo} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
+      <Avatar name={name} color={color} src={photo} size={40} className={cx('absolute z-10 ring-4 ring-surface phone:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(

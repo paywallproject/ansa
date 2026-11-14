@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, ChevronDown, Clock, KeyboardOff, Send, StickyNote, Trash2, UserRound, X } from 'lucide-react'
+import { PHONE } from '../lib/phone'
 import { api } from '../lib/api'
 import { canSee } from '../lib/access'
 import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
@@ -522,7 +523,7 @@ export const Composer = forwardRef<
             onClick={saveAndClose}
             aria-label="Close. Your draft is kept."
             title="Close (Esc). Your draft is kept."
-            className="absolute -top-4 right-4 z-10 flex size-8 items-center justify-center rounded-full border border-line-strong bg-surface text-fg-2 shadow-[0_2px_6px_rgba(24,24,29,0.10)] transition-colors hover:text-fg max-md:hidden"
+            className="absolute -top-4 right-4 z-10 flex size-8 items-center justify-center rounded-full border border-line-strong bg-surface text-fg-2 shadow-[0_2px_6px_rgba(24,24,29,0.10)] transition-colors hover:text-fg phone:hidden"
           >
             <X className="size-4" aria-hidden />
           </button>
@@ -607,7 +608,7 @@ export const Composer = forwardRef<
                       >
                         <span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
                         {STATUS_LABEL[sendStatus]}
-                        <ChevronDown className="size-3.5 opacity-60 max-md:hidden" aria-hidden />
+                        <ChevronDown className="size-3.5 opacity-60 phone:hidden" aria-hidden />
                       </button>
                     )}
                   >
@@ -645,8 +646,7 @@ export const Composer = forwardRef<
   )
 })
 
-/** A phone-width screen, tracked live (a tablet turning round can cross the line). */
-const PHONE = '(max-width: 767px)'
+/** The phone layout, tracked live (turning the device round can cross the line). */
 function useIsPhone() {
   return useSyncExternalStore(
     (notify) => {

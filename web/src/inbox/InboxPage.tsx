@@ -192,7 +192,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
             </div>
           ) : (
             <>
-              <h1 className="min-w-0 truncate text-[15px] font-semibold max-md:hidden">{folderInfo?.label ?? 'All conversations'}</h1>
+              <h1 className="min-w-0 truncate text-[15px] font-semibold phone:hidden">{folderInfo?.label ?? 'All conversations'}</h1>
               {/* On a phone: the folder, its count and a switcher, centred, as in Help Scout's app. */}
               {mailbox && (
                 <div className="flex min-w-0 flex-1 justify-center md:hidden">
@@ -208,7 +208,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
                   </button>
                   {/* The folders drop down over the list, full width, as in Help Scout's app. */}
                   {folderPanel !== null && (
-                    <div className="animate-fade fixed inset-x-0 bottom-0 z-[25] flex flex-col bg-surface" style={{ top: folderPanel }} role="dialog" aria-label="Folders">
+                    <div className="safe-x animate-fade fixed inset-x-0 bottom-0 z-[25] flex flex-col bg-surface" style={{ top: folderPanel }} role="dialog" aria-label="Folders">
                       <p className="pt-2 pb-5 text-center text-[14px] text-fg-3">{mailbox.name}</p>
                       <nav className="min-h-0 flex-1 overflow-y-auto">
                         {visibleFolders().map((f) => {
@@ -250,7 +250,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
               )}
             </>
           )}
-          <span className="flex-1 max-md:hidden" />
+          <span className="flex-1 phone:hidden" />
           <IconButton label={selecting ? 'Done selecting' : 'Select conversations'} size="sm" active={selecting} onClick={() => {
               if (selecting) setChecked(new Set())
               setSelecting(!selecting)
@@ -283,7 +283,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto max-md:pb-[var(--safe-bottom)]">
+      <div className="min-h-0 flex-1 overflow-y-auto phone:pb-[var(--safe-bottom)]">
         {list.isPending && list.fetchStatus !== 'idle' ? (
           <div className="flex justify-center py-10">
             <Spinner />
@@ -454,13 +454,13 @@ function Row({
         </Link>
       )}
       <Link to={to} className={cx(COLS, 'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2 pr-4 outline-offset-[-2px] md:py-1.5 md:pr-5')}>
-        <span className={cx('truncate text-[16px] leading-snug md:text-sm md:leading-normal', waiting ? 'font-semibold text-fg' : pending ? 'text-fg' : 'font-medium text-fg-2 max-md:font-semibold max-md:text-fg')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
+        <span className={cx('truncate text-[16px] leading-snug md:text-sm md:leading-normal', waiting ? 'font-semibold text-fg' : pending ? 'text-fg' : 'font-medium text-fg-2 phone:font-semibold phone:text-fg')} title={c.customer.name || c.customer.email}>{c.customer.name || c.customer.email}</span>
         {/* Two lines, as in Help Scout: the subject, then the preview in lighter text under it. */}
         <span className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-start-auto">
           <span className="flex min-w-0 items-center gap-1.5">
             {c.source === 'chat' && <MessageCircle className="size-3.5 shrink-0 text-fg-3" aria-label="Live chat" />}
             {viewers.length > 0 && <ViewersBadge viewers={viewers} />}
-            <span className={cx('truncate text-[15px] leading-snug md:text-sm md:leading-[1.35]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg' : 'font-medium text-fg max-md:font-semibold')}>{c.subject || '(no subject)'}</span>
+            <span className={cx('truncate text-[15px] leading-snug md:text-sm md:leading-[1.35]', waiting ? 'font-semibold text-fg' : pending ? 'text-fg' : 'font-medium text-fg phone:font-semibold')}>{c.subject || '(no subject)'}</span>
             {showStatus && <StatusBadge status={c.status} />}
             {c.hasDraft && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-amber-50 px-1.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">Draft</span>}
             {showMailbox && <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-sunken px-1.5 text-xs font-medium text-fg-2 group-hover:bg-hover">{c.mailboxName}</span>}
@@ -474,12 +474,12 @@ function Row({
           </span>
           {/* The newest note, when nothing has been said since, as in Help Scout. */}
           {c.notePreview ? (
-            <span className="mt-0.5 block text-sm text-fg-3 max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]">
+            <span className="mt-0.5 block text-sm text-fg-3 phone:line-clamp-2 phone:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]">
               <StickyNote className="mr-1 inline size-3.5 -translate-y-px text-note-fg" aria-label="Note" />
               {c.notePreview}
             </span>
           ) : (
-            <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]', 'text-fg-3')}>{c.preview || 'No message text'}</span>
+            <span className={cx('mt-0.5 block text-sm phone:line-clamp-2 phone:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]', 'text-fg-3')}>{c.preview || 'No message text'}</span>
           )}
           {/* On a phone, tags get a line of their own, under the preview. */}
           {c.tags.length > 0 && (

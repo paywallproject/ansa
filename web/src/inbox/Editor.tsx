@@ -130,15 +130,15 @@ export function EditorToolbar({ editor, children }: { editor: Editor | null; chi
         <Type className="size-4" />
       </IconButton>
       {tools.slice(0, 2).map((t) => (
-        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className={cx(!formatting && 'max-md:hidden')}>
+        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className={cx(!formatting && 'phone:hidden')}>
           {t.icon}
         </IconButton>
       ))}
-      <span className={cx('contents', !formatting && 'max-md:hidden')}>
+      <span className={cx('contents', !formatting && 'phone:hidden')}>
         <LinkButton editor={editor} />
       </span>
       {tools.slice(2).map((t) => (
-        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className={cx(!formatting && 'max-md:hidden')}>
+        <IconButton key={t.label} label={t.label} size="sm" active={t.active} aria-pressed={t.active} onClick={t.run} className={cx(!formatting && 'phone:hidden')}>
           {t.icon}
         </IconButton>
       ))}
