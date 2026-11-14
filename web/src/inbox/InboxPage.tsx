@@ -84,10 +84,10 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     if (next && next.id !== selectedId) open(next.id)
   }
   /** After closing a conversation, go back to the list, as in Help Scout, with a way to look at it again. */
-  const done = (message: string) => {
+  const done = (message: string, undo?: () => void) => {
     const id = selectedId
     open(null)
-    toast(message, { action: id ? { label: 'View', run: () => open(id) } : undefined })
+    toast(message, { action: undo ? { label: 'Undo', run: undo } : id ? { label: 'View', run: () => open(id) } : undefined })
   }
   useHotkeys({ j: () => step(1), k: () => step(-1), escape: () => selectedId && !document.querySelector('[role=dialog], [role=menu]') && open(null) })
 
