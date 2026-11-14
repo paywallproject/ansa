@@ -1,3 +1,4 @@
+import { isPhone } from './lib/phone'
 import { lastMailbox } from './lib/lastMailbox'
 import { useAppBadge } from './lib/badge'
 import { useVisualViewport } from './lib/viewport'
@@ -93,7 +94,7 @@ function Home() {
   const list = mailboxes.data ?? []
   if (list.length === 0) return <Welcome />
   // With several mailboxes, the logo opens a dashboard of them on a computer. A phone opens straight into the last mailbox.
-  if (list.length > 1 && !window.matchMedia('(max-width: 767px)').matches) return <Dashboard mailboxes={list} />
+  if (list.length > 1 && !isPhone()) return <Dashboard mailboxes={list} />
   // Home (and the logo) open the mailbox you were last in, not always the first one.
   const first = list.find((m) => m.id === lastMailbox()) ?? list[0]
   return <Navigate to={`/m/${first.id}/${first.counts.unassigned === 0 && first.counts.mine > 0 && user ? 'mine' : 'unassigned'}`} replace />

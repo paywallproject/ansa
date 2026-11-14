@@ -443,9 +443,7 @@ export function Shell() {
     root.classList.toggle('reading', inConversation)
     // In a mailbox on a phone the list's own header is the top bar (as in Help Scout's app).
     root.classList.toggle('bare', !!current && !inConversation)
-    // In a mailbox the folder list runs down the left: the strips around a landscape phone match it (index.css).
-    root.classList.toggle('in-mailbox', !!current)
-    return () => root.classList.remove('reading', 'bare', 'in-mailbox')
+    return () => root.classList.remove('reading', 'bare')
   }, [inConversation, current])
   // Remembered so the logo and the home page come back to this mailbox.
   useEffect(() => {
@@ -479,7 +477,7 @@ export function Shell() {
   return (
     <ShellContext.Provider value={actions}>
       <div className="flex h-full flex-col">
-        <div className={cx((inConversation || current) && 'max-md:hidden')}>
+        <div className={cx((inConversation || current) && 'phone:hidden')}>
           <TopBar mailboxes={list} current={current} onMenu={current ? () => setDrawer(true) : undefined} />
         </div>
         <PullToRefresh />

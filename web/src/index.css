@@ -2,6 +2,12 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
+/* The computer layout (folder list beside the conversations) from 768px wide, except on a phone on its side:
+   a touch screen under 500px tall gets the phone layout, as when it is upright. `phone` is exactly the rest.
+   Keep in step with lib/phone.ts. */
+@custom-variant md (@media (width >= 48rem) and ((pointer: fine) or (height >= 500px)));
+@custom-variant phone (@media not all and (width >= 48rem) and ((pointer: fine) or (height >= 500px)));
+
 :root {
   --canvas: #f5f5f7;
   --surface: #ffffff;
@@ -164,7 +170,7 @@
   overflow-wrap: anywhere;
 }
 /* Easier to read on a phone. */
-@media (max-width: 767px) {
+@media not all and (min-width: 768px) and ((pointer: fine) or (min-height: 500px)) {
   .prose-mail {
     font-size: 16px;
     line-height: 1.6;
@@ -378,7 +384,7 @@
   }
   /* With the keyboard up it covers the home bar: no bottom padding, or a gap shows above the keyboard. */
   /* Reading a conversation on a phone, the top bar is hidden: the strip behind the clock matches the page. */
-  @media (max-width: 767px) {
+  @media not all and (min-width: 768px) and ((pointer: fine) or (min-height: 500px)) {
     .reading body::before {
       background: var(--canvas);
     }
@@ -400,7 +406,9 @@
   .keyboard-open #root {
     padding-bottom: 0;
   }
+  /* The drawer: clear of the clock, the home bar and, on its side, the notch. */
   .safe-pad-y {
+    padding-left: env(safe-area-inset-left);
     padding-top: env(safe-area-inset-top);
     padding-bottom: var(--safe-bottom);
   }
@@ -410,35 +418,32 @@
   }
 }
 
-/* A phone on its side: iOS keeps the app clear of the notch on both sides and of the home bar below, and the
-   page shows through those strips. Paint them like what they border: the top bar along the top, the grey of
-   the folder list (or of the page) down the left, and the page itself on the right and along the bottom. */
+/* A phone on its side: iOS keeps the app clear of the notch on both sides, and the page shows through those
+   strips. Paint them like the page beside them, so the app looks edge to edge as it does upright: white beside
+   the list, grey beside a conversation, and elsewhere the top bar's colour beside the top bar and grey below. */
 @media (display-mode: standalone) and (orientation: landscape) {
-  :root {
-    --side-left: 0px;
-    --side-page: var(--canvas);
-  }
-  /* A mailbox: the folder list (212px and its 1px border) on the left, the white list or conversation beside it. */
-  .in-mailbox {
-    --side-left: 213px;
-  }
-  .in-mailbox,
-  .reading {
-    --side-page: var(--surface);
-  }
   body {
     background:
       linear-gradient(var(--nav), var(--nav)) top / 100% calc(env(safe-area-inset-top) + 48px) no-repeat,
-      linear-gradient(var(--canvas), var(--canvas)) left / calc(env(safe-area-inset-left) + var(--side-left)) 100% no-repeat,
-      var(--side-page);
+      var(--canvas);
+  }
+  .bare body {
+    background: var(--surface);
+  }
+  .reading body {
+    background: var(--canvas);
   }
 }
 
 /* The phone reply sheet covers the whole screen, outside #root: its own clearance for the clock and the home
    bar, without the home-bar padding while the keyboard is up (it covers the home bar). */
 .sheet-safe {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: var(--safe-bottom);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) var(--safe-bottom) env(safe-area-inset-left);
+}
+/* Other full-width layers outside #root (the folder list over the inbox): clear of the notch on a phone on its side. */
+.safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 .keyboard-open .sheet-safe {
   padding-bottom: 0;

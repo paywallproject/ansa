@@ -1,3 +1,4 @@
+import { isPhone } from './lib/phone'
 import { STATUS_LABEL } from './lib/format'
 import {
   createContext,
@@ -507,7 +508,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       />
       {createPortal(
         // On a phone, as in Help Scout's app: a dark bar at the bottom, out of the way of the list.
-        <div className="safe-shift pointer-events-none fixed inset-x-0 top-16 z-[60] flex flex-col items-center gap-2 px-4 max-md:top-auto max-md:bottom-[calc(var(--safe-bottom)+12px)] max-md:px-3" aria-live="polite">
+        <div className="safe-shift pointer-events-none fixed inset-x-0 top-16 z-[60] flex flex-col items-center gap-2 px-4 phone:top-auto phone:bottom-[calc(var(--safe-bottom)+12px)] phone:px-[max(12px,env(safe-area-inset-left))]" aria-live="polite">
           {toasts.map((t) => (
             // On a computer, as in Help Scout: a soft green (or red) card with a round icon, an outlined action and a close button.
             <div
@@ -516,21 +517,21 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
               className={cx(
                 'animate-toast pointer-events-auto flex max-w-md items-center gap-3 rounded-2xl border py-2 pr-2 pl-3 text-[15px] text-fg shadow-pop',
                 t.kind === 'error' ? 'border-danger/60 bg-danger-soft' : 'border-ok/60 bg-ok-soft',
-                'max-md:min-h-14 max-md:w-full max-md:max-w-none max-md:border-0 max-md:bg-[#18202c] max-md:py-2 max-md:pr-2 max-md:pl-5 max-md:text-[17px] max-md:text-white',
+                'phone:min-h-14 phone:w-full phone:max-w-none phone:border-0 phone:bg-[#18202c] phone:py-2 phone:pr-2 phone:pl-5 phone:text-[17px] phone:text-white',
               )}
-              onClick={() => window.matchMedia('(max-width: 767px)').matches && setToasts((list) => list.filter((x) => x.id !== t.id))}
+              onClick={() => isPhone() && setToasts((list) => list.filter((x) => x.id !== t.id))}
             >
-              <span className={cx('flex size-7 shrink-0 max-md:hidden items-center justify-center rounded-full text-white', t.kind === 'error' ? 'bg-danger' : 'bg-ok')} aria-hidden>
+              <span className={cx('flex size-7 shrink-0 phone:hidden items-center justify-center rounded-full text-white', t.kind === 'error' ? 'bg-danger' : 'bg-ok')} aria-hidden>
                 {t.kind === 'error' ? <span className="text-[15px] leading-none font-bold">!</span> : <Check className="size-4" strokeWidth={3.5} />}
               </span>
-              <span className="min-w-0 py-1 max-md:flex-1">{t.message}</span>
+              <span className="min-w-0 py-1 phone:flex-1">{t.message}</span>
               {t.action && (
                 <button
                   type="button"
                   className={cx(
                     'shrink-0 rounded-lg border bg-surface px-3 py-1 text-[14px] font-semibold transition-colors',
                     t.kind === 'error' ? 'border-danger/60 hover:bg-danger-soft' : 'border-ok/60 hover:bg-ok-soft',
-                    'max-md:h-11 max-md:border-0 max-md:bg-transparent max-md:px-4 max-md:text-[17px] max-md:font-medium max-md:text-white',
+                    'phone:h-11 phone:border-0 phone:bg-transparent phone:px-4 phone:text-[17px] phone:font-medium phone:text-white',
                   )}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -541,7 +542,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
                   {t.action.label}
                 </button>
               )}
-              <button type="button" aria-label="Dismiss" className="flex size-8 shrink-0 max-md:hidden items-center justify-center rounded-lg text-fg-3 transition-colors hover:text-fg" onClick={() => setToasts((list) => list.filter((x) => x.id !== t.id))}>
+              <button type="button" aria-label="Dismiss" className="flex size-8 shrink-0 phone:hidden items-center justify-center rounded-lg text-fg-3 transition-colors hover:text-fg" onClick={() => setToasts((list) => list.filter((x) => x.id !== t.id))}>
                 <X className="size-4" aria-hidden />
               </button>
             </div>
