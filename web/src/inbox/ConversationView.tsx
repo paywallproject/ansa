@@ -50,7 +50,7 @@ import { useSheetDrag } from '../lib/sheetDrag'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
 
-export function ConversationView({ id, onBack, onDone }: { id: number; onBack: () => void; onDone: (message: string) => void }) {
+export function ConversationView({ id, onBack, onDone }: { id: number; onBack: () => void; onDone: (message: string, undo?: () => void) => void }) {
   const { user } = useSession()
   const client = useQueryClient()
   const navigate = useNavigate()
@@ -133,7 +133,18 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
       {
         onSuccess: () => {
           // The conversation leaves this folder, so go back to the list.
-          if (status === 'closed' || status === 'spam' || (status === 'pending' && workspace().fourStatuses)) onDone('Status updated')
+          // As in Help Scout: "Conversation closed", with Undo to put the old status back.
+          if (status === 'closed' || status === 'spam' || (status === 'pending' && workspace().fourStatuses))
+            onDone(status === 'closed' ? 'Conversation closed' : `Marked as ${STATUS_LABEL[status].toLowerCase()}`, () =>
+              api
+                .patch(`/conversations/${id}`, { status: previous })
+                .then(() => {
+                  void client.invalidateQueries({ queryKey: ['conversation', id] })
+                  void client.invalidateQueries({ queryKey: ['conversations'] })
+                  void client.invalidateQueries({ queryKey: ['mailboxes'] })
+                })
+                .catch((err: Error) => toast(err.message, { kind: 'error' })),
+            )
           else toast(`Marked as ${STATUS_LABEL[status].toLowerCase()}`, { action: { label: 'Undo', run: () => update.mutate({ status: previous }) } })
         },
       },
