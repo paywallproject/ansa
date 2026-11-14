@@ -37,7 +37,9 @@ const CLIENTS = ['Claude Code', 'Claude Desktop', 'Cursor', 'Other'] as const
 const TOOLS: [string, string][] = [
   ['list_conversations', 'List or search conversations'],
   ['get_conversation', 'Read a full thread'],
-  ['reply_to_conversation', 'Email the customer'],
+  ['reply_to_conversation', 'Email the customer, now or later'],
+  ['list_scheduled_replies', 'Replies waiting to send'],
+  ['get_attachment', 'Download a file'],
   ['add_note', 'Add an internal note'],
   ['update_conversation', 'Status, assignee, tags, snooze'],
   ['create_conversation', 'Start a conversation'],

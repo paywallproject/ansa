@@ -473,3 +473,63 @@ test('the inbox shows the newest note until someone writes again, and the note b
   assert.equal((await summary()).notePreview, '')
   assert.equal(one > 0, true)
 })
+
+test('MCP: replies scheduled for later, and attachments downloaded', async () => {
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${agentToken}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    })
+    const text = await res.text()
+    const json = JSON.parse(text.startsWith('{') ? text : text.split('\n').find((l) => l.startsWith('data: '))!.slice(6))
+    return json.result as { isError?: boolean; content: any[] }
+  }
+  const { storeAttachment } = await import('../services/attachments.ts')
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'later@example.com', subject: 'Later', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+
+  // A time in the past, or without a date, is refused rather than sent at once.
+  assert.equal((await tool('reply_to_conversation', { id: conv.id, body: 'x', send_at: '2020-01-01T00:00:00Z' })).isError, true)
+  assert.equal((await tool('reply_to_conversation', { id: conv.id, body: 'x', send_at: 'tomorrow' })).isError, true)
+
+  const at = new Date(Date.now() + 3 * 86_400_000).toISOString()
+  const scheduled = JSON.parse((await tool('reply_to_conversation', { id: conv.id, body: 'Following up!', send_at: at, only_if_no_reply: true })).content[0].text)
+  assert.equal(scheduled.scheduled, true)
+  assert.equal(scheduled.send_at, at)
+  assert.equal(get<{ state: string }>('SELECT state FROM threads WHERE id = ?', scheduled.reply_id)!.state, 'scheduled')
+  assert.equal(scheduled.conversation.status, 'active', 'status waits until it is sent')
+
+  const listed = JSON.parse((await tool('list_scheduled_replies', {})).content[0].text)
+  const mine = listed.find((r: any) => r.reply_id === scheduled.reply_id)
+  assert.equal(mine.only_if_no_reply, true)
+  assert.equal(mine.text, 'Following up!')
+  const detail = JSON.parse((await tool('get_conversation', { id: conv.id })).content[0].text)
+  assert.equal(detail.thread.find((t: any) => t.id === scheduled.reply_id).send_at, at)
+
+  assert.equal(JSON.parse((await tool('cancel_scheduled_reply', { reply_id: scheduled.reply_id })).content[0].text).cancelled, true)
+  assert.equal(get('SELECT 1 FROM threads WHERE id = ?', scheduled.reply_id), undefined)
+  const again = JSON.parse((await tool('reply_to_conversation', { id: conv.id, body: 'Now then', send_at: at })).content[0].text)
+  assert.equal(JSON.parse((await tool('send_scheduled_reply_now', { reply_id: again.reply_id })).content[0].text).sent, true)
+  assert.equal(get<{ state: string }>('SELECT state FROM threads WHERE id = ?', again.reply_id)!.state, 'sent')
+
+  // Attachments: ids in get_conversation; images as images, text as text, anything else as base64.
+  const threadId = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'customer'`, conv.id)!.id
+  const png = storeAttachment(new Uint8Array([137, 80, 78, 71]), { filename: 'shot.png', mime: 'image/png', threadId })
+  const txt = storeAttachment(new TextEncoder().encode('error log'), { filename: 'log.txt', mime: 'text/plain', threadId })
+  const pdf = storeAttachment(new Uint8Array([37, 80, 68, 70]), { filename: 'invoice.pdf', mime: 'application/pdf', threadId })
+  const listedFiles = JSON.parse((await tool('get_conversation', { id: conv.id })).content[0].text).thread.find((t: any) => t.id === threadId).attachments
+  assert.deepEqual(listedFiles.map((f: any) => f.id), [png.id, txt.id, pdf.id])
+  const image = await tool('get_attachment', { id: png.id })
+  assert.equal(image.content[1].type, 'image')
+  assert.equal(image.content[1].data, Buffer.from([137, 80, 78, 71]).toString('base64'))
+  assert.equal((await tool('get_attachment', { id: txt.id })).content[1].resource.text, 'error log')
+  assert.equal((await tool('get_attachment', { id: pdf.id })).content[1].resource.blob, Buffer.from([37, 80, 68, 70]).toString('base64'))
+  const link = await tool('get_attachment', { id: pdf.id, as_link: true })
+  assert.equal(link.content.length, 1)
+  assert.match(JSON.parse(link.content[0].text).download_url, /\/api\/attachments\/\d+\/invoice\.pdf\?download$/)
+
+  // Not a file from a mailbox the teammate cannot see.
+  const billingConv = conversations.createConversation({ mailboxId: billing, customerEmail: 'y@example.com', subject: 'B', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const hidden = storeAttachment(new Uint8Array([1]), { filename: 'secret.bin', threadId: get<{ id: number }>('SELECT id FROM threads WHERE conversation_id = ?', billingConv.id)!.id })
+  assert.equal((await tool('get_attachment', { id: hidden.id })).isError, true)
+})

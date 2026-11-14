@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { z } from 'zod'
-import { all } from './db.ts'
+import { all, get } from './db.ts'
 import { config } from './config.ts'
 import type { User } from './auth.ts'
 import { htmlToText, textToHtml } from './mail/html.ts'
@@ -13,6 +13,8 @@ import {
   getConversation,
   listConversations,
   saveDraft,
+  sendScheduledNow,
+  cancelScheduled,
   updateConversation,
   type Actor,
   type ConversationSummary,
@@ -20,7 +22,9 @@ import {
 import { getCustomer, listCustomers, updateCustomer } from './services/customers.ts'
 import { buildReport } from './services/reports.ts'
 import { publish } from './events.ts'
-import { assertConversation, assertMailbox, canSeeMailbox, scopeOf } from './services/access.ts'
+import { assertConversation, assertMailbox, assertThread, canSeeMailbox, scopeOf } from './services/access.ts'
+import { attachmentFile } from './services/attachments.ts'
+import { AppError } from './services/customers.ts'
 
 const iso = (ts: number | null | undefined) => (ts ? new Date(ts).toISOString() : null)
 const toHtml = (body: string) => (/<(p|br|div|ul|ol|strong|em|a)\b[^>]*>/i.test(body) ? body : textToHtml(body))
@@ -67,9 +71,15 @@ function detail(id: number, mailboxIds: number[] | null, userId: number) {
             from: t.author.name,
             at: iso(t.createdAt),
             delivery: t.type === 'reply' ? t.state : undefined,
+            // A scheduled reply: when it goes out, or held because the customer wrote first.
+            send_at: t.state === 'scheduled' ? iso(t.sendAt) : undefined,
+            held: t.state === 'scheduled' && t.event?.held ? true : undefined,
+            only_if_no_reply: t.state === 'scheduled' && t.event?.ifNoReply ? true : undefined,
             error: t.error || undefined,
             text: htmlToText(t.bodyHtml),
-            attachments: t.attachments.length ? t.attachments.map((a) => ({ filename: a.filename, mime: a.mime, size: a.size })) : undefined,
+            attachments: t.attachments.length
+              ? t.attachments.map((a) => ({ id: a.id, filename: a.filename, mime: a.mime, size: a.size, inline: a.inline || undefined }))
+              : undefined,
           },
     ),
     other_conversations_from_customer: c.previousConversations.map((p) => ({ id: p.id, subject: p.subject, status: p.status })),
@@ -90,6 +100,21 @@ const safe =
     }
   }
 
+/** An ISO 8601 time in the future, for send later. */
+function futureTime(value: string, field: string): number {
+  const at = Date.parse(value)
+  if (Number.isNaN(at)) throw new Error(`${field} must be an ISO 8601 date and time with a UTC offset, such as 2026-11-20T09:00:00-05:00.`)
+  // addReply sends at once when the time is seconds away; an assistant asking to schedule never means "now".
+  if (at <= Date.now() + 60_000) throw new Error(`${field} must be at least a minute in the future.`)
+  return at
+}
+
+const TEXT_MIME = /^(text\/|application\/(json|xml|csv|x-yaml|yaml|javascript|x-ndjson)\b)|\+(json|xml)\b/i
+/** Images the assistant can look at directly. */
+const IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+/** Larger files are not put in the tool result; the assistant gets a link to download them with its token. */
+const MAX_INLINE_BYTES = 10 * 1024 * 1024
+
 const STATUS = z.enum(['active', 'waiting', 'pending', 'closed', 'spam'])
 
 function buildServer(user: User) {
@@ -109,7 +134,9 @@ function buildServer(user: User) {
         'reply_to_conversation sends a real email to the customer, so draft carefully and confirm with the user before sending unless told otherwise. ' +
         'add_note is internal and safe: customers never see notes. ' +
         'draft_reply is also safe: it writes a reply into the user\'s own draft for them to review and send from Ansa, and sends nothing. ' +
-        'Prefer it when the user wants to check a reply first.',
+        'Prefer it when the user wants to check a reply first. ' +
+        'To send a reply later, give reply_to_conversation a send_at time; list_scheduled_replies, cancel_scheduled_reply and send_scheduled_reply_now manage those. ' +
+        'get_attachment downloads a file attached to a message.',
     },
   )
 
@@ -183,7 +210,9 @@ function buildServer(user: User) {
       description:
         'Email a reply to the customer on an existing conversation. This sends real email. `body` is plain text (blank lines separate paragraphs) or simple HTML. ' +
         'The signature is added automatically. `status` is what the conversation becomes after sending (default closed; a customer reply reopens it). ' +
-        '`assignee_id` is who it is assigned to afterwards (null: unassigned); leave it out to follow the mailbox\'s setting.',
+        '`assignee_id` is who it is assigned to afterwards (null: unassigned); leave it out to follow the mailbox\'s setting. ' +
+        'Send later: pass `send_at` to schedule the reply instead of sending it now; with `only_if_no_reply` it is held back if the customer writes first. ' +
+        'Until then it shows in the conversation as scheduled and can be cancelled with cancel_scheduled_reply.',
       inputSchema: {
         id: z.number().int(),
         body: z.string().min(1),
@@ -191,13 +220,150 @@ function buildServer(user: User) {
         cc: z.array(z.string()).optional(),
         bcc: z.array(z.string()).optional(),
         assignee_id: z.number().int().nullable().optional(),
+        send_at: z
+          .string()
+          .optional()
+          .describe('ISO 8601 time to send it, with a UTC offset (e.g. 2026-11-20T09:00:00-05:00). At least a minute ahead, within a year. Leave out to send now.'),
+        only_if_no_reply: z.boolean().optional().describe('With send_at: do not send if the customer writes before then (a follow-up)'),
       },
       annotations: { destructiveHint: false, openWorldHint: true },
     },
     safe((a) => {
-      addReply(mine(a.id), { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id }, actor)
-      return { sent: true, conversation: brief(getConversation(a.id)) }
+      const sendAt = a.send_at === undefined ? undefined : futureTime(a.send_at, 'send_at')
+      if (a.only_if_no_reply && sendAt === undefined) throw new Error('only_if_no_reply needs a send_at time.')
+      const replyId = addReply(
+        mine(a.id),
+        { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id, sendAt, ifNoReply: a.only_if_no_reply },
+        actor,
+      )
+      if (sendAt === undefined) return { sent: true, reply_id: replyId, conversation: brief(getConversation(a.id)) }
+      return {
+        sent: false,
+        scheduled: true,
+        reply_id: replyId,
+        send_at: iso(sendAt),
+        only_if_no_reply: !!a.only_if_no_reply,
+        note: 'Nothing was sent yet. The conversation keeps its status until the reply goes out.',
+        conversation: brief(getConversation(a.id)),
+      }
     }),
+  )
+
+  server.registerTool(
+    'list_scheduled_replies',
+    {
+      title: 'List scheduled replies',
+      description:
+        'Replies waiting to be sent later, soonest first. A held reply was to go only if the customer stayed quiet, and they wrote first: it will not send unless sent by hand.',
+      inputSchema: { mine_only: z.boolean().optional().describe('Only replies you scheduled. Default false') },
+      annotations: { readOnlyHint: true },
+    },
+    safe((a) =>
+      all<any>(
+        `SELECT t.id, t.conversation_id, t.send_at, t.event, t.body_text, u.name AS author, c.subject, c.mailbox_id, cu.name AS customer_name, cu.email AS customer_email
+           FROM threads t JOIN conversations c ON c.id = t.conversation_id JOIN customers cu ON cu.id = c.customer_id LEFT JOIN users u ON u.id = t.user_id
+          WHERE t.type = 'reply' AND t.state = 'scheduled' ${a.mine_only ? 'AND t.user_id = ?' : ''}
+          ORDER BY t.send_at IS NULL, t.send_at`,
+        ...(a.mine_only ? [user.id] : []),
+      )
+        .filter((t) => canSeeMailbox(user, t.mailbox_id))
+        .map((t) => {
+          let event: Record<string, any> = {}
+          try {
+            event = JSON.parse(t.event || '{}')
+          } catch {}
+          return {
+            reply_id: t.id,
+            conversation_id: t.conversation_id,
+            subject: t.subject,
+            customer: { name: t.customer_name, email: t.customer_email },
+            by: t.author,
+            send_at: iso(t.send_at),
+            held: !!event.held,
+            only_if_no_reply: !!event.ifNoReply,
+            status_after: event.status ?? 'closed',
+            text: t.body_text,
+            url: `${config.appUrl}/c/${t.conversation_id}`,
+          }
+        }),
+    ),
+  )
+
+  server.registerTool(
+    'cancel_scheduled_reply',
+    {
+      title: 'Cancel a scheduled reply',
+      description:
+        "Take back a reply that is waiting to be sent. Its text goes back into its writer's draft on the conversation (unless they already have one there); its attachments are removed.",
+      inputSchema: { reply_id: z.number().int().describe("From list_scheduled_replies, or a scheduled reply's id in get_conversation") },
+      annotations: { destructiveHint: true },
+    },
+    safe((a) => {
+      assertThread(user, a.reply_id)
+      cancelScheduled(a.reply_id, actor)
+      return { cancelled: true }
+    }),
+  )
+
+  server.registerTool(
+    'send_scheduled_reply_now',
+    {
+      title: 'Send a scheduled reply now',
+      description: 'Send a reply that is waiting to be sent, without waiting for its time. This sends real email.',
+      inputSchema: { reply_id: z.number().int() },
+      annotations: { destructiveHint: false, openWorldHint: true },
+    },
+    safe((a) => {
+      assertThread(user, a.reply_id)
+      sendScheduledNow(a.reply_id, actor)
+      return { sent: true }
+    }),
+  )
+
+  server.registerTool(
+    'get_attachment',
+    {
+      title: 'Download an attachment',
+      description:
+        "Get a file attached to a message (ids are in get_conversation, under each message's attachments). " +
+        'Images come back as images you can see, text files as text, and other files (PDF, Word, zip…) as base64 data. ' +
+        `Files over ${MAX_INLINE_BYTES / 1048576} MB, or with as_link, come back as a download_url instead: fetch it with the same Authorization: Bearer token this server uses.`,
+      inputSchema: {
+        id: z.number().int(),
+        as_link: z.boolean().optional().describe('Only return the details and download link, not the file'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (a) => {
+      try {
+        // A file belongs to its message's mailbox. One not sent yet belongs to whoever uploaded it (as in the REST API).
+        const owner = get<{ thread_id: number | null; uploaded_by: number | null }>('SELECT thread_id, uploaded_by FROM attachments WHERE id = ?', a.id)
+        if (!owner) throw new AppError('File not found.', 404)
+        if (owner.thread_id) assertThread(user, owner.thread_id)
+        else if (owner.uploaded_by !== user.id && user.mailboxAccess !== 'all') throw new AppError('File not found.', 404)
+        const file = attachmentFile(a.id)
+        if (!file) throw new AppError('File not found.', 404)
+        const info = {
+          id: a.id,
+          filename: file.filename,
+          mime: file.mime,
+          size: file.size,
+          conversation_id: owner.thread_id ? (get<{ conversation_id: number }>('SELECT conversation_id FROM threads WHERE id = ?', owner.thread_id)?.conversation_id ?? null) : null,
+          download_url: `${config.appUrl}/api/attachments/${a.id}/${encodeURIComponent(file.filename)}?download`,
+        }
+        if (a.as_link || file.size > MAX_INLINE_BYTES) {
+          const note = a.as_link ? undefined : 'Too large to return here. Download it from download_url with your token.'
+          return ok({ ...info, note })
+        }
+        const head = ok(info).content[0]
+        const uri = info.download_url
+        if (IMAGE_MIME.has(file.mime)) return { content: [head, { type: 'image' as const, data: Buffer.from(file.data).toString('base64'), mimeType: file.mime }] }
+        if (TEXT_MIME.test(file.mime)) return { content: [head, { type: 'resource' as const, resource: { uri, mimeType: file.mime, text: new TextDecoder().decode(file.data) } }] }
+        return { content: [head, { type: 'resource' as const, resource: { uri, mimeType: file.mime, blob: Buffer.from(file.data).toString('base64') } }] }
+      } catch (err) {
+        return fail(err)
+      }
+    },
   )
 
   server.registerTool(
