@@ -164,6 +164,11 @@
     line-height: 1.6;
   }
 }
+/* Writing on a phone: as large as iOS's own mail apps, as in Help Scout's. */
+.composer-phone .prose-mail {
+  font-size: 18px;
+  line-height: 1.5;
+}
 /* A customer's signature, folded away until "⋯" is pressed. */
 .prose-mail.hide-signature .ansa-signature {
   display: none;
@@ -297,6 +302,11 @@
     transform: translateY(-8px);
   }
 }
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
 @keyframes spokes {
   to {
     transform: rotate(360deg);
@@ -315,7 +325,11 @@
 .animate-toast {
   animation: toast-in 0.18s ease-out;
 }
+.animate-sheet {
+  animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
 @media (prefers-reduced-motion: reduce) {
+  .animate-sheet,
   .animate-pop,
   .animate-fade,
   .animate-toast {
