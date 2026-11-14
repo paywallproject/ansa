@@ -67,8 +67,9 @@
 }
 
 @theme inline {
-  /* The device's own UI font, as Help Scout falls back to: San Francisco on Apple devices, Segoe UI on Windows. */
-  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* Inter, bundled with the app: a clean grotesk close to Help Scout's own font, the same on every device.
+     The device's UI font stands in while it loads. */
+  --font-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
@@ -150,10 +151,11 @@
 
 /* Rendered email and note bodies, and the editor's content. */
 .prose-mail {
-  /* Messages, read and written, look as Gmail shows them: Arial. Outgoing email uses the same. */
+  /* Messages, read and written, exactly as Gmail shows them: `font: small / 1.5 Arial` (small is 13px).
+     Outgoing email uses Arial too, so what you write looks like what the customer receives. */
   font-family: Arial, Helvetica, sans-serif;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--fg);
   overflow-wrap: anywhere;
 }

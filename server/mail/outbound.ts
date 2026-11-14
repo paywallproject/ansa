@@ -148,10 +148,10 @@ export async function testSmtp(smtp: SmtpSettings): Promise<void> {
   }
 }
 
-// The same as the app shows messages in, and as Gmail shows email: what you write is what they get.
+// Arial, as the app shows messages in. No size, spacing or colour, as Gmail sends email: the customer's mail app
+// shows it at its own default size, and in its own colours in dark mode.
 const FONT = 'Arial, Helvetica, sans-serif'
-export const wrapEmailHtml = (inner: string) =>
-  `<div style="font-family: ${FONT}; font-size: 14px; line-height: 1.55; color: #1f2328;">${inner}</div>`
+export const wrapEmailHtml = (inner: string) => `<div style="font-family: ${FONT};">${inner}</div>`
 
 export function newMessageId(mailboxEmail: string): string {
   const domain = mailboxEmail.split('@')[1] || 'ansa.local'

@@ -1402,11 +1402,11 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
           <div className="flex items-center gap-3 md:gap-2.5">
             <Avatar name={name} color={color} src={photo} size={36} className="md:hidden" />
             <button type="button" onClick={onToggle} aria-expanded={!folded} className="flex min-w-0 flex-1 items-baseline rounded text-left">
-              <span className="truncate text-[17px] font-semibold md:text-sm">{name}</span>
+              <span className="truncate text-[17px] font-semibold md:text-[15px]">{name}</span>
             </button>
             {thread.state === 'sending' && <span className="shrink-0 text-xs text-fg-3">Sending…</span>}
             {scheduled && <span className="shrink-0 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-fg">{thread.sendAt ? 'Scheduled' : 'On hold'}</span>}
-            <time className={cx('shrink-0 text-[13px] tabular-nums md:text-xs', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
+            <time className={cx('shrink-0 text-[13px] tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
               {messageDate(thread.createdAt)}
             </time>
             {((isCustomer && thread.via === 'email') || canDelete) && (
@@ -1452,7 +1452,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
             </button>
           ) : (
             (meta.length > 0 || how) && (
-              <div className={cx('mt-1 flex items-baseline gap-3 text-xs', isNote ? 'text-note-fg' : 'text-fg-3')}>
+              <div className={cx('mt-1 flex items-baseline gap-3 text-[13px]', isNote ? 'text-note-fg' : 'text-fg-3')}>
                 <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">
                   {meta.map((part, index) => (
                     <Fragment key={index}>
