@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clock, Mail, StickyNote } from 'lucide-react'
+import { Clock, Mail, StickyNote, X } from 'lucide-react'
 import { SendLaterDialog } from './SendLater'
 import { api, qs } from '../lib/api'
 import { canSee } from '../lib/access'
@@ -9,6 +9,8 @@ import { useDebounced, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Customer, Mailbox } from '../lib/types'
 import { Banner, Button, Field, Input, Modal, Select, cx } from '../ui'
 import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
+
+const splitEmails = (value: string) => value.split(/[,;\s]+/).filter(Boolean)
 
 export interface ComposePrefill {
   mailboxId?: number
@@ -24,6 +26,13 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
   const [email, setEmail] = useState(prefill.customerEmail ?? '')
   const [name, setName] = useState(prefill.customerName ?? '')
   const [subject, setSubject] = useState('')
+  // Cc and Bcc, for an email only: a logged call or chat sends nothing.
+  const [showCc, setShowCc] = useState(false)
+  const [showBcc, setShowBcc] = useState(false)
+  const [cc, setCc] = useState('')
+  const [bcc, setBcc] = useState('')
+  const sendsCc = kind === 'reply' && showCc
+  const sendsBcc = kind === 'reply' && showBcc
   const [error, setError] = useState<string | null>(null)
   const uploads = useUploads()
   const drop = useFileDrop(uploads.add)
@@ -54,6 +63,8 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
         // Sent: nothing more to do until the customer answers, which reopens it.
         status: kind === 'reply' ? 'closed' : 'active',
         attachmentIds: uploads.ids,
+        cc: sendsCc ? splitEmails(cc) : [],
+        bcc: sendsBcc ? splitEmails(bcc) : [],
         ...(chooseAssignee ? { assigneeId } : {}),
       }),
     onSuccess: ({ conversation }) => {
@@ -72,6 +83,11 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
       setError(kind === 'reply' ? 'Write your message before sending.' : 'Write the note before saving.')
       return false
     }
+    const wrong = [...(sendsCc ? splitEmails(cc) : []), ...(sendsBcc ? splitEmails(bcc) : [])].find((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))
+    if (wrong) {
+      setError(`"${wrong}" is not an email address.`)
+      return false
+    }
     if (!subject.trim()) {
       setError('Add a subject.')
       return false
@@ -82,7 +98,20 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
     if (ready()) create.mutate(undefined)
   }
   const editor = useRichEditor({ placeholder: kind === 'reply' ? 'Write your message' : 'What happened? For example, notes from a phone call', onSubmit: submit })
-  const exact = suggestions.data?.some((c) => c.emails.some((e) => e.toLowerCase() === email.trim().toLowerCase()))
+  const existing = suggestions.data?.find((c) => c.emails.some((e) => e.toLowerCase() === email.trim().toLowerCase()))
+  const addressButton = 'h-7 rounded-md px-1.5 text-[13px] font-medium text-fg-3 transition-colors hover:bg-sunken hover:text-fg'
+  const addressRow = (label: 'Cc' | 'Bcc', value: string, onChange: (value: string) => void, onRemove: () => void) => (
+    <Field label={label}>
+      {(id) => (
+        <div className="relative">
+          <Input id={id} autoFocus={!value} value={value} onChange={(e) => onChange(e.target.value)} placeholder="name@example.com, another@example.com" className="pr-10" />
+          <button type="button" aria-label={`Remove ${label}`} onClick={onRemove} className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-sunken hover:text-fg">
+            <X className="size-3.5" aria-hidden />
+          </button>
+        </div>
+      )}
+    </Field>
+  )
 
   return (
     <Modal
@@ -180,7 +209,34 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
           <Field label="Customer email">
             {(id) => (
               <>
-                <Input id={id} type="email" required autoFocus={!prefill.customerEmail} list={`${id}-list`} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@example.com" />
+                <div className="relative">
+                  <Input
+                    id={id}
+                    type="email"
+                    required
+                    autoFocus={!prefill.customerEmail}
+                    list={`${id}-list`}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="jane@example.com"
+                    className={kind === 'reply' && !(showCc && showBcc) ? 'pr-20' : undefined}
+                  />
+                  {/* Cc and Bcc sit inside the address, as in Gmail, and open a row each. */}
+                  {kind === 'reply' && (
+                    <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center">
+                      {!showCc && (
+                        <button type="button" className={addressButton} onClick={() => setShowCc(true)}>
+                          Cc
+                        </button>
+                      )}
+                      {!showBcc && (
+                        <button type="button" className={addressButton} onClick={() => setShowBcc(true)}>
+                          Bcc
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <datalist id={`${id}-list`}>
                   {suggestions.data?.map((c) => (
                     <option key={c.id} value={c.email}>
@@ -191,10 +247,30 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
               </>
             )}
           </Field>
-          <Field label="Customer name" hint={exact ? 'Existing customer. Leave blank to keep their name.' : undefined}>
-            {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} placeholder="Optional" />}
+          {/* An existing customer's name shows as the placeholder, not as a line under the box, so the two boxes
+              stay level and nothing below jumps when the address matches someone. */}
+          <Field label="Customer name">
+            {(id) => (
+              <Input
+                id={id}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={existing ? `${existing.name || 'Existing customer'} (leave blank to keep)` : 'Optional'}
+                title={existing ? 'Existing customer. Leave blank to keep their name.' : undefined}
+              />
+            )}
           </Field>
         </div>
+        {sendsCc &&
+          addressRow('Cc', cc, setCc, () => {
+            setShowCc(false)
+            setCc('')
+          })}
+        {sendsBcc &&
+          addressRow('Bcc', bcc, setBcc, () => {
+            setShowBcc(false)
+            setBcc('')
+          })}
         <Field label="Subject">{(id) => <Input id={id} required autoFocus={!!prefill.customerEmail} value={subject} onChange={(e) => setSubject(e.target.value)} />}</Field>
         <div {...drop.handlers} className={cx('rounded-lg border border-line-strong focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20', drop.over && 'border-accent ring-3 ring-accent/20')}>
           <EditorArea editor={editor} className="max-h-64 min-h-32 px-3 py-2.5" />
