@@ -148,9 +148,9 @@ export async function testSmtp(smtp: SmtpSettings): Promise<void> {
   }
 }
 
-// Arial, as the app shows messages in. No size, spacing or colour, as Gmail sends email: the customer's mail app
-// shows it at its own default size, and in its own colours in dark mode.
-const FONT = 'Arial, Helvetica, sans-serif'
+// Exactly as Help Scout sends email: `font-family: sans-serif` and nothing else. The customer's mail app picks its
+// own sans-serif (Arial or Helvetica), default size and colours, dark mode included.
+const FONT = 'sans-serif'
 export const wrapEmailHtml = (inner: string) => `<div style="font-family: ${FONT};">${inner}</div>`
 
 export function newMessageId(mailboxEmail: string): string {
