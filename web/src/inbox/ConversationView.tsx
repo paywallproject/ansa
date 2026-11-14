@@ -230,7 +230,7 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
         {/* On a phone the email gets the screen: the header's controls live in a sheet opened from the card below. */}
         <div className="max-md:hidden">{header}</div>
         <LightboxProvider images={images}>
-          <ThreadList conversation={conversation} composing={composing} onCompose={openComposer} />
+          <ThreadList key={conversation.id} conversation={conversation} composing={composing} onCompose={openComposer} />
         </LightboxProvider>
         {/* Phone: a summary card and an action bar along the bottom, as in Help Scout's app. */}
         {!composing && (
@@ -1024,31 +1024,85 @@ function dayLabel(ts: number): string {
 function ThreadList({ conversation, composing, onCompose }: { conversation: Conversation; composing: boolean; onCompose: (mode: 'reply' | 'note') => void }) {
   const scroller = useRef<HTMLDivElement>(null)
   const lastId = conversation.threads[conversation.threads.length - 1]?.id
-  // Every message starts open. Click a name to fold one away; the choice resets when another conversation opens.
-  const [folded, setFolded] = useState<Set<number>>(() => new Set())
+  // As in Gmail, what the team has not answered yet starts open (or just the newest message when everything is
+  // answered), and older messages fold to a line. A failed or scheduled reply stays open: it needs a decision.
+  // Click a name to open or fold one; the choices reset when another conversation opens.
+  const defaultOpen = useMemo(() => {
+    const messages = conversation.threads.filter((t) => t.type !== 'event')
+    let answered = -1
+    messages.forEach((t, i) => {
+      if (t.type === 'reply' && (t.state === 'sent' || t.state === 'sending')) answered = i
+    })
+    const open = new Set(messages.slice(answered + 1).map((t) => t.id))
+    if (open.size === 0 && messages.length > 0) open.add(messages[messages.length - 1].id)
+    for (const t of messages) if (t.state === 'failed' || t.state === 'scheduled') open.add(t.id)
+    return open
+  }, [conversation.threads])
+  const [toggled, setToggled] = useState<Map<number, boolean>>(() => new Map())
+  const isOpen = (id: number) => toggled.get(id) ?? defaultOpen.has(id)
+  // A long run of folded messages shrinks further: the first and last stay, the ones between become one
+  // "N older messages" line, as in Gmail. Clicking it shows them all, still folded.
+  const [showAll, setShowAll] = useState(false)
+  const { hidden, pills } = useMemo(() => {
+    const hidden = new Set<number>()
+    const pills = new Map<number, number>() // the id of the first hidden thread → how many messages are hidden
+    if (showAll) return { hidden, pills }
+    const threads = conversation.threads
+    let run: number[] = []
+    const flush = () => {
+      if (run.length >= 4) {
+        for (let i = run[1]; i < run[run.length - 1]; i++) hidden.add(threads[i].id)
+        pills.set(threads[run[1]].id, run.length - 2)
+      }
+      run = []
+    }
+    threads.forEach((t, i) => {
+      if (t.type === 'event') return
+      if (toggled.get(t.id) ?? defaultOpen.has(t.id)) flush()
+      else run.push(i)
+    })
+    flush()
+    return { hidden, pills }
+  }, [conversation.threads, defaultOpen, toggled, showAll])
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
     // Writing a reply: the end, so the newest message sits just above the composer.
     const messages = el.querySelectorAll<HTMLElement>('[data-message]')
-    const newest = messages[messages.length - 1]
+    const newest = el.querySelector<HTMLElement>('[data-message][data-open]') ?? messages[messages.length - 1]
     if (composing || !newest) {
       el.scrollTop = el.scrollHeight
       return
     }
-    // Reading: the start of the newest message, as Help Scout does, not its signature at the bottom. A short
+    // Reading: the start of the first open message (the newest one, unless the customer wrote more than once since
+    // the last reply), as Help Scout does, not its signature at the bottom. A short
     // message cannot scroll that far, so it still ends up at the bottom as before.
     el.scrollTop = newest.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12
   }, [conversation.id, lastId, composing])
 
+  let previous: Thread | undefined
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {/* On a phone, messages are cards on a light grey background, as in Help Scout's app. */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-3 md:bg-transparent md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
         <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-4 md:pb-28')}>
-          {conversation.threads.map((thread, index) => {
-            const newDay = index === 0 || dayKey(thread.createdAt) !== dayKey(conversation.threads[index - 1].createdAt)
+          {conversation.threads.map((thread) => {
+            const pill = pills.get(thread.id)
+            if (hidden.has(thread.id) && !pill) return null
+            if (pill)
+              return (
+                <li key={thread.id} className="flex items-center gap-3 md:px-14">
+                  <span className="h-px flex-1 bg-line" aria-hidden />
+                  <button type="button" onClick={() => setShowAll(true)} className="h-7 shrink-0 rounded-full border border-line bg-surface px-3 text-xs font-medium text-fg-2 transition-colors hover:bg-sunken hover:text-fg">
+                    {pill} older {pill === 1 ? 'message' : 'messages'}
+                  </button>
+                  <span className="h-px flex-1 bg-line" aria-hidden />
+                </li>
+              )
+            // A day line when the day changes from the message shown above, hidden ones aside.
+            const newDay = previous === undefined || dayKey(thread.createdAt) !== dayKey(previous.createdAt)
+            previous = thread
             return (
               <Fragment key={thread.id}>
                 {newDay && (
@@ -1063,15 +1117,8 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
                 ) : (
                   <Message
                     thread={thread}
-                    folded={folded.has(thread.id)}
-                    onToggle={() =>
-                      setFolded((set) => {
-                        const next = new Set(set)
-                        if (next.has(thread.id)) next.delete(thread.id)
-                        else next.add(thread.id)
-                        return next
-                      })
-                    }
+                    folded={!isOpen(thread.id)}
+                    onToggle={() => setToggled((map) => new Map(map).set(thread.id, !isOpen(thread.id)))}
                   />
                 )}
               </Fragment>
@@ -1378,7 +1425,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const how = isNote ? 'Note' : scheduled ? 'Not sent yet' : sentStatus ? (STATUS_LABEL[sentStatus] ?? '') : ''
 
   return (
-    <li className="relative md:px-14" data-message>
+    <li className="relative md:px-14" data-message data-open={folded ? undefined : ''}>
       {original && <OriginalDialog thread={thread} onClose={() => setOriginal(false)} />}
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
