@@ -617,3 +617,28 @@ test('show original: encryption is read from the hop where the email reached you
   assert.equal(deliveredOverTls(['from mail.sender.test by mx.provider.test with Microsoft SMTP Server id 15.20']), null)
   assert.equal(deliveredOverTls([]), null)
 })
+
+test('show original: MXroute (Exim) mail reads as encrypted, signed by gmail.com, DKIM and DMARC passing', async () => {
+  const { deliveryDetails } = await import('../mail/original.ts')
+  const h = (name: string, value: string) => ({ name, value })
+  const details = deliveryDetails([
+    h('Return-Path', '<tylerchannell@gmail.com>'),
+    h('Delivered-To', 'support@paywallproject.com'),
+    h('Received', 'from fusion.mxrouting.net by fusion.mxrouting.net with LMTP id AYMsN9wA+Gq3ABYAEL6zoA (envelope-from <tylerchannell@gmail.com>) for <support@paywallproject.com>; Sat, 14 Nov 2026 06:34:04 +0000'),
+    h('Received', 'from mail-yx1-f43.google.com ([74.125.224.43])by fusion.mxrouting.net with esmtps (TLS1.3:TLS_AES_256_GCM_SHA384:256 encrypted) id 1xS7Ku-00000006D8F-2s3X (envelope-from <tylerchannell@gmail.com>) for @; Sat, 14 Nov 2026 06:34:04 +0000; Sat, 14 Nov 2026 06:34:04 +0000'),
+    h('Received', 'by mail-yx1-f43.google.com with SMTP id 956f58d0204a3-67921b515a7so1852976d50.2 for <support@paywallproject.com>; Fri, 13 Nov 2026 22:34:04 -0800 (PST)'),
+    h('ARC-Authentication-Results', 'i=1; mx.google.com; arc=none'),
+    // A sender could write its own X-DKIM: only the last one, which Exim appends, counts.
+    h('X-DKIM', "signer='bank.test' status='pass' reason=''"),
+    h('From', 'Tyler <tylerchannell@gmail.com>'),
+    h('X-DKIM', "signer='gmail.com' status='pass' reason=''"),
+    h('DKIMCheck', 'Server passes DKIM test, 0 Spam score'),
+    h('X-DMARC-Status', 'pass'),
+  ])
+  assert.deepEqual(details, {
+    mailedBy: 'gmail.com',
+    signedBy: ['gmail.com'],
+    tls: true,
+    checks: [{ name: 'DKIM', result: 'pass' }, { name: 'DMARC', result: 'pass' }],
+  })
+})

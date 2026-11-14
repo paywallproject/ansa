@@ -109,6 +109,23 @@ export function deliveryDetails(headers: Header[]): DeliveryDetails {
     if (result) checks.push({ name, result: result.toLowerCase() })
   }
 
+  // Exim (cPanel, DirectAdmin, MXroute) writes no Authentication-Results: it appends X-DKIM and
+  // X-DMARC-Status at the end of the headers, so only the last of each is its own.
+  if (!auth) {
+    const last = (name: string) => headers.findLast((h) => h.name.toLowerCase() === name)?.value ?? null
+    const spf = /^\s*([a-z]+)/i.exec(first('received-spf') ?? '')?.[1]
+    if (spf) checks.push({ name: 'SPF', result: spf.toLowerCase() })
+    const dkim = last('x-dkim')
+    const dkimStatus = dkim && /status='?([a-z]+)/i.exec(dkim)?.[1]?.toLowerCase()
+    if (dkimStatus) {
+      checks.push({ name: 'DKIM', result: dkimStatus })
+      const signer = /signer='?([^'\s]+)/i.exec(dkim!)?.[1]
+      if (dkimStatus === 'pass' && signer) signedBy.add(signer.toLowerCase())
+    }
+    const dmarc = /^\s*([a-z]+)/i.exec(last('x-dmarc-status') ?? '')?.[1]
+    if (dmarc) checks.push({ name: 'DMARC', result: dmarc.toLowerCase() })
+  }
+
   const tls = deliveredOverTls(headers.filter((h) => h.name.toLowerCase() === 'received').map((h) => h.value))
 
   return { mailedBy, signedBy: [...signedBy], tls, checks }
