@@ -74,10 +74,10 @@ function CustomerList() {
                 <th scope="col" className="hidden px-3 py-2.5 font-medium sm:table-cell">
                   Company
                 </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                <th scope="col" className="px-3 py-2.5 text-right font-medium whitespace-nowrap">
                   Conversations
                 </th>
-                <th scope="col" className="hidden px-5 py-2.5 text-right font-medium sm:table-cell">
+                <th scope="col" className="hidden px-5 py-2.5 text-right font-medium whitespace-nowrap sm:table-cell">
                   Last message
                 </th>
               </tr>
@@ -96,7 +96,7 @@ function CustomerList() {
                   </td>
                   <td className="hidden px-3 py-2.5 text-fg-2 sm:table-cell">{c.company || <span className="text-fg-3">–</span>}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{c.conversationCount ?? 0}</td>
-                  <td className="hidden px-5 py-2.5 text-right text-fg-3 sm:table-cell">{c.lastSeenAt ? ago(c.lastSeenAt) : '–'}</td>
+                  <td className="hidden px-5 py-2.5 text-right whitespace-nowrap text-fg-3 sm:table-cell">{c.lastSeenAt ? ago(c.lastSeenAt) : '–'}</td>
                 </tr>
               ))}
             </tbody>

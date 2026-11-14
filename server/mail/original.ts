@@ -1,0 +1,99 @@
+import sanitizeHtml from 'sanitize-html'
+
+/**
+ * "Show original": the email as its sender designed it, and where it came from, as in Gmail.
+ *
+ * The conversation view strips mail down to plain formatting so every message reads alike. Here the
+ * layout survives: tables, colours, inline styles and <style> blocks. The app shows the result in a
+ * sandboxed frame with scripts off, and the page's own Content Security Policy still applies inside it.
+ */
+
+const DESIGNED_TAGS = [
+  'a', 'abbr', 'address', 'article', 'aside', 'b', 'bdi', 'bdo', 'big', 'blockquote', 'br', 'caption', 'center', 'cite', 'code',
+  'col', 'colgroup', 'dd', 'del', 'details', 'dfn', 'div', 'dl', 'dt', 'em', 'figcaption', 'figure', 'font', 'footer', 'h1', 'h2',
+  'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'i', 'img', 'ins', 'kbd', 'li', 'main', 'mark', 'nav', 'ol', 'p', 'picture', 'pre', 'q',
+  's', 'samp', 'section', 'small', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'tfoot',
+  'th', 'thead', 'time', 'tr', 'tt', 'u', 'ul', 'var', 'wbr',
+]
+
+const LAYOUT_ATTRIBUTES = [
+  'style', 'class', 'id', 'align', 'valign', 'width', 'height', 'bgcolor', 'background', 'border', 'cellpadding', 'cellspacing',
+  'color', 'face', 'size', 'dir', 'lang', 'title', 'role', 'colspan', 'rowspan', 'nowrap', 'hspace', 'vspace', 'frame', 'rules',
+  'span', 'start', 'type', 'aria-hidden', 'aria-label',
+]
+
+/** Keep the email's own design, without anything that runs, submits or embeds another page. */
+export function designedHtml(html: string, inlineImages: { contentId: string; url: string }[] = []): string {
+  let source = html
+  for (const image of inlineImages) {
+    // Match the whole reference so "cid:img1" does not also rewrite "cid:img10".
+    const ref = new RegExp(`cid:${image.contentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=["'\\s>)])`, 'gi')
+    source = source.replace(ref, image.url)
+  }
+  return sanitizeHtml(source, {
+    allowedTags: DESIGNED_TAGS,
+    allowVulnerableTags: true, // <style>: harmless here, since nothing in the frame can run
+    allowedAttributes: {
+      '*': LAYOUT_ATTRIBUTES,
+      a: ['href', 'name', 'target', 'rel'],
+      img: ['src', 'srcset', 'alt'],
+      ol: ['start', 'type'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+    allowProtocolRelative: false,
+    nonTextTags: ['script', 'textarea', 'option', 'noscript', 'title', 'select', 'button', 'iframe', 'object', 'svg', 'math'],
+    transformTags: {
+      // The <body> often carries the background colour: keep it on a wrapper.
+      body: (_tagName, attribs) => ({ tagName: 'div', attribs }),
+      a: (tagName, attribs) => ({ tagName, attribs: { ...attribs, target: '_blank', rel: 'noopener noreferrer nofollow' } }),
+    },
+  }).trim()
+}
+
+export interface DeliveryDetails {
+  /** The domain bounces go back to (Return-Path), Gmail's "mailed-by". */
+  mailedBy: string | null
+  /** Domains whose DKIM signature checked out, Gmail's "signed-by". */
+  signedBy: string[]
+  /** Whether the last hop reached your mail server over TLS. Null when the headers do not say. */
+  tls: boolean | null
+  /** SPF, DKIM and DMARC results from your mail server, when it recorded them. */
+  checks: { name: 'SPF' | 'DKIM' | 'DMARC'; result: string }[]
+}
+
+type Header = { name: string; value: string }
+
+const domainOf = (address: string) => address.replace(/^.*?</, '').replace(/>.*$/, '').trim().split('@').pop()?.toLowerCase() || null
+
+/**
+ * Where the email came from, from its headers. Only the topmost Authentication-Results header and the
+ * topmost hop that names a sending server count: your own mail server adds those, while lower ones could
+ * be written by anyone.
+ */
+export function deliveryDetails(headers: Header[]): DeliveryDetails {
+  const first = (name: string) => headers.find((h) => h.name.toLowerCase() === name)?.value ?? null
+  const auth = first('authentication-results') ?? ''
+  // Gmail and others stamp internal hops first ("Received: by 2002:…"): the hop from the sender's server names it with "from".
+  const received = headers.find((h) => h.name.toLowerCase() === 'received' && /^\s*from\s/i.test(h.value))?.value ?? null
+
+  const returnPath = first('return-path')
+  const mailFrom = /smtp\.mailfrom=([^\s;]+)/i.exec(auth)?.[1]
+  const mailedBy = (returnPath && returnPath.includes('@') ? domainOf(returnPath) : null) ?? (mailFrom ? domainOf(mailFrom) : null)
+
+  const signedBy = new Set<string>()
+  for (const match of auth.matchAll(/dkim=pass\b([^;]*)/gi)) {
+    const d = /header\.d=([^\s;]+)/i.exec(match[1])?.[1] ?? /header\.i=@?([^\s;]+)/i.exec(match[1])?.[1]
+    if (d) signedBy.add(domainOf(d.includes('@') ? d : `@${d}`)!)
+  }
+
+  const checks: DeliveryDetails['checks'] = []
+  for (const name of ['SPF', 'DKIM', 'DMARC'] as const) {
+    const result = new RegExp(`\\b${name}=([a-z]+)`, 'i').exec(auth)?.[1]
+    if (result) checks.push({ name, result: result.toLowerCase() })
+  }
+
+  const tls = received ? /\bESMTPS\b|\bESMTPSA\b|\bTLS ?v?1|\bversion=TLS|\bcipher=/i.test(received) || (/\bwith (E?SMTP|LMTP)A?\b/i.test(received) ? false : null) : null
+
+  return { mailedBy, signedBy: [...signedBy], tls, checks }
+}

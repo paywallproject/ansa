@@ -20,6 +20,7 @@ import { agentActive, allPresence, leavePresence, subscribe, touchPresence, view
 import { ASSIGN_AFTER_REPLY, explainMailError, loginUser, testSmtp, type MailboxRow } from './mail/outbound.ts'
 import { restartMailbox, syncMailboxNow, testImap } from './mail/imap.ts'
 import { cleanHtml, htmlToText } from './mail/html.ts'
+import { deliveryDetails, designedHtml } from './mail/original.ts'
 import { simpleParser } from 'mailparser'
 import {
   addNote,
@@ -787,15 +788,22 @@ api.get('/threads/:id/original', async (c) => {
   assertThread(c.get('user'), id)
   const t = get<{ raw_key: string | null; body_html: string; body_full_html: string | null; type: string }>('SELECT raw_key, body_html, body_full_html, type FROM threads WHERE id = ?', id)!
   const raw = t.raw_key ? blobs.get(t.raw_key) : null
-  if (!raw) return c.json({ available: false, text: htmlToText(t.body_full_html || t.body_html), source: null, headers: [] })
+  const stored = t.body_full_html || t.body_html
+  if (!raw) return c.json({ available: false, text: htmlToText(stored), html: designedHtml(stored), source: null, headers: [], details: null })
   const source = new TextDecoder().decode(raw)
   const mail = await simpleParser(Buffer.from(raw), { skipImageLinks: true })
   const headers = mail.headerLines.map((h) => {
     const at = h.line.indexOf(':')
     return { name: at > 0 ? h.line.slice(0, at) : h.key, value: (at > 0 ? h.line.slice(at + 1) : h.line).replace(/\r?\n[ \t]+/g, ' ').trim() }
   })
-  const text = mail.text?.trim() || (mail.html ? htmlToText(cleanHtml(mail.html)) : '') || htmlToText(t.body_full_html || t.body_html)
-  return c.json({ available: true, text, source, headers })
+  const text = mail.text?.trim() || (mail.html ? htmlToText(cleanHtml(mail.html)) : '') || htmlToText(stored)
+  // Pictures inside the email point at the copies kept when it arrived.
+  const inlineImages = all<{ id: number; filename: string; content_id: string }>('SELECT id, filename, content_id FROM attachments WHERE thread_id = ? AND content_id IS NOT NULL', id).map((a) => ({
+    contentId: a.content_id,
+    url: `/api/attachments/${a.id}/${encodeURIComponent(a.filename)}`,
+  }))
+  const html = designedHtml(mail.html || mail.textAsHtml || stored, inlineImages)
+  return c.json({ available: true, text, html, source, headers, details: deliveryDetails(headers) })
 })
 
 api.get('/threads/:id/original.eml', (c) => {
