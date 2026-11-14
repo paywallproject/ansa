@@ -66,16 +66,32 @@ type Header = { name: string; value: string }
 
 const domainOf = (address: string) => address.replace(/^.*?</, '').replace(/>.*$/, '').trim().split('@').pop()?.toLowerCase() || null
 
+/** A hop inside your own mail provider: delivery to the mailbox (LMTP), a hand-off from localhost or a private address, or one with no sender at all. */
+const INTERNAL_HOP = /^(?!\s*from\s)|\bwith (LMTPS?A?|local|HTTPS?|IMAP)\b|\blocalhost\b|\[(127\.|::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|f[cd][0-9a-f]{2}:)/i
+const TLS_HOP = /\bE?SMTPS(A)?\b|\bTLS ?v?1|\bversion=TLS|\bcipher=|Google Transport Security/i
+const PLAIN_HOP = /\bwith E?SMTPA?\b/i
+
+/**
+ * Whether the email reached your mail provider encrypted. Received headers are read newest first: hops
+ * inside your provider are skipped, and the first hop that says how it was carried decides. Null when
+ * none says, so Ansa never warns on a guess.
+ */
+export function deliveredOverTls(received: string[]): boolean | null {
+  for (const hop of received.slice(0, 8)) {
+    if (INTERNAL_HOP.test(hop)) continue
+    if (TLS_HOP.test(hop)) return true
+    if (PLAIN_HOP.test(hop)) return false
+  }
+  return null
+}
+
 /**
  * Where the email came from, from its headers. Only the topmost Authentication-Results header and the
- * topmost hop that names a sending server count: your own mail server adds those, while lower ones could
- * be written by anyone.
+ * newest hops count: your own mail provider adds those, while lower ones could be written by anyone.
  */
 export function deliveryDetails(headers: Header[]): DeliveryDetails {
   const first = (name: string) => headers.find((h) => h.name.toLowerCase() === name)?.value ?? null
   const auth = first('authentication-results') ?? ''
-  // Gmail and others stamp internal hops first ("Received: by 2002:…"): the hop from the sender's server names it with "from".
-  const received = headers.find((h) => h.name.toLowerCase() === 'received' && /^\s*from\s/i.test(h.value))?.value ?? null
 
   const returnPath = first('return-path')
   const mailFrom = /smtp\.mailfrom=([^\s;]+)/i.exec(auth)?.[1]
@@ -93,7 +109,7 @@ export function deliveryDetails(headers: Header[]): DeliveryDetails {
     if (result) checks.push({ name, result: result.toLowerCase() })
   }
 
-  const tls = received ? /\bESMTPS\b|\bESMTPSA\b|\bTLS ?v?1|\bversion=TLS|\bcipher=/i.test(received) || (/\bwith (E?SMTP|LMTP)A?\b/i.test(received) ? false : null) : null
+  const tls = deliveredOverTls(headers.filter((h) => h.name.toLowerCase() === 'received').map((h) => h.value))
 
   return { mailedBy, signedBy: [...signedBy], tls, checks }
 }
