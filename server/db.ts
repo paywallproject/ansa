@@ -360,6 +360,14 @@ const migrations: string[] = [
   ALTER TABLE threads ADD COLUMN open_last_at INTEGER;
   ALTER TABLE threads ADD COLUMN open_last_agent TEXT;
   `,
+  `
+  -- The newest note, when it is the newest thing in the conversation: the inbox shows it instead of the last message.
+  ALTER TABLE conversations ADD COLUMN note_preview TEXT NOT NULL DEFAULT '';
+  UPDATE conversations SET note_preview = COALESCE((
+    SELECT CASE WHEN t.type = 'note' THEN substr(trim(replace(replace(replace(t.body_text, char(13), ' '), char(10), ' '), char(9), ' ')), 1, 180) ELSE '' END
+    FROM threads t WHERE t.conversation_id = conversations.id ORDER BY t.created_at DESC, t.id DESC LIMIT 1
+  ), '');
+  `,
 ]
 
 export function migrate() {

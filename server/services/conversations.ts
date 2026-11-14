@@ -79,6 +79,8 @@ function serialize(row: any, tags: { id: number; name: string; color: string }[]
     subject: (row.subject as string) || '(no subject)',
     status: row.status as Status,
     preview: row.preview as string,
+    /** The newest note, when nothing has been said since: the inbox shows it in place of the preview. */
+    notePreview: (row.note_preview as string) || '',
     source: row.source as string,
     customer: { id: row.customer_id as number, name: row.customer_name as string, email: row.customer_email as string, company: row.customer_company as string },
     assignee: row.assignee_id
@@ -389,7 +391,7 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
     if (assigneeGone) run('UPDATE conversations SET assignee_id = NULL WHERE id = ?', conversationId)
     run(
       `UPDATE conversations SET status = CASE WHEN status = 'spam' THEN 'spam' ELSE ? END, snoozed_until = NULL, closed_at = NULL, closed_by = NULL,
-         preview = ?, thread_count = thread_count + 1, last_customer_at = ?, waiting_since = COALESCE(waiting_since, ?), updated_at = ? WHERE id = ?`,
+         preview = ?, note_preview = '', thread_count = thread_count + 1, last_customer_at = ?, waiting_since = COALESCE(waiting_since, ?), updated_at = ? WHERE id = ?`,
       // With four statuses, an answer from the customer puts the conversation on our side. A first message stays "active".
       getWorkspace().fourStatuses && conv.thread_count > 0 ? 'waiting' : 'active',
       previewOf(text),
@@ -448,7 +450,7 @@ function assigneeAfterReply(current: number | null, mailbox: MailboxRow, input: 
 /** What a sent reply does to its conversation: status, assignee and the timers reports use. */
 function markReplied(conversationId: number, r: { status: Status; assignee: number | null; cc: string[]; text: string; at: number; closedBy: number | null }) {
   run(
-    `UPDATE conversations SET status = ?, assignee_id = ?, snoozed_until = NULL, cc = ?, preview = ?, thread_count = thread_count + 1,
+    `UPDATE conversations SET status = ?, assignee_id = ?, snoozed_until = NULL, cc = ?, preview = ?, note_preview = '', thread_count = thread_count + 1,
        last_agent_at = ?, first_reply_at = COALESCE(first_reply_at, ?), waiting_since = NULL, updated_at = ?,
        closed_at = CASE WHEN ? = 'closed' THEN ? ELSE NULL END, closed_by = CASE WHEN ? = 'closed' THEN ? ELSE NULL END
      WHERE id = ?`,
@@ -679,6 +681,14 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
     )
     attach(id, conversationId, input.attachmentIds)
     run('UPDATE conversations SET thread_count = thread_count + 1, updated_at = ? WHERE id = ?', at, conversationId)
+    // The inbox shows the note, unless an imported note is older than a message already there.
+    run(
+      `UPDATE conversations SET note_preview = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE conversation_id = ? AND type != 'note' AND created_at > ?)`,
+      previewOf(text) || 'Attached a file',
+      conversationId,
+      conversationId,
+      at,
+    )
     if (actor.userId) run(`DELETE FROM drafts WHERE conversation_id = ? AND user_id = ? AND kind = 'note'`, conversationId, actor.userId)
     reindex(conversationId)
     return id
@@ -1009,6 +1019,9 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
   const files = all<{ storage_key: string }>('SELECT storage_key FROM attachments WHERE thread_id = ?', threadId).map((f) => f.storage_key)
   const mailboxId = tx(() => {
     run('DELETE FROM threads WHERE id = ?', threadId) // mentions and attachments go with it
+    // The inbox shows the note before it, if that is now the newest thing in the conversation.
+    const newest = get<{ type: string; body_text: string }>('SELECT type, body_text FROM threads WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', t.conversation_id)
+    run('UPDATE conversations SET note_preview = ? WHERE id = ?', newest?.type === 'note' ? previewOf(newest.body_text) || 'Attached a file' : '', t.conversation_id)
     run(
       `UPDATE conversations SET thread_count = MAX(0, thread_count - 1),
          has_attachments = EXISTS (SELECT 1 FROM attachments a JOIN threads th ON th.id = a.thread_id WHERE th.conversation_id = ?1)
