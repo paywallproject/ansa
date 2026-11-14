@@ -443,7 +443,9 @@ export function Shell() {
     root.classList.toggle('reading', inConversation)
     // In a mailbox on a phone the list's own header is the top bar (as in Help Scout's app).
     root.classList.toggle('bare', !!current && !inConversation)
-    return () => root.classList.remove('reading', 'bare')
+    // In a mailbox the folder list runs down the left: the strips around a landscape phone match it (index.css).
+    root.classList.toggle('in-mailbox', !!current)
+    return () => root.classList.remove('reading', 'bare', 'in-mailbox')
   }, [inConversation, current])
   // Remembered so the logo and the home page come back to this mailbox.
   useEffect(() => {
