@@ -868,13 +868,18 @@ function snoozePresets(): { label: string; at: number; hint: string }[] {
   return presets.map((p) => ({ ...p, hint: fmt(p.at) }))
 }
 
-function SnoozeMenu({ snoozedUntil, onSnooze }: { snoozedUntil: number | null; onSnooze: (until: number | null) => void }) {
+type Trigger = Parameters<typeof Popover>[0]['trigger']
+
+/** Snooze: presets and a date. The list's selection bar passes its own button as `trigger`. */
+export function SnoozeMenu({ snoozedUntil, onSnooze, trigger }: { snoozedUntil: number | null; onSnooze: (until: number | null) => void; trigger?: Trigger }) {
   const [custom, setCustom] = useState('')
   return (
     <Popover
       align="end"
       width={256}
-      trigger={({ ref, ...props }) =>
+      trigger={
+        trigger ??
+        (({ ref, ...props }) =>
         snoozedUntil ? (
           <button ref={ref} type="button" {...props} className={cx(pill, 'border-transparent bg-accent-soft text-accent-fg hover:bg-accent-soft')}>
             <AlarmClock className="size-4" aria-hidden />
@@ -884,7 +889,7 @@ function SnoozeMenu({ snoozedUntil, onSnooze }: { snoozedUntil: number | null; o
           <button ref={ref} type="button" {...props} aria-label="Snooze" title="Snooze" className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line text-fg-2 transition-colors hover:bg-sunken aria-expanded:bg-sunken">
             <AlarmClock className="size-4" aria-hidden />
           </button>
-        )
+        ))
       }
     >
       {(close) => (
@@ -939,7 +944,8 @@ function SnoozeMenu({ snoozedUntil, onSnooze }: { snoozedUntil: number | null; o
   )
 }
 
-function TagMenu({ current, hiddenCount, onAdd, onRemove }: { current: string[]; hiddenCount: number; onAdd: (name: string) => void; onRemove: (name: string) => void }) {
+/** Find, add, remove or create tags. The list's selection bar passes its own button as `trigger`. */
+export function TagMenu({ current, hiddenCount, onAdd, onRemove, trigger }: { current: string[]; hiddenCount: number; onAdd: (name: string) => void; onRemove: (name: string) => void; trigger?: Trigger }) {
   const tags = useTags()
   const [filter, setFilter] = useState('')
   const clean = filter.trim().toLowerCase().replace(/\s+/g, '-')
@@ -949,13 +955,16 @@ function TagMenu({ current, hiddenCount, onAdd, onRemove }: { current: string[];
     <Popover
       width={230}
       onOpenChange={(open) => open && setFilter('')}
-      trigger={({ ref, ...props }) => (
+      trigger={
+        trigger ??
+        (({ ref, ...props }) => (
         <button ref={ref} type="button" {...props} aria-label="Add or remove tags" className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed border-line-strong px-2 text-xs font-medium text-fg-3 transition-colors hover:border-fg-3 hover:text-fg aria-expanded:border-fg-3 aria-expanded:text-fg">
           <TagIcon className="size-3" aria-hidden />
           <span className={cx(current.length > 0 && 'lg:hidden')}>{current.length > 0 ? current.length : 'Add tag'}</span>
           {current.length > 0 && <span className="hidden lg:inline">{hiddenCount > 0 ? `+${hiddenCount}` : 'Add tag'}</span>}
         </button>
-      )}
+        ))
+      }
     >
       {() => (
         <>

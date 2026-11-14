@@ -1,18 +1,19 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, SquareCheckBig, MessageCircle, Minus, Paperclip, Search, ShieldAlert, Trash2, UserRound, UserRoundCheck, X } from 'lucide-react'
+import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, SquareCheckBig, MessageCircle, Minus, Paperclip, Search, UserRoundCheck } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
 import { canSee } from '../lib/access'
-import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useUsers, useViewers } from '../lib/hooks'
+import { useDebounced, useDocumentTitle, useHotkeys, useLocalState, useMailboxes, useSession, useViewers } from '../lib/hooks'
 import type { ConversationSummary, Folder, Viewer } from '../lib/types'
-import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback, MenuDivider, MenuLabel } from '../ui'
+import { Avatar, Button, EmptyState, IconButton, Input, MenuItem, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { FOLDERS, useShell, visibleFolders } from '../Shell'
 import { Logo } from '../pages/Auth'
-import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
+import { workspace } from '../lib/workspace'
 import { ConversationView } from './ConversationView'
 import { SwipeRow } from './SwipeRow'
+import { SelectionBar, type BulkPayload } from './SelectionBar'
 
 type Sort = 'recent' | 'waiting' | 'oldest'
 const SORTS: Record<Sort, string> = { recent: 'Newest activity', waiting: 'Longest waiting', oldest: 'Oldest activity' }
@@ -37,7 +38,6 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const { user } = useSession()
   const { toast, confirm } = useFeedback()
   const mailboxes = useMailboxes()
-  const users = useUsers()
   const [searchParams, setSearchParams] = useSearchParams()
   const mailboxId = Number(params.mailboxId) || undefined
   const folder = (params.folder as Folder) || 'all'
@@ -92,10 +92,10 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   useHotkeys({ j: () => step(1), k: () => step(-1), escape: () => selectedId && !document.querySelector('[role=dialog], [role=menu]') && open(null) })
 
   const bulk = useMutation({
-    mutationFn: (payload: { patch?: Record<string, unknown>; delete?: boolean }) => api.post('/conversations/bulk', { ids: [...checked], ...payload }),
+    mutationFn: ({ keep: _keep, ...payload }: BulkPayload) => api.post('/conversations/bulk', { ids: [...checked], ...payload }),
     onSuccess: (_data, payload) => {
       toast(`${plural(checked.size, 'conversation')} ${payload.delete ? 'deleted' : 'updated'}`)
-      setChecked(new Set())
+      if (!payload.keep) setChecked(new Set())
       void client.invalidateQueries({ queryKey: ['conversations'] })
       void client.invalidateQueries({ queryKey: ['mailboxes'] })
       void client.invalidateQueries({ queryKey: ['conversation'] })
@@ -157,103 +157,18 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const toggleAll = () => setChecked(allChecked ? new Set() : new Set(items.map((c) => c.id)))
 
   return (
-    <section className="flex h-full flex-col" aria-label="Conversations">
-      {checked.size > 0 ? (
-        <div className="flex h-14 shrink-0 items-center gap-1.5 border-b border-accent/20 bg-accent-soft pr-3 pl-3 md:pr-4">
-          <button type="button" aria-label="Clear selection" onClick={() => setChecked(new Set())} className="flex size-8 shrink-0 items-center justify-center rounded-lg text-accent-fg transition-colors hover:bg-accent/10">
-            <X className="size-4" aria-hidden />
-          </button>
-          <span className="text-[13px] font-semibold whitespace-nowrap text-accent-fg">
-            <span className="tabular-nums">{checked.size}</span> selected
-          </span>
-          <div className="ml-auto flex items-center gap-1.5">
-            <Popover
-              align="end"
-              width={230}
-              trigger={({ ref, ...props }) => (
-                <button ref={ref} type="button" {...props} disabled={bulk.isPending} aria-label="Set status" className="flex h-8 items-center gap-1.5 rounded-lg bg-accent pr-2 pl-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(34,31,92,0.25)] transition-colors hover:bg-accent-hover disabled:opacity-60">
-                  Status
-                  <ChevronDown className="size-3.5 opacity-80" aria-hidden />
-                </button>
-              )}
-            >
-              {(close) => (
-                <>
-                  <MenuLabel>Set status to</MenuLabel>
-                  {statusOptions().map((status) => (
-                    <MenuItem
-                      key={status}
-                      icon={<span className={cx('size-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />}
-                      onSelect={() => {
-                        close()
-                        bulk.mutate({ patch: { status } })
-                      }}
-                    >
-                      {STATUS_LABEL[status]}
-                    </MenuItem>
-                  ))}
-                </>
-              )}
-            </Popover>
-            <Popover
-              align="end"
-              width={230}
-              trigger={({ ref, ...props }) => (
-                <button ref={ref} type="button" {...props} disabled={bulk.isPending} aria-label="Assign" className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/25 bg-surface pr-2 pl-2.5 text-[13px] font-medium text-fg transition-colors hover:border-accent disabled:opacity-60">
-                  <UserRoundCheck className="size-4 text-fg-2" aria-hidden />
-                  <span className="hidden sm:inline">Assign</span>
-                  <ChevronDown className="size-3.5 opacity-60" aria-hidden />
-                </button>
-              )}
-            >
-              {(close) => (
-                <>
-                  <MenuLabel>Assign to</MenuLabel>
-                  {(users.data ?? [])
-                    .filter((u) => !u.disabled && canSee(u, mailboxId))
-                    // Yourself first: it is the most common choice.
-                    .sort((x, y) => Number(y.id === user.id) - Number(x.id === user.id))
-                    .map((u) => (
-                      <MenuItem
-                        key={u.id}
-                        icon={<Avatar name={u.name} color={u.color} src={u.avatarUrl} size={20} />}
-                        onSelect={() => {
-                          close()
-                          bulk.mutate({ patch: { assigneeId: u.id } })
-                        }}
-                      >
-                        {u.name} {u.id === user.id && <span className="ml-1 text-fg-3">you</span>}
-                      </MenuItem>
-                    ))}
-                  <MenuDivider />
-                  <MenuItem
-                    icon={
-                      <span className="flex size-5 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-3">
-                        <UserRound className="size-3" aria-hidden />
-                      </span>
-                    }
-                    onSelect={() => {
-                      close()
-                      bulk.mutate({ patch: { assigneeId: null } })
-                    }}
-                  >
-                    Unassigned
-                  </MenuItem>
-                </>
-              )}
-            </Popover>
-            <span className="mx-1.5 hidden h-5 w-px bg-accent/25 sm:block" aria-hidden />
-            <button type="button" disabled={bulk.isPending} onClick={() => bulk.mutate({ patch: { status: 'spam' } })} aria-label="Mark as spam" className="flex h-8 items-center gap-1.5 rounded-lg pr-2.5 pl-2 text-[13px] font-medium text-fg-2 transition-colors hover:bg-accent/10 hover:text-fg disabled:opacity-60">
-              <ShieldAlert className="size-4" aria-hidden />
-              <span className="hidden sm:inline">Spam</span>
-            </button>
-            <button type="button" disabled={bulk.isPending} onClick={() => void bulkDelete()} aria-label="Delete" className="flex h-8 items-center gap-1.5 rounded-lg pr-2.5 pl-2 text-[13px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-60">
-              <Trash2 className="size-4" aria-hidden />
-              <span className="hidden sm:inline">Delete</span>
-            </button>
-          </div>
-        </div>
-      ) : (
+    <section className="relative flex h-full flex-col" aria-label="Conversations">
+      {checked.size > 0 && (
+        <SelectionBar
+          selected={items.filter((c) => checked.has(c.id))}
+          mailboxId={mailboxId}
+          pending={bulk.isPending}
+          onBulk={(payload) => !bulk.isPending && bulk.mutate(payload)}
+          onDelete={() => void bulkDelete()}
+          onClear={() => setChecked(new Set())}
+        />
+      )}
+      {(
         <div className="flex h-11 shrink-0 items-center gap-2 px-2 md:h-14 md:border-b md:border-line md:px-5">
           {/* Phone: the logo opens the drawer (inboxes, search, settings), as in Help Scout's app. */}
           {!search && (

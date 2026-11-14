@@ -9,6 +9,9 @@ import { Avatar, Banner, Button, Field, IconButton, Input, Modal, useFeedback, c
 import { useShell } from '../Shell'
 import { STATUS_DOT } from '../lib/workspace'
 
+/** How many of the customer's conversations the panel lists before "View all". */
+const SHOWN = 6
+
 const StatusDot = ({ status, className }: { status: string; className?: string }) => <span className={`size-2 shrink-0 rounded-full ${STATUS_DOT[status] ?? 'bg-fg-3'} ${className ?? ''}`} aria-hidden />
 
 interface AppPanel {
@@ -152,40 +155,44 @@ export function CustomerPanel({ conversation }: { conversation: Conversation }) 
       <section className="rounded-xl border border-line bg-surface p-4">
         <div className="flex h-5 items-center">
           <h3 className="font-semibold">Conversations</h3>
-          <span className="ml-1.5 text-fg-3 tabular-nums">{conversation.previousConversations.length + 1}</span>
+          <span className="ml-1.5 text-fg-3 tabular-nums">{conversation.conversationCount}</span>
         </div>
-        <ul className="-mx-2 mt-2.5 flex flex-col gap-0.5">
-          <li>
-            <div className="flex items-start gap-2.5 rounded-lg bg-accent-soft px-2 py-2" aria-current="true">
-              <StatusDot status={conversation.status} className="mt-1.5" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-1.5">
-                  <span className="truncate font-medium">{conversation.subject}</span>
-                  <span className="shrink-0 text-fg-3 tabular-nums">#{conversation.id}</span>
-                </span>
-                <span className="block text-xs text-fg-3">
-                  {STATUS_LABEL[conversation.status]} · {ago(conversation.updatedAt)} · Viewing now
-                </span>
-              </span>
-            </div>
-          </li>
-          {conversation.previousConversations.map((c) => (
-            <li key={c.id}>
-              <Link to={`/c/${c.id}`} className="flex items-start gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-sunken">
-                <StatusDot status={c.status} className="mt-1.5" />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-1.5">
-                    <span className="truncate font-medium">{c.subject}</span>
-                    <span className="shrink-0 text-fg-3 tabular-nums">#{c.id}</span>
-                  </span>
-                  <span className="block text-xs text-fg-3">
-                    {STATUS_LABEL[c.status]} · {ago(c.updatedAt)}
-                  </span>
-                </span>
-              </Link>
-            </li>
-          ))}
+        {/* One line each, as in Help Scout: the subject and how long ago, with the number, date and status on
+            hover. The one open now is shaded. Past the first few, "View all" opens the customer's page. */}
+        <ul className="-mx-2 mt-2 flex flex-col">
+          {[{ id: conversation.id, subject: conversation.subject, status: conversation.status, updatedAt: conversation.updatedAt }, ...conversation.previousConversations]
+            .slice(0, SHOWN)
+            .map((c) => {
+              const current = c.id === conversation.id
+              const row = cx('flex h-9 items-center gap-2.5 rounded-lg px-2', current ? 'bg-accent-soft' : 'transition-colors hover:bg-sunken')
+              const inner = (
+                <>
+                  <StatusDot status={c.status} />
+                  <span className={cx('min-w-0 flex-1 truncate', current && 'font-medium')}>{c.subject || '(no subject)'}</span>
+                  <span className="shrink-0 text-[13px] text-fg-3 tabular-nums">{ago(c.updatedAt)}</span>
+                </>
+              )
+              const title = `#${c.id} · ${dateOnly(c.updatedAt)} · ${STATUS_LABEL[c.status] ?? c.status}${current ? ' · Viewing now' : ''}`
+              return (
+                <li key={c.id}>
+                  {current ? (
+                    <div className={row} title={title} aria-current="true">
+                      {inner}
+                    </div>
+                  ) : (
+                    <Link to={`/c/${c.id}`} className={row} title={title}>
+                      {inner}
+                    </Link>
+                  )}
+                </li>
+              )
+            })}
         </ul>
+        {conversation.conversationCount > SHOWN && (
+          <Link to={`/customers/${customer.id}`} className="mt-1 -ml-2 inline-flex h-8 items-center rounded-lg px-2 font-medium text-fg-2 transition-colors hover:bg-sunken hover:text-fg">
+            View all {conversation.conversationCount}
+          </Link>
+        )}
         {conversation.previousConversations.length === 0 && <p className="mt-3 text-fg-3">This is their first conversation.</p>}
         <button
           type="button"
