@@ -1109,7 +1109,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
         <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-4 md:pb-28')}>
           {messageIds.length > 1 && (
-            <li className="-mb-1 flex justify-end md:-mb-2 md:px-8">
+            <li className="-mb-1 flex justify-end md:-mb-2 md:px-14">
               <button
                 type="button"
                 onClick={() => setAll(anyFolded)}
@@ -1125,7 +1125,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
             if (hidden.has(thread.id) && !pill) return null
             if (pill)
               return (
-                <li key={thread.id} className="flex items-center gap-3 md:px-8">
+                <li key={thread.id} className="flex items-center gap-3 md:px-14">
                   <span className="h-px flex-1 bg-line" aria-hidden />
                   <button type="button" onClick={() => setShowAll(true)} className="h-7 shrink-0 rounded-full border border-line bg-surface px-3 text-xs font-medium text-fg-2 transition-colors hover:bg-sunken hover:text-fg">
                     {pill} older {pill === 1 ? 'message' : 'messages'}
@@ -1139,7 +1139,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
             return (
               <Fragment key={thread.id}>
                 {newDay && (
-                  <li className="flex items-center gap-3 text-xs text-fg-3 md:px-8">
+                  <li className="flex items-center gap-3 text-xs text-fg-3 md:px-14">
                     <span className="h-px flex-1 bg-line" aria-hidden />
                     <time dateTime={new Date(thread.createdAt).toISOString().slice(0, 10)}>{dayLabel(thread.createdAt)}</time>
                     <span className="h-px flex-1 bg-line" aria-hidden />
@@ -1427,9 +1427,9 @@ function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdi
     }
   }
   return (
-    <li className="relative md:px-8">
-      <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} className="absolute top-4 right-3 z-10 ring-4 ring-surface max-md:hidden" />
-      <article aria-label={isNote ? 'Draft note' : 'Draft reply'} className={cx('relative rounded-[20px] border px-4 pt-4 pb-5 shadow-card md:rounded-xl md:px-10 md:pt-5 md:pb-6 md:shadow-none', isNote ? 'border-note-line bg-note' : 'border-line bg-surface')}>
+    <li className="relative md:px-14">
+      <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} className="absolute top-4 right-9 z-10 ring-4 ring-surface max-md:hidden" />
+      <article aria-label={isNote ? 'Draft note' : 'Draft reply'} className={cx('relative rounded-[20px] border px-4 pt-4 pb-5 shadow-card md:rounded-xl md:px-12 md:pt-5 md:pb-6 md:shadow-none lg:px-20', isNote ? 'border-note-line bg-note' : 'border-line bg-surface')}>
         <span className="absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full bg-accent" aria-hidden />
         <header className="flex items-center gap-2.5 border-b border-line pb-3">
           <span className="min-w-0 flex-1 truncate text-[17px] font-semibold md:text-sm">You</span>
@@ -1544,16 +1544,16 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const how = isNote ? 'Note' : scheduled ? 'Not sent yet' : sentStatus ? (STATUS_LABEL[sentStatus] ?? '') : ''
 
   return (
-    <li className="relative md:px-8" data-message data-open={folded ? undefined : ''}>
+    <li className="relative md:px-14" data-message data-open={folded ? undefined : ''}>
       {original && <OriginalDialog thread={thread} onClose={() => setOriginal(false)} />}
       {/* The avatar sits on the card's edge, half in and half out: left for the customer, right for the team.
           The ring is the page colour, so the card's border looks cut out around it. */}
-      <Avatar name={name} color={color} src={photo} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-3' : 'right-3')} />
+      <Avatar name={name} color={color} src={photo} size={40} className={cx('absolute z-10 ring-4 ring-surface max-md:hidden', folded ? 'top-3' : 'top-4', isCustomer ? 'left-9' : 'right-9')} />
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
-          // Side margins inside the card clear the avatar on its edge; the rest of the width goes to the message.
-          'relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-10 md:shadow-none',
+          // Wide side margins inside the card keep lines short and give the text room.
+          'relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-12 md:shadow-none lg:px-20',
           folded ? 'py-4' : 'pt-4 pb-5 md:pt-5 md:pb-6',
           isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
           scheduled && 'border-dashed border-line-strong',
@@ -1563,7 +1563,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         {/* A thin line down the left marks what the team wrote, as in Help Scout: from the name to the end of the
             message, not the "opened" line under it. It sits 6-10px in from the card's edge. */}
         <div className="relative">
-        {!isCustomer && <span className={cx('absolute top-0 bottom-0 -left-2.5 w-0.5 rounded-full md:-left-[30px]', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
+        {!isCustomer && <span className={cx('absolute top-0 bottom-0 -left-2.5 w-0.5 rounded-full md:-left-[38px] lg:-left-[70px]', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
         <header>
           <div className="flex items-center gap-3 md:gap-2.5">
             <Avatar name={name} color={color} src={photo} size={36} className="md:hidden" />
