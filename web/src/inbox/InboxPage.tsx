@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, SquareCheckBig, MessageCircle, Minus, Paperclip, Search, UserRoundCheck } from 'lucide-react'
+import { ArrowUpDown, Archive, Check, ChevronDown, Clock, Eye, Inbox, PenLine, SquareCheckBig, MessageCircle, Minus, Paperclip, Search, StickyNote, UserRoundCheck } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { plural, shortTime, STATUS_LABEL } from '../lib/format'
 import { canSee } from '../lib/access'
@@ -463,7 +463,15 @@ function Row({
             ))}
             {c.tags.length > 3 && <span className="hidden shrink-0 text-xs text-fg-3 md:inline">+{c.tags.length - 3}</span>}
           </span>
-          <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]', 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          {/* The newest note, when nothing has been said since, as in Help Scout. */}
+          {c.notePreview ? (
+            <span className="mt-0.5 block text-sm text-fg-3 max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]">
+              <StickyNote className="mr-1 inline size-3.5 -translate-y-px text-note-fg" aria-label="Note" />
+              {c.notePreview}
+            </span>
+          ) : (
+            <span className={cx('mt-0.5 block text-sm max-md:line-clamp-2 max-md:leading-snug md:mt-0 md:truncate md:text-sm md:leading-[1.35]', 'text-fg-3')}>{c.preview || 'No message text'}</span>
+          )}
           {/* On a phone, tags get a line of their own, under the preview. */}
           {c.tags.length > 0 && (
             <span className="mt-1.5 flex flex-wrap gap-1 md:hidden">

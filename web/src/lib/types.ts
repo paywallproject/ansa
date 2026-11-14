@@ -133,6 +133,8 @@ export interface ConversationSummary {
   subject: string
   status: Status
   preview: string
+  /** The newest note, when nothing has been said since. */
+  notePreview?: string
   source: string
   customer: { id: number; name: string; email: string; company: string }
   assignee: { id: number; name: string; color: string; avatarUrl: string | null } | null

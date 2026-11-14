@@ -446,3 +446,27 @@ test('a note can be deleted by its author or an admin, and only a note', async (
   assert.equal((await call(adminToken, 'DELETE', `/threads/${byAdmin}`)).status, 200)
   assert.equal(count(), before - 2)
 })
+
+test('the inbox shows the newest note until someone writes again, and the note before it when it is deleted', async () => {
+  const { addNote, deleteNote } = await import('../services/conversations.ts')
+  const { ingestRaw } = await import('../mail/ingest.ts')
+  const raw = (id: string, body: string, subject = 'Note preview') => ['From: Nora <nora@example.com>', 'To: sales@acme.test', `Subject: ${subject}`, `Message-ID: <${id}@example.com>`, ...(id === 'np-2' ? ['In-Reply-To: <np-1@example.com>'] : []), '', body, ''].join('\r\n')
+  const first = await ingestRaw(sales, raw('np-1', 'Hello there'))
+  const conversationId = first!.conversationId
+  const summary = async () => (await call(adminToken, 'GET', `/conversations?mailboxId=${sales}&folder=all`)).data.conversations?.find((c: any) => c.id === conversationId) ?? (await call(adminToken, 'GET', `/conversations/${conversationId}`)).data.conversation
+  const actor = { userId: null, via: 'api' } as any
+  assert.equal((await summary()).notePreview, '')
+  const one = addNote(conversationId, { bodyHtml: '<p>First   note</p>' }, actor)
+  addNote(conversationId, { bodyHtml: '<p>Second note</p>' }, actor)
+  assert.equal((await summary()).notePreview, 'Second note')
+  assert.equal((await summary()).preview, 'Hello there')
+  // Deleting the newest note shows the one before it.
+  const second = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'note' ORDER BY id DESC LIMIT 1`, conversationId)!.id
+  deleteNote(second, actor, true)
+  assert.equal((await summary()).notePreview, 'First note')
+  // The customer writes again: the inbox goes back to the message.
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await ingestRaw(sales, raw('np-2', 'One more thing', 'Re: Note preview'))
+  assert.equal((await summary()).notePreview, '')
+  assert.equal(one > 0, true)
+})
