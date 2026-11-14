@@ -1083,11 +1083,11 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
   }, [conversation.id, lastId, composing])
 
   // Expand all / Collapse all, as in Gmail: while any message is folded the button opens them all (and the
-  // "N older messages" line with them); once all are open it folds them all again.
+  // "N older messages" line with them); once all are open it folds all but the newest, which stays open to read.
   const messageIds = conversation.threads.filter((t) => t.type !== 'event').map((t) => t.id)
   const anyFolded = messageIds.some((id) => !isOpen(id))
   const setAll = (open: boolean) => {
-    setToggled(new Map(messageIds.map((id) => [id, open])))
+    setToggled(new Map(messageIds.map((id, i) => [id, open || i === messageIds.length - 1])))
     setShowAll(open)
   }
   let previous: Thread | undefined
