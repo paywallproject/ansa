@@ -683,7 +683,7 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
     run('UPDATE conversations SET thread_count = thread_count + 1, updated_at = ? WHERE id = ?', at, conversationId)
     // The inbox shows the note, unless an imported note is older than a message already there.
     run(
-      `UPDATE conversations SET note_preview = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE conversation_id = ? AND type != 'note' AND created_at > ?)`,
+      `UPDATE conversations SET note_preview = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply') AND created_at > ?)`,
       previewOf(text) || 'Attached a file',
       conversationId,
       conversationId,
@@ -1019,8 +1019,8 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
   const files = all<{ storage_key: string }>('SELECT storage_key FROM attachments WHERE thread_id = ?', threadId).map((f) => f.storage_key)
   const mailboxId = tx(() => {
     run('DELETE FROM threads WHERE id = ?', threadId) // mentions and attachments go with it
-    // The inbox shows the note before it, if that is now the newest thing in the conversation.
-    const newest = get<{ type: string; body_text: string }>('SELECT type, body_text FROM threads WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', t.conversation_id)
+    // The inbox shows the note before it, if nothing has been said since. Events (assigned, closed…) do not count.
+    const newest = get<{ type: string; body_text: string }>(`SELECT type, body_text FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply', 'note') ORDER BY created_at DESC, id DESC LIMIT 1`, t.conversation_id)
     run('UPDATE conversations SET note_preview = ? WHERE id = ?', newest?.type === 'note' ? previewOf(newest.body_text) || 'Attached a file' : '', t.conversation_id)
     run(
       `UPDATE conversations SET thread_count = MAX(0, thread_count - 1),

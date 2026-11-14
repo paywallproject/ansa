@@ -368,6 +368,13 @@ const migrations: string[] = [
     FROM threads t WHERE t.conversation_id = conversations.id ORDER BY t.created_at DESC, t.id DESC LIMIT 1
   ), '');
   `,
+  `
+  -- Again, without events: an assignment or status change after a note hid it.
+  UPDATE conversations SET note_preview = COALESCE((
+    SELECT CASE WHEN t.type = 'note' THEN substr(trim(replace(replace(replace(t.body_text, char(13), ' '), char(10), ' '), char(9), ' ')), 1, 180) ELSE '' END
+    FROM threads t WHERE t.conversation_id = conversations.id AND t.type IN ('customer', 'reply', 'note') ORDER BY t.created_at DESC, t.id DESC LIMIT 1
+  ), '');
+  `,
 ]
 
 export function migrate() {
