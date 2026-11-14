@@ -410,6 +410,30 @@
   }
 }
 
+/* A phone on its side: iOS keeps the app clear of the notch on both sides and of the home bar below, and the
+   page shows through those strips. Paint them like what they border: the top bar along the top, the grey of
+   the folder list (or of the page) down the left, and the page itself on the right and along the bottom. */
+@media (display-mode: standalone) and (orientation: landscape) {
+  :root {
+    --side-left: 0px;
+    --side-page: var(--canvas);
+  }
+  /* A mailbox: the folder list (212px and its 1px border) on the left, the white list or conversation beside it. */
+  .in-mailbox {
+    --side-left: 213px;
+  }
+  .in-mailbox,
+  .reading {
+    --side-page: var(--surface);
+  }
+  body {
+    background:
+      linear-gradient(var(--nav), var(--nav)) top / 100% calc(env(safe-area-inset-top) + 48px) no-repeat,
+      linear-gradient(var(--canvas), var(--canvas)) left / calc(env(safe-area-inset-left) + var(--side-left)) 100% no-repeat,
+      var(--side-page);
+  }
+}
+
 /* The phone reply sheet covers the whole screen, outside #root: its own clearance for the clock and the home
    bar, without the home-bar padding while the keyboard is up (it covers the home bar). */
 .sheet-safe {
