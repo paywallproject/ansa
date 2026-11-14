@@ -172,7 +172,16 @@ export function InboxPage({ search = false }: { search?: boolean }) {
         <div className="flex h-11 shrink-0 items-center gap-2 px-2 md:h-14 md:border-b md:border-line md:px-5">
           {/* Phone: the logo opens the drawer (inboxes, search, settings), as in Help Scout's app. */}
           {!search && (
-            <button type="button" aria-label="Open menu" onClick={shell.openDrawer} className="flex size-10 shrink-0 items-center justify-center rounded-lg md:hidden">
+            <button
+              type="button"
+              aria-label="Open menu"
+              onClick={() => {
+                // The folder panel would otherwise stay open on top of part of the drawer.
+                setFolderPanel(null)
+                shell.openDrawer()
+              }}
+              className="flex size-10 shrink-0 items-center justify-center rounded-lg md:hidden"
+            >
               <Logo size={28} />
             </button>
           )}
@@ -199,7 +208,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
                   </button>
                   {/* The folders drop down over the list, full width, as in Help Scout's app. */}
                   {folderPanel !== null && (
-                    <div className="animate-fade fixed inset-x-0 bottom-0 z-30 flex flex-col bg-surface" style={{ top: folderPanel }} role="dialog" aria-label="Folders">
+                    <div className="animate-fade fixed inset-x-0 bottom-0 z-[25] flex flex-col bg-surface" style={{ top: folderPanel }} role="dialog" aria-label="Folders">
                       <p className="pt-2 pb-5 text-center text-[14px] text-fg-3">{mailbox.name}</p>
                       <nav className="min-h-0 flex-1 overflow-y-auto">
                         {visibleFolders().map((f) => {
