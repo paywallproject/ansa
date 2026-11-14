@@ -1107,7 +1107,7 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
       {/* On a phone, messages are cards on a light grey background, as in Help Scout's app. */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-3 md:bg-transparent md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
-        <ol className={cx('mx-auto flex max-w-[1040px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-4 md:pb-28')}>
+        <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-4 md:pb-28')}>
           {messageIds.length > 1 && (
             <li className="-mb-1 flex justify-end md:-mb-2 md:px-14">
               <button
@@ -1429,7 +1429,7 @@ function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdi
   return (
     <li className="relative md:px-14">
       <Avatar name={user.name} color={user.color} src={user.avatarUrl} size={40} className="absolute top-4 right-9 z-10 ring-4 ring-surface max-md:hidden" />
-      <article aria-label={isNote ? 'Draft note' : 'Draft reply'} className={cx('relative rounded-[20px] border px-4 pt-4 pb-5 shadow-card md:rounded-xl md:px-12 md:pt-5 md:pb-6 md:shadow-none lg:px-14', isNote ? 'border-note-line bg-note' : 'border-line bg-surface')}>
+      <article aria-label={isNote ? 'Draft note' : 'Draft reply'} className={cx('relative rounded-[20px] border px-4 pt-4 pb-5 shadow-card md:rounded-xl md:px-12 md:pt-5 md:pb-6 md:shadow-none lg:px-20', isNote ? 'border-note-line bg-note' : 'border-line bg-surface')}>
         <span className="absolute top-2.5 bottom-2.5 left-2 w-[3px] rounded-full bg-accent" aria-hidden />
         <header className="flex items-center gap-2.5 border-b border-line pb-3">
           <span className="min-w-0 flex-1 truncate text-[17px] font-semibold md:text-sm">You</span>
@@ -1552,8 +1552,8 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
       <article
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
-          // Side margins inside the card clear the avatar on its edge; the rest of the width goes to the message.
-          'relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-12 md:shadow-none lg:px-14',
+          // Wide side margins inside the card keep lines short and give the text room.
+          'relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-12 md:shadow-none lg:px-20',
           folded ? 'py-4' : 'pt-4 pb-5 md:pt-5 md:pb-6',
           isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
           scheduled && 'border-dashed border-line-strong',
@@ -1563,7 +1563,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         {/* A thin line down the left marks what the team wrote, as in Help Scout: from the name to the end of the
             message, not the "opened" line under it. It sits 6-10px in from the card's edge. */}
         <div className="relative">
-        {!isCustomer && <span className={cx('absolute top-0 bottom-0 -left-2.5 w-0.5 rounded-full md:-left-[38px] lg:-left-[46px]', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
+        {!isCustomer && <span className={cx('absolute top-0 bottom-0 -left-2.5 w-0.5 rounded-full md:-left-[38px] lg:-left-[70px]', isNote ? 'bg-note-fg/30' : 'bg-line-strong')} aria-hidden />}
         <header>
           <div className="flex items-center gap-3 md:gap-2.5">
             <Avatar name={name} color={color} src={photo} size={36} className="md:hidden" />
