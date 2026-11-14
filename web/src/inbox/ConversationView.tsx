@@ -9,6 +9,8 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CircleAlert,
   Download,
   Ellipsis,
@@ -1080,6 +1082,14 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
     el.scrollTop = newest.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12
   }, [conversation.id, lastId, composing])
 
+  // Expand all / Collapse all, as in Gmail: while any message is folded the button opens them all (and the
+  // "N older messages" line with them); once all are open it folds them all again.
+  const messageIds = conversation.threads.filter((t) => t.type !== 'event').map((t) => t.id)
+  const anyFolded = messageIds.some((id) => !isOpen(id))
+  const setAll = (open: boolean) => {
+    setToggled(new Map(messageIds.map((id) => [id, open])))
+    setShowAll(open)
+  }
   let previous: Thread | undefined
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -1087,6 +1097,18 @@ function ThreadList({ conversation, composing, onCompose }: { conversation: Conv
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-3 md:bg-transparent md:px-6">
         {/* The extra bottom space keeps the last message clear of the floating buttons. */}
         <ol className={cx('mx-auto flex max-w-[860px] flex-col gap-3 pt-3 md:gap-4 md:pt-5', composing ? 'pb-4' : 'pb-4 md:pb-28')}>
+          {messageIds.length > 1 && (
+            <li className="-mb-1 flex justify-end md:-mb-2 md:px-14">
+              <button
+                type="button"
+                onClick={() => setAll(anyFolded)}
+                className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-fg-3 transition-colors hover:bg-sunken hover:text-fg"
+              >
+                {anyFolded ? <ChevronsUpDown className="size-3.5" aria-hidden /> : <ChevronsDownUp className="size-3.5" aria-hidden />}
+                {anyFolded ? 'Expand all' : 'Collapse all'}
+              </button>
+            </li>
+          )}
           {conversation.threads.map((thread) => {
             const pill = pills.get(thread.id)
             if (hidden.has(thread.id) && !pill) return null
