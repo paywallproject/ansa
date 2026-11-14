@@ -13,6 +13,8 @@ import {
   ChevronsUpDown,
   CircleAlert,
   Download,
+  Lock,
+  LockOpen,
   Ellipsis,
   Expand,
   FileText,
@@ -876,7 +878,7 @@ export function SnoozeMenu({ snoozedUntil, onSnooze, trigger }: { snoozedUntil: 
   return (
     <Popover
       align="end"
-      width={256}
+      width={288}
       trigger={
         trigger ??
         (({ ref, ...props }) =>
@@ -919,7 +921,7 @@ export function SnoozeMenu({ snoozedUntil, onSnooze, trigger }: { snoozedUntil: 
               }
             }}
           >
-            <Input type="datetime-local" aria-label="Custom date and time" className="h-8 px-2 text-[13px]" value={custom} onChange={(e) => setCustom(e.target.value)} />
+            <Input type="datetime-local" aria-label="Custom date and time" className="h-8 min-w-0 flex-1 px-2 text-[13px]" value={custom} onChange={(e) => setCustom(e.target.value)} />
             <Button type="submit" variant="primary" disabled={!custom || new Date(custom).getTime() <= Date.now()}>
               Set
             </Button>
@@ -1240,21 +1242,73 @@ function viewedLabel(ts: number, zone: string) {
   return `${p.month} ${p.day} @ ${p.hour}:${p.minute}${String(p.dayPeriod).toLowerCase()}`
 }
 
-/** The email as it arrived: the sender's plain-text version, and the raw source with every header. */
+type Original = {
+  available: boolean
+  text: string
+  html: string
+  source: string | null
+  headers: { name: string; value: string }[]
+  details: { mailedBy: string | null; signedBy: string[]; tls: boolean | null; checks: { name: string; result: string }[] } | null
+}
+
+/**
+ * The email as it arrived, as in Gmail's "Show original": rendered the way its sender designed it, its
+ * plain-text version and its raw source, with where it came from (mailed-by, signed-by, encryption).
+ */
 function OriginalDialog({ thread, onClose }: { thread: Thread; onClose: () => void }) {
-  const [tab, setTab] = useState<'text' | 'source'>('text')
+  const [tab, setTab] = useState<'email' | 'text' | 'source'>('email')
+  const zone = useZone()
   const original = useQuery({
     queryKey: ['original', thread.id],
-    queryFn: () => api.get<{ available: boolean; text: string; source: string | null; headers: { name: string; value: string }[] }>(`/threads/${thread.id}/original`),
+    queryFn: () => api.get<Original>(`/threads/${thread.id}/original`),
     staleTime: Infinity,
   })
   const header = (name: string) => original.data?.headers.find((h) => h.name.toLowerCase() === name)?.value
+  const details = original.data?.details
+  const date = header('date')
+  const sent = date ? new Date(date) : null
+  const rows: [string, ReactNode, string?][] = []
+  if (original.data?.available) {
+    for (const name of ['from', 'reply-to', 'to', 'cc'] as const) if (header(name)) rows.push([name, header(name), header(name)])
+    if (date) rows.push(['date', sent && !Number.isNaN(sent.getTime()) ? new Intl.DateTimeFormat('en-US', { timeZone: zone, dateStyle: 'medium', timeStyle: 'short' }).format(sent) : date, date])
+    if (header('subject')) rows.push(['subject', header('subject'), header('subject')])
+    if (details?.mailedBy) rows.push(['mailed-by', details.mailedBy])
+    if (details?.signedBy.length) rows.push(['signed-by', details.signedBy.join(', ')])
+    if (details?.tls != null)
+      rows.push([
+        'security',
+        details.tls ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Lock className="size-3.5 text-fg-3" aria-hidden />
+            Standard encryption (TLS)
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-danger">
+            <LockOpen className="size-3.5" aria-hidden />
+            Not encrypted on its way to your mail server
+          </span>
+        ),
+      ])
+    if (details?.checks.length)
+      rows.push([
+        'checks',
+        <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+          {details.checks.map((c) => (
+            <span key={c.name} className="inline-flex items-center gap-1">
+              {c.result === 'pass' ? <ShieldCheck className="size-3.5 text-ok" aria-hidden /> : <ShieldAlert className={cx('size-3.5', c.result === 'none' || c.result === 'neutral' ? 'text-fg-3' : 'text-danger')} aria-hidden />}
+              {c.name} {c.result}
+            </span>
+          ))}
+        </span>,
+      ])
+  }
+  const tabs = original.data?.available ? (['email', 'text', 'source'] as const) : (['email', 'text'] as const)
   return (
     <Modal
       open
       onClose={onClose}
       title="Original message"
-      width={760}
+      width={880}
       footer={
         <>
           {original.data?.available && (
@@ -1272,49 +1326,83 @@ function OriginalDialog({ thread, onClose }: { thread: Thread; onClose: () => vo
         <p className="text-[13px] text-danger">{(original.error as Error).message}</p>
       ) : (
         <div className="flex flex-col gap-3">
-          {original.data.available ? (
-            <>
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[13px]">
-                {(['from', 'to', 'cc', 'date', 'subject'] as const).map((name) =>
-                  header(name) ? (
-                    <Fragment key={name}>
-                      <dt className="text-fg-3 capitalize">{name}</dt>
-                      <dd className="truncate" title={header(name)}>
-                        {header(name)}
-                      </dd>
-                    </Fragment>
-                  ) : null,
-                )}
-              </dl>
-              <div role="tablist" aria-label="View" className="flex w-max gap-1 rounded-lg bg-sunken p-1">
-                {(['text', 'source'] as const).map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === id}
-                    onClick={() => setTab(id)}
-                    className={cx('h-7 rounded-md px-3 text-[13px] font-medium transition-colors', tab === id ? 'bg-surface text-fg shadow-card' : 'text-fg-2 hover:text-fg')}
-                  >
-                    {id === 'text' ? 'Plain text' : 'Source'}
-                  </button>
-                ))}
-              </div>
-            </>
+          {rows.length > 0 ? (
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-[13px]">
+              {rows.map(([label, value, title]) => (
+                <Fragment key={label}>
+                  <dt className="text-right text-fg-3">{label}:</dt>
+                  <dd className="truncate" title={title}>
+                    {value}
+                  </dd>
+                </Fragment>
+              ))}
+            </dl>
           ) : (
-            <p className="rounded-lg bg-sunken px-3 py-2 text-[13px] text-fg-2">This email arrived before originals were kept, so only its text is shown. Email received from now on keeps its original.</p>
+            <p className="rounded-lg bg-sunken px-3 py-2 text-[13px] text-fg-2">This email arrived before originals were kept, so its headers and source were not saved. Email received from now on keeps its original.</p>
           )}
-          <pre
-            className={cx(
-              'max-h-[55vh] overflow-auto rounded-lg border border-line bg-sunken p-3 text-xs leading-relaxed whitespace-pre-wrap text-fg [overflow-wrap:anywhere]',
-              tab === 'source' && original.data.available ? 'font-mono' : 'font-sans text-[13px]',
-            )}
-          >
-            {tab === 'source' && original.data.available ? original.data.source : original.data.text || 'No text in this message.'}
-          </pre>
+          <div role="tablist" aria-label="View" className="flex w-max gap-1 rounded-lg bg-sunken p-1">
+            {tabs.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => setTab(id)}
+                className={cx('h-7 rounded-md px-3 text-[13px] font-medium transition-colors', tab === id ? 'bg-surface text-fg shadow-card' : 'text-fg-2 hover:text-fg')}
+              >
+                {id === 'email' ? 'Email' : id === 'text' ? 'Plain text' : 'Source'}
+              </button>
+            ))}
+          </div>
+          {tab === 'email' ? (
+            <DesignedEmail html={original.data.html} />
+          ) : (
+            <pre
+              className={cx(
+                'max-h-[55vh] overflow-auto rounded-lg border border-line bg-sunken p-3 text-xs leading-relaxed whitespace-pre-wrap text-fg [overflow-wrap:anywhere]',
+                tab === 'source' ? 'font-mono' : 'font-sans text-[13px]',
+              )}
+            >
+              {tab === 'source' ? original.data.source : original.data.text || 'No text in this message.'}
+            </pre>
+          )}
         </div>
       )}
     </Modal>
+  )
+}
+
+/**
+ * An email shown as its sender designed it, like a newsletter's "view in browser" page. The frame is
+ * sandboxed with scripts off (and the app's Content Security Policy applies inside it), and links open
+ * in a new tab. It grows to fit the email, so the dialog scrolls like a web page.
+ */
+function DesignedEmail({ html }: { html: string }) {
+  const frame = useRef<HTMLIFrameElement>(null)
+  const doc = useMemo(
+    () =>
+      `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html{color-scheme:light}body{margin:0;padding:16px;background:#fff;color:#222;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow-wrap:break-word}img{max-width:100%}</style></head><body>${html}</body></html>`,
+    [html],
+  )
+  const fit = () => {
+    const root = frame.current?.contentDocument?.documentElement
+    if (frame.current && root) frame.current.style.height = `${Math.max(240, root.scrollHeight)}px`
+  }
+  return (
+    <iframe
+      ref={frame}
+      title="The email as its sender designed it"
+      // Same origin (with scripts off) so its pictures load with your session and the frame can be sized.
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      referrerPolicy="no-referrer"
+      srcDoc={doc}
+      onLoad={() => {
+        fit()
+        // Pictures that arrive later make the email taller.
+        frame.current?.contentDocument?.addEventListener('load', fit, true)
+      }}
+      className="block h-[60vh] w-full rounded-lg border border-line bg-white"
+    />
   )
 }
 

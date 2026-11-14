@@ -207,6 +207,11 @@ test('show original: the email as it arrived, its plain text and headers, kept u
   const { ingestRaw } = await import('../mail/ingest.ts')
   const { blobs } = await import('../blobs.ts')
   const raw = [
+    'Return-Path: <bounce+123@mail.example.com>',
+    'Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Fri, 13 Nov 2026 17:40:26 +0000',
+    'Authentication-Results: mx.acme.test; dkim=pass header.i=@example.com header.s=s1; spf=pass smtp.mailfrom=bounce+123@mail.example.com; dmarc=pass header.from=example.com',
+    'Received: from mail.example.com (mail.example.com [192.0.2.1]) by mx.acme.test with ESMTPS id abc (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384); Fri, 13 Nov 2026 17:40:25 +0000',
+    'Authentication-Results: forged.test; dkim=pass header.d=bank.test',
     'From: Messy Sender <messy@example.com>',
     'To: sales@acme.test',
     'Subject: A very messy email',
@@ -221,7 +226,7 @@ test('show original: the email as it arrived, its plain text and headers, kept u
     '--b',
     'Content-Type: text/html; charset=utf-8',
     '',
-    '<table><tr><td><font size=1>The <b>messy</b> HTML version</font></td></tr></table>',
+    '<html><head><title>Hidden</title><style>.x{color:red}</style><script>alert(1)</script></head><body bgcolor="#eee"><table width="600"><tr><td style="color:blue" onclick="alert(1)"><font size=1>The <b>messy</b> HTML version</font><a href="javascript:alert(1)">x</a><iframe src="https://evil.test"></iframe></td></tr></table></body></html>',
     '--b--',
     '',
   ].join('\r\n')
@@ -236,6 +241,17 @@ test('show original: the email as it arrived, its plain text and headers, kept u
   assert.equal(original.text, 'The clean plain text version.')
   assert.match(original.source, /<font size=1>The <b>messy<\/b>/)
   assert.equal(original.headers.find((h: any) => h.name === 'Subject').value, 'A very messy email')
+  // The email as designed: its layout and styles kept, nothing that runs or embeds another page.
+  assert.match(original.html, /<style>\.x\{color:red\}<\/style>/)
+  assert.match(original.html, /<div bgcolor="#eee"><table width="600"><tr><td style="color:blue">/)
+  assert.doesNotMatch(original.html, /script|onclick|javascript|iframe|Hidden/)
+  // Where it came from, from the headers your own server added (not the lower, forged one).
+  assert.deepEqual(original.details, {
+    mailedBy: 'mail.example.com',
+    signedBy: ['example.com'],
+    tls: true,
+    checks: [{ name: 'SPF', result: 'pass' }, { name: 'DKIM', result: 'pass' }, { name: 'DMARC', result: 'pass' }],
+  })
 
   const eml = await app.request(`/api/threads/${thread.id}/original.eml`, { headers: { Authorization: `Bearer ${adminToken}` } })
   assert.equal(eml.headers.get('content-type'), 'message/rfc822')
@@ -255,6 +271,8 @@ test('show original: the email as it arrived, its plain text and headers, kept u
   const older = (await call(adminToken, 'GET', `/threads/${get<{ id: number }>('SELECT id FROM threads WHERE conversation_id = ?', inSales)!.id}/original`)).data
   assert.equal(older.available, false)
   assert.equal(typeof older.text, 'string')
+  assert.equal(typeof older.html, 'string')
+  assert.equal(older.details, null)
 })
 
 test('a new email can be sent later: it waits as pending, then goes out like any scheduled reply', async () => {
