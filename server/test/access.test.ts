@@ -460,7 +460,10 @@ test('the inbox shows the newest note until someone writes again, and the note b
   addNote(conversationId, { bodyHtml: '<p>Second note</p>' }, actor)
   assert.equal((await summary()).notePreview, 'Second note')
   assert.equal((await summary()).preview, 'Hello there')
-  // Deleting the newest note shows the one before it.
+  // Assigning it or changing its status afterwards keeps the note showing.
+  await call(adminToken, 'PATCH', `/conversations/${conversationId}`, { assigneeId: adminId })
+  assert.equal((await summary()).notePreview, 'Second note')
+  // Deleting the newest note shows the one before it, even with an event after it.
   const second = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'note' ORDER BY id DESC LIMIT 1`, conversationId)!.id
   deleteNote(second, actor, true)
   assert.equal((await summary()).notePreview, 'First note')
