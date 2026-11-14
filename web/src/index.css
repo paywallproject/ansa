@@ -14,6 +14,8 @@
   --fg: #1f2329;
   --fg-2: #444b55;
   --fg-3: #6b7480;
+  /* Message text: Help Scout's slate, rgb(49, 67, 81). */
+  --prose: #314351;
   --nav: #221f5c;
   --accent: #5448e2;
   --accent-hover: #4639cf;
@@ -45,6 +47,7 @@
   --fg: #ededf1;
   --fg-2: #b1b1bc;
   --fg-3: #8d8d99;
+  --prose: #ededf1;
   --nav: #1a1938;
   --accent: #7b70f5;
   --accent-hover: #8d83f8;
@@ -151,12 +154,13 @@
 
 /* Rendered email and note bodies, and the editor's content. */
 .prose-mail {
-  /* Messages, read and written, exactly as Gmail shows them: `font: small / 1.5 Arial` (small is 13px).
-     Outgoing email uses Arial too, so what you write looks like what the customer receives. */
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--fg);
+  /* Messages, read and written, as Help Scout shows them: its grotesk (Inter here) at 14px, slate text,
+     even-width figures. Outgoing email stays Arial, since the customer's mail app will not have Inter. */
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  color: var(--prose);
   overflow-wrap: anywhere;
 }
 /* Easier to read on a phone. */
