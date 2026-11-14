@@ -21,7 +21,9 @@ The assistant acts as the teammate who created the token. Revoke the token to cu
 | `list_mailboxes` | Mailboxes and how many conversations need attention |
 | `list_conversations` | List, filter or full-text search conversations |
 | `get_conversation` | Read a thread: messages, replies, notes, customer |
-| `reply_to_conversation` | Email a reply to the customer |
+| `reply_to_conversation` | Email a reply to the customer  now, or at a set time (`send_at`), optionally only if the customer hasn't written by then (`only_if_no_reply`) |
+| `list_scheduled_replies`, `cancel_scheduled_reply`, `send_scheduled_reply_now` | See, take back or send early the replies waiting to go out |
+| `get_attachment` | Download a file from a message: images and text come back inline, other files as base64, files over 10 MB as a download link for the same token |
 | `add_note` | Add an internal note |
 | `draft_reply` | Write a reply (or note) into your draft for you to review and send from Ansa. Sends nothing |
 | `update_conversation` | Change status, assignee, tags, subject, snooze |
@@ -30,7 +32,7 @@ The assistant acts as the teammate who created the token. Revoke the token to cu
 | `list_saved_replies`, `list_tags`, `list_team` | Reference data |
 | `get_report` | Support metrics for the last N days |
 
-`reply_to_conversation` and `create_conversation` (kind `email`) send real email. The server tells assistants to confirm with you first.
+`reply_to_conversation` (without `send_at`), `send_scheduled_reply_now` and `create_conversation` (kind `email`) send real email. The server tells assistants to confirm with you first.
 
 ## REST API
 
