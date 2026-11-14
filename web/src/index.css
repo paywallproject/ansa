@@ -155,7 +155,7 @@
 /* Rendered email and note bodies, and the editor's content. */
 .prose-mail {
   /* Messages, read and written, as Help Scout shows them: its grotesk (Inter here) at 14px, slate text,
-     even-width figures. Outgoing email stays Arial, since the customer's mail app will not have Inter. */
+     even-width figures. Outgoing email is plain sans-serif, as Help Scout sends it. */
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.6;
