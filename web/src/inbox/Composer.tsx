@@ -500,7 +500,7 @@ export const Composer = forwardRef<
     // On a computer, a card under the conversation. A phone gets a full-screen sheet instead (phoneSheet).
     <div className={cx('shrink-0 md:px-6 md:pb-5', !open && 'hidden')}>
       {mentionList}
-      <div className="mx-auto max-w-[860px] md:px-14">
+      <div className="mx-auto max-w-[1040px] md:px-14">
         {othersReplying.length > 0 && !isNote && (
           <div className="mb-2">
             <Banner kind="warn">
