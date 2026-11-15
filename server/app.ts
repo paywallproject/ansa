@@ -58,10 +58,17 @@ export function prepareData() {
   if (interrupted) console.log(`[mail] ${interrupted} unsent repl${interrupted === 1 ? 'y was' : 'ies were'} flagged for re-sending`)
 }
 
+let timersPaused = false
+/** Hold the periodic jobs, e.g. while a backup is restored, so nothing reads or sends from a half-written database. */
+export function pauseTimers(paused: boolean) {
+  timersPaused = paused
+}
+
 /** Periodic jobs that only matter while the process is awake. */
 export function startTimers() {
   const every = (ms: number, job: () => void) => {
     const timer = setInterval(() => {
+      if (timersPaused) return
       try {
         job()
       } catch (err) {
