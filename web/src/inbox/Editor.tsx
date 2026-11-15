@@ -65,12 +65,19 @@ export const lineHtml = (html: string) =>
     .replace(/<p>/g, '<div>')
     .replace(/<\/p>/g, '</div>')
 
-/** The reverse of lineHtml, for putting a saved message back into the editor. */
-export const paragraphHtml = (html: string) =>
-  html
+/**
+ * The reverse of lineHtml, for putting a saved message back into the editor. A blank line written as
+ * <br><br> (as drafts from the MCP often are) becomes a paragraph break, so the text isn't one long
+ * paragraph that a triple-click selects all of.
+ */
+export const paragraphHtml = (html: string) => {
+  let out = html
     .replace(/<div><br\s*\/?><\/div>/g, '<p></p>')
     .replace(/<div>/g, '<p>')
     .replace(/<\/div>/g, '</p>')
+  if (!/<(p|ul|ol|blockquote|pre)\b/i.test(out)) out = `<p>${out}</p>`
+  return out.replace(/<p>([\s\S]*?)<\/p>/g, (_, inner: string) => `<p>${inner.split(/(?:<br\s*\/?>\s*){2,}/i).join('</p><p></p><p>')}</p>`)
+}
 
 function LinkButton({ editor }: { editor: Editor }) {
   const [url, setUrl] = useState('')
