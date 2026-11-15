@@ -73,8 +73,11 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     enabled: search ? q.trim().length > 0 : !!mailboxId,
     placeholderData: (previous, previousQuery) => (previousQuery && JSON.stringify(previousQuery.queryKey[1]) === JSON.stringify(view) ? previous : undefined),
   })
-  const items = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data])
-  const total = list.data?.pages[0]?.total ?? 0
+  // Rows swiped out of this folder hide at once, instead of waiting for the server and the refetch.
+  const [leaving, setLeaving] = useState<ReadonlySet<number>>(new Set())
+  const fetched = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data])
+  const items = useMemo(() => (leaving.size ? fetched.filter((c) => !leaving.has(c.id)) : fetched), [fetched, leaving])
+  const total = Math.max(0, (list.data?.pages[0]?.total ?? 0) - (fetched.length - items.length))
 
   const open = (id: number | null) => navigate(id ? `${base}/${id}${suffix}` : `${base}${suffix}`)
   const step = (delta: number) => {
@@ -115,19 +118,35 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   )
 
   // Swipe a row on a phone: close it, or take it. Undo puts it back.
+  const hide = (id: number, hidden: boolean) =>
+    setLeaving((set) => {
+      if (set.has(id) === hidden) return set
+      const next = new Set(set)
+      if (hidden) next.add(id)
+      else next.delete(id)
+      return next
+    })
   const quick = useMutation({
     mutationFn: ({ id, patch }: { id: number; patch: Record<string, unknown>; undo: Record<string, unknown>; message: string }) => api.patch(`/conversations/${id}`, patch),
-    onSuccess: (_data, { id, undo, message }) => {
-      void client.invalidateQueries({ queryKey: ['conversations'] })
-      void client.invalidateQueries({ queryKey: ['mailboxes'] })
-      void client.invalidateQueries({ queryKey: ['conversation', id] })
-      toast(message, { action: { label: 'Undo', run: () => quick.mutate({ id, patch: undo, undo: {}, message: 'Undone' }) } })
+    onSuccess: async (_data, { id, undo, message }) => {
+      toast(message, { action: { label: 'Undo', run: () => (hide(id, false), quick.mutate({ id, patch: undo, undo: {}, message: 'Undone' })) } })
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['conversations'] }),
+        client.invalidateQueries({ queryKey: ['mailboxes'] }),
+        client.invalidateQueries({ queryKey: ['conversation', id] }),
+      ])
     },
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
+    // Once the list has refetched without it (or the change failed), the row no longer needs hiding.
+    onSettled: (_data, _err, { id }) => hide(id, false),
   })
-  const swipeClose = (c: ConversationSummary) => quick.mutate({ id: c.id, patch: { status: 'closed' }, undo: { status: c.status }, message: 'Closed' })
+  const swipeClose = (c: ConversationSummary) => {
+    if (!search && folder !== 'closed' && folder !== 'all') hide(c.id, true)
+    quick.mutate({ id: c.id, patch: { status: 'closed' }, undo: { status: c.status }, message: 'Closed' })
+  }
   const swipeAssign = (c: ConversationSummary) => {
     const mine = c.assignee?.id === user.id
+    if (!search && (mine ? folder === 'mine' || folder === 'assigned' : folder === 'unassigned')) hide(c.id, true)
     quick.mutate({ id: c.id, patch: { assigneeId: mine ? null : user.id }, undo: { assigneeId: c.assignee?.id ?? null }, message: mine ? 'Unassigned' : 'Assigned to you' })
   }
 
