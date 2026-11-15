@@ -61,7 +61,7 @@ export function SwipeRow({ className, contentClassName, children, start, end }: 
         if (!g?.horizontal) return
         const action = dx > 0 ? start : end
         if (action && Math.abs(dx) >= COMMIT) {
-          // Slide off, do it, then come back: the list refreshes and the row moves or leaves on its own.
+          // Slide off, do it, then come back. A row the action takes out of the list is hidden by its owner in the same render.
           setSettling(true)
           setDx(Math.sign(dx) * g.width)
           window.setTimeout(() => {
