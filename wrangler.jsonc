@@ -18,6 +18,9 @@
   // Lets the Worker and the Durable Object tell which upload of the code each one runs.
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "observability": { "enabled": true },
+  // Backups to DigitalOcean Spaces: new attachments every 15 minutes, the database nightly. Off until the
+  // SPACES_ secrets are set. See docs/self-hosting.md.
+  "triggers": { "crons": ["*/15 * * * *"] },
   "vars": {
     // Seconds between checks for new email.
     "IMAP_POLL_SECONDS": "60"

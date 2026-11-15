@@ -69,10 +69,61 @@ How it runs on Cloudflare:
 - **Use port 587 or 465 for SMTP.** Cloudflare blocks port 25.
 - **Your domain.** Add a custom domain to the Worker in the Cloudflare dashboard. Links in notification emails use the address you sign in on. To pin it, set `APP_URL` under `vars` in `wrangler.jsonc`.
 - **Plan.** The free plan is enough to try Ansa. For a team that keeps it open all day, use Workers Paid: an open browser tab keeps the Durable Object awake, and the free plan's daily allowance covers about one tab.
-- **Backups.** Cloudflare keeps 30 days of point-in-time recovery for the Durable Object. There is no file to download.
+- **Backups.** Cloudflare keeps 30 days of point-in-time recovery for the Durable Object. For a copy outside Cloudflare, see [Back up to DigitalOcean Spaces](#back-up-to-digitalocean-spaces).
 - **Updates.** Push to the repository that the button created. Cloudflare rebuilds and deploys it.
 
 Try it locally with `npm run dev:cf` (http://localhost:8787).
+
+## Back up to DigitalOcean Spaces
+
+On Cloudflare, Ansa can keep a copy of everything in a DigitalOcean Space (any S3-compatible storage works). It is off until you add the settings below.
+
+What it keeps, in a folder named `ansa` inside the Space:
+
+- **`db/`**: a snapshot of the database every night, after 07:00 UTC (set `BACKUP_HOUR_UTC` to change the hour). It keeps every snapshot from the last 30 days, then the first of each month for a year.
+- **`attachments/`**: every attachment, original email, avatar and logo, uploaded within 15 minutes of arriving. Files are uploaded once and never deleted from the Space.
+
+Sign-in sessions are not kept, so after a restore everyone signs in again. A snapshot does hold the key that unlocks the saved mail passwords, so keep the Space private.
+
+### Turn it on
+
+1. In DigitalOcean, create a Space (for example `acme-ansa-backups` in `nyc3`), with file listing restricted.
+2. Under **Spaces Object Storage → Access Keys**, create a key with read and write access to that Space.
+3. Add these as secrets on the Worker, in the Cloudflare dashboard (**Workers → ansa → Settings → Variables and Secrets**, type *Secret*) or from a terminal:
+
+   ```bash
+   npx wrangler secret put SPACES_KEY      # the access key
+   npx wrangler secret put SPACES_SECRET   # its secret
+   npx wrangler secret put SPACES_BUCKET   # the Space's name
+   npx wrangler secret put SPACES_REGION   # the datacenter, e.g. nyc3
+   ```
+
+The first backup runs within 15 minutes and takes a snapshot straight away. Check the Space for `ansa/db/` and `ansa/attachments/`. The Worker's logs show a `[backup]` line every run.
+
+### Restore
+
+A restore replaces all the data in the install it runs on. Pick one:
+
+- **The same install**, to go back in time. If the install has any data, it first saves that data as a `-before-restore` snapshot, so you can undo the restore.
+- **A new install**, if the old one is gone. Deploy Ansa to any Cloudflare account (the Deploy button or `npm run deploy`), but do not create an account on it.
+
+Then:
+
+1. Make sure the install has the four `SPACES_` secrets.
+2. Add one more secret, `RESTORE_FROM`, set to `latest`, or to the start of a snapshot's name to pick one, such as `20261114` (the last one from that day) or `20261114T071502Z`.
+3. Open the site. It shows "Restoring from a backup" and reloads by itself when the data is back, usually within a minute. Attachments then come back over the next few minutes while you work. Everyone signs in with their usual email and password.
+
+Each `RESTORE_FROM` value runs once, so you can leave it in place. To restore again later, set a different value. If the restore cannot run (a wrong name, for example), the page says why, and it tries again every few minutes until you fix or remove the setting.
+
+If the old install is still running, turn it off or remove its mailboxes. Otherwise both installs fetch the same mail.
+
+### A new address
+
+On a new install, or to change the address:
+
+1. In the Cloudflare dashboard, open **Workers → ansa → Settings → Domains & Routes → Add → Custom domain** and enter the address, e.g. `help.example.com`. The domain must be on Cloudflare. Cloudflare creates the DNS record and certificate.
+2. Sign in on the new address. Ansa uses the address you sign in on for links in emails. To pin it, set `APP_URL` under `vars` in `wrangler.jsonc`.
+3. If you use the live chat, copy the new chat code from the mailbox's settings (**Settings → Mailboxes**) into your website. Point anything that calls the API or the MCP server at the new address.
 
 ## Connect Google Workspace or Gmail
 

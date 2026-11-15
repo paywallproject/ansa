@@ -8,13 +8,19 @@ import crypto from 'node:crypto'
 import { config } from '../server/config.ts'
 import { initDb, get } from '../server/db.ts'
 import { initBlobs } from '../server/blobs.ts'
-import { createApp, prepareData, startTimers } from '../server/app.ts'
+import { createApp, pauseTimers, prepareData, startTimers } from '../server/app.ts'
 import { pruneSessions } from '../server/auth.ts'
 import { pollAllMailboxes } from '../server/mail/imap.ts'
 import { dispatchScheduled, nextScheduledAt, wakeSnoozed } from '../server/services/conversations.ts'
 import { importIsRunning, importStep } from '../server/services/import-helpscout.ts'
+import { findSnapshot, pruneSnapshots, restoreDatabase, restoreFilesStep, snapshot, uploadFiles } from './backup.ts'
+import { Spaces, type SpacesEnv } from './spaces.ts'
 
-interface Env {
+interface Env extends SpacesEnv {
+  /** Restore from a backup in Spaces: "latest", or the start of a snapshot's name such as "20261114". Done once per value. */
+  RESTORE_FROM?: string
+  /** The hour (UTC) after which the nightly database snapshot is taken. Default 7, about 2 or 3 am in New York. */
+  BACKUP_HOUR_UTC?: string
   ANSA: DurableObjectNamespace
   /** Which upload of the code is running. The Worker and the Durable Object can briefly differ after a deploy. */
   CF_VERSION_METADATA?: { id: string; timestamp: string }
@@ -25,6 +31,17 @@ const codeStamp = (env: Env) => Date.parse(env.CF_VERSION_METADATA?.timestamp ||
 const CODE_HEADER = 'x-ansa-code'
 
 const CHUNK = 1024 * 1024
+const HOUR = 3_600_000
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+/** What everyone sees while a backup is restored. */
+function restoringResponse(request: Request, error?: string) {
+  const message = error ? `The restore stopped: ${error} It tries again every few minutes. Fix the setting, or remove RESTORE_FROM to cancel.` : 'Restoring from a backup. This page reloads when it is done.'
+  const headers = { 'retry-after': '5', 'cache-control': 'no-store' }
+  if (new URL(request.url).pathname.startsWith('/api/')) return Response.json({ error: message }, { status: 503, headers })
+  const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><title>Restoring</title><body style="font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:20vh auto;padding:0 16px;color:#222"><p>${escapeHtml(message)}</p></body>`
+  return new Response(html, { status: 503, headers: { ...headers, 'content-type': 'text/html; charset=utf-8' } })
+}
 const toBuffer = (value: unknown) => (value instanceof Uint8Array ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) : value)
 
 export class AnsaStore extends DurableObject<Env> {
@@ -102,6 +119,15 @@ export class AnsaStore extends DurableObject<Env> {
     const theirs = Number(request.headers.get(CODE_HEADER) || 0)
     if (mine && theirs > mine && (request.method === 'GET' || request.method === 'HEAD')) this.ctx.abort('A newer version was deployed.')
 
+    if (this.restorePending()) {
+      pauseTimers(true)
+      const alarm = await this.ctx.storage.getAlarm()
+      if (alarm === null) await this.ctx.storage.setAlarm(Date.now())
+      const out = restoringResponse(request, this.ctx.storage.kv.get<string>('restoreError'))
+      out.headers.set(CODE_HEADER, String(mine))
+      return out
+    }
+
     this.learnUrl(request)
     const response = await this.app.fetch(request)
     await this.scheduleAlarm()
@@ -153,6 +179,12 @@ export class AnsaStore extends DurableObject<Env> {
       if (current === null || current > Date.now() + 3000) await this.ctx.storage.setAlarm(Date.now() + 1000)
       return
     }
+    // Attachments come back from a backup in short steps, like an import.
+    if (this.ctx.storage.kv.get('fileRestore') !== undefined) {
+      const current = await this.ctx.storage.getAlarm()
+      if (current === null || current > Date.now() + 3000) await this.ctx.storage.setAlarm(Date.now() + 1000)
+      return
+    }
     // A scheduled reply goes out on time, not at the next mail check.
     const due = nextScheduledAt()
     if (due !== null) {
@@ -165,8 +197,110 @@ export class AnsaStore extends DurableObject<Env> {
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + this.pollEveryMs())
   }
 
-  async alarm() {
+  /** The RESTORE_FROM value still to restore, or null. */
+  private restorePending(): string | null {
+    const from = this.env.RESTORE_FROM?.trim()
+    return from && this.ctx.storage.kv.get<string>('restoredFrom') !== from ? from : null
+  }
+
+  /**
+   * Replace everything with a backup. A database that has users is first saved to Spaces as "-before-restore",
+   * so a restore can itself be undone. When it is done the object restarts to load the restored data.
+   */
+  private async restore(from: string) {
+    pauseTimers(true)
+    const { kv } = this.ctx.storage
+    const spaces = Spaces.from(this.env)
     try {
+      if (!spaces) throw new Error('Backups are not set up. Add the SPACES_KEY, SPACES_SECRET, SPACES_BUCKET and SPACES_REGION secrets.')
+      let state = kv.get<{ from: string; key: string; saved: boolean }>('restore')
+      if (!state || state.from !== from) {
+        state = { from, key: await findSnapshot(spaces, from), saved: false }
+        kv.put('restore', state)
+      }
+      if (!state.saved) {
+        let hasUsers = false
+        try {
+          hasUsers = !!get('SELECT 1 FROM users LIMIT 1')
+        } catch {
+          // No users table: nothing to keep.
+        }
+        if (hasUsers) {
+          const before = await snapshot(this.ctx.storage, spaces, 'before-restore')
+          console.log(`[restore] saved the current data first as ${before.key}`)
+        }
+        state = { ...state, saved: true }
+        kv.put('restore', state)
+      }
+      console.log(`[restore] restoring ${state.key}`)
+      const result = await restoreDatabase(this.ctx.storage, spaces, state.key)
+      console.log(`[restore] ${result.rows} rows in ${result.tables} tables${result.skipped ? `, ${result.skipped} skipped` : ''}. Attachments follow.`)
+      kv.put('restoredFrom', from)
+      kv.put('fileRestore', '')
+      kv.delete('restore')
+      kv.delete('restoreError')
+      await this.ctx.storage.setAlarm(Date.now() + 1000)
+      await this.ctx.storage.sync()
+    } catch (err) {
+      const message = (err as Error).message
+      console.error('[restore]', message)
+      kv.put('restoreError', message)
+      await this.ctx.storage.setAlarm(Date.now() + 5 * 60_000)
+      return
+    }
+    this.ctx.abort('Restored from a backup.')
+  }
+
+  private async restoreFiles() {
+    const { kv } = this.ctx.storage
+    const after = kv.get<string>('fileRestore')
+    const spaces = Spaces.from(this.env)
+    if (after === undefined) return
+    if (!spaces) return void kv.delete('fileRestore')
+    const step = await restoreFilesStep(this.ctx.storage, spaces, after, Date.now() + 20_000)
+    if (step.after === null) {
+      kv.delete('fileRestore')
+      console.log('[restore] all attachments are back')
+    } else kv.put('fileRestore', step.after)
+  }
+
+  private backingUp = false
+  /**
+   * Called every 15 minutes by the cron trigger: upload new attachments, and once a night take a database snapshot.
+   * Does nothing until the SPACES_ secrets are set.
+   */
+  async backup(): Promise<string> {
+    if (this.restorePending()) return 'A restore is in progress; no backup taken.'
+    const spaces = Spaces.from(this.env)
+    if (!spaces) return 'Backups are off: the SPACES_ secrets are not set.'
+    if (this.backingUp) return 'A backup is already running.'
+    this.backingUp = true
+    const { kv } = this.ctx.storage
+    const done: string[] = []
+    try {
+      const last = kv.get<number>('lastSnapshotAt') ?? 0
+      const hour = Number(this.env.BACKUP_HOUR_UTC ?? 7)
+      if (!last || (Date.now() - last > 20 * HOUR && new Date().getUTCHours() >= hour)) {
+        const shot = await snapshot(this.ctx.storage, spaces)
+        kv.put('lastSnapshotAt', Date.now())
+        done.push(`Saved ${shot.key} (${shot.rows} rows, ${(shot.bytes / 1024 / 1024).toFixed(1)} MB).`)
+        const removed = await pruneSnapshots(spaces)
+        if (removed) done.push(`Removed ${removed} old snapshot${removed === 1 ? '' : 's'}.`)
+      }
+      const files = await uploadFiles(this.ctx.storage, spaces, Date.now() + 5 * 60_000)
+      if (files.sent) done.push(`Uploaded ${files.sent} file${files.sent === 1 ? '' : 's'}.`)
+      if (files.left) done.push(`${files.left} files still to upload.`)
+      return done.join(' ') || 'Up to date.'
+    } finally {
+      this.backingUp = false
+    }
+  }
+
+  async alarm() {
+    const from = this.restorePending()
+    if (from) return this.restore(from)
+    try {
+      await this.restoreFiles().catch((err) => console.error('[restore] attachments', err))
       // Each step on its own: one that fails must not stop the others, least of all the mail check.
       await importStep().catch((err) => console.error('[alarm] import', err))
       await dispatchScheduled().catch((err) => console.error('[alarm] send later', err))
@@ -184,6 +318,16 @@ export class AnsaStore extends DurableObject<Env> {
 let objectIsCurrent = false
 
 export default {
+  /** Backups: see AnsaStore.backup. */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      env.ANSA.get(env.ANSA.idFromName('main'))
+        .backup()
+        .then((result) => console.log(`[backup] ${result}`))
+        .catch((err) => console.error('[backup] failed:', err)),
+    )
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const mine = codeStamp(env)
     const object = () => env.ANSA.get(env.ANSA.idFromName('main'))
