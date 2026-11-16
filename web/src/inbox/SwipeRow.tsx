@@ -11,6 +11,8 @@ export interface SwipeAction {
 
 /** How far a row must travel before letting go does the action. */
 const COMMIT = 96
+/** The gap between the card and its action tile, plus the tile's margin from the screen edge. */
+const TILE_INSET = 20
 
 /**
  * A list row you can swipe on a touch screen. Swiping left reveals `end` (on the right), swiping right reveals
@@ -81,14 +83,22 @@ export function SwipeRow({ className, contentClassName, children, start, end }: 
       }}
     >
       {dx !== 0 && (
-        <div className={cx('absolute inset-0 flex items-center px-6 text-sm font-semibold text-white', dx > 0 ? cx(start?.tone, 'justify-start') : cx(end?.tone, 'justify-end'))} aria-hidden>
-          <span className={cx('flex items-center gap-2 transition-transform', Math.abs(dx) >= COMMIT ? 'scale-110' : 'opacity-80')}>
+        // As in Help Scout: the row lifts into a card, and the action waits beside it as a tile, icon over label.
+        <div
+          className={cx('absolute inset-y-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-2xl text-sm font-medium text-white', dx > 0 ? cx(start?.tone, 'left-2') : cx(end?.tone, 'right-2'))}
+          style={{ width: Math.max(0, Math.abs(dx) - TILE_INSET) }}
+          aria-hidden
+        >
+          <span className={cx('flex flex-col items-center gap-1 whitespace-nowrap transition', Math.abs(dx) >= COMMIT ? 'scale-110 opacity-100' : Math.abs(dx) > 48 ? 'opacity-80' : 'opacity-0')}>
             {dx > 0 ? start?.icon : end?.icon}
             {dx > 0 ? start?.label : end?.label}
           </span>
         </div>
       )}
-      <div className={cx('relative flex', contentClassName ?? 'bg-surface', settling && 'transition-transform duration-200 ease-out')} style={{ transform: dx ? `translateX(${dx}px)` : undefined }}>
+      <div
+        className={cx('relative flex', contentClassName ?? 'bg-surface', dx !== 0 && 'rounded-2xl shadow-[0_1px_4px_rgb(0_0_0/0.08)] ring-1 ring-inset ring-line', settling && 'transition-transform duration-200 ease-out')}
+        style={{ transform: dx ? `translateX(${dx}px)` : undefined }}
+      >
         {children}
       </div>
     </li>
