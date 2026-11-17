@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { api } from './api.ts'
 import { chat } from './chat/routes.ts'
+import { config } from './config.ts'
 import { userFromBearer, pruneSessions } from './auth.ts'
 import { prunePresence, pruneVisitors } from './events.ts'
 import { handleMcp } from './mcp.ts'
@@ -31,7 +32,8 @@ export function createApp() {
   app.get('/healthz', (c) => c.json({ ok: true }))
 
   // Model Context Protocol endpoint. Authenticate with an API token from Settings → API & MCP.
-  app.all('/mcp', bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
+  // Room for upload_attachment's largest file, base64 encoded (a third larger), plus the rest of the request.
+  app.all('/mcp', bodyLimit({ maxSize: Math.ceil((config.maxAttachmentBytes * 4) / 3) + 1024 * 1024 }), async (c) => {
     const user = userFromBearer(c.req.header('authorization'))
     if (!user) {
       return c.json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized. Send "Authorization: Bearer <Ansa API token>".' }, id: null }, 401, {

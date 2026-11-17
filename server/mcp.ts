@@ -23,11 +23,19 @@ import { getCustomer, listCustomers, updateCustomer } from './services/customers
 import { buildReport } from './services/reports.ts'
 import { publish } from './events.ts'
 import { assertConversation, assertMailbox, assertThread, canSeeMailbox, scopeOf } from './services/access.ts'
-import { attachmentFile } from './services/attachments.ts'
+import { attachmentFile, attachmentUrl, copyAttachment, inlineAttachmentIds, mimeFromName, removeFiles, storeAttachment } from './services/attachments.ts'
 import { AppError } from './services/customers.ts'
 
 const iso = (ts: number | null | undefined) => (ts ? new Date(ts).toISOString() : null)
-const toHtml = (body: string) => (/<(p|br|div|ul|ol|strong|em|a)\b[^>]*>/i.test(body) ? body : textToHtml(body))
+/**
+ * A body as HTML. Plain text becomes paragraphs; <img> tags in it (images from upload_attachment) are kept as they are.
+ */
+function toHtml(body: string): string {
+  if (/<(p|br|div|ul|ol|strong|em|a)\b[^>]*>/i.test(body)) return body
+  const images: string[] = []
+  const text = body.replace(/<img\b[^>]*>/gi, (tag) => `\uE000${images.push(tag) - 1}\uE001`)
+  return textToHtml(text).replace(/\uE000(\d+)\uE001/g, (_, i: string) => images[Number(i)])
+}
 // The reply box writes a blank line as an empty paragraph (paragraphs there have no gap between them),
 // so a draft needs one between its paragraphs to look the way it will be sent.
 const toDraftHtml = (body: string) => toHtml(body).replace(/<\/p>\s*<p(?=[\s>])/gi, '</p><p></p><p')
@@ -84,7 +92,14 @@ function detail(id: number, mailboxIds: number[] | null, userId: number) {
     ),
     other_conversations_from_customer: c.previousConversations.map((p) => ({ id: p.id, subject: p.subject, status: p.status })),
     // Your unsent draft on this conversation (from the web app or draft_reply), if any.
-    your_draft: c.draft ? { kind: c.draft.kind, text: htmlToText(c.draft.bodyHtml) } : null,
+    your_draft: c.draft
+      ? {
+          kind: c.draft.kind,
+          text: htmlToText(c.draft.bodyHtml),
+          images: inlineAttachmentIds(c.draft.bodyHtml).length || undefined,
+          attachments: c.draft.attachments.length ? c.draft.attachments.map((f) => ({ id: f.id, filename: f.filename, mime: f.mime, size: f.size })) : undefined,
+        }
+      : null,
   }
 }
 
@@ -117,6 +132,14 @@ const MAX_INLINE_BYTES = 10 * 1024 * 1024
 
 const STATUS = z.enum(['active', 'waiting', 'pending', 'closed', 'spam'])
 
+const ATTACHMENT_IDS = z
+  .array(z.number().int())
+  .optional()
+  .describe('Files to attach, from upload_attachment. A file already on a message in a conversation you can see is copied.')
+const BODY_IMAGES =
+  ' To show an image inside the body, upload it with upload_attachment and write <img src="attachment:ID" alt="…"> on a line of its own (or within HTML).'
+
+
 function buildServer(user: User) {
   const actor: Actor = { userId: user.id, via: 'mcp' }
   // The assistant sees exactly the mailboxes its teammate sees.
@@ -125,6 +148,37 @@ function buildServer(user: User) {
     assertConversation(user, id)
     return id
   }
+
+  /**
+   * A file the assistant names, as an unsent upload of this user that a new message can take: its own upload
+   * as it is, or a copy of a file on a message it can see (a customer's screenshot, say).
+   */
+  const claim = (id: number): { id: number; filename: string; mime: string } => {
+    const row = get<{ thread_id: number | null; uploaded_by: number | null; filename: string; mime: string }>('SELECT thread_id, uploaded_by, filename, mime FROM attachments WHERE id = ?', id)
+    if (!row || (!row.thread_id && row.uploaded_by !== user.id)) throw new AppError(`File ${id} not found. Upload it with upload_attachment first.`, 404)
+    if (!row.thread_id) return { id, filename: row.filename, mime: row.mime }
+    assertThread(user, row.thread_id)
+    const copy = copyAttachment(id, user.id)
+    if (!copy) throw new AppError(`File ${id} not found.`, 404)
+    return copy
+  }
+  /**
+   * Turn an assistant's body into HTML for a message, with the files it names ready to go on that message.
+   * Images are written <img src="attachment:ID"> (or with the file's own /api/attachments/… link).
+   */
+  const withFiles = (body: string, attachmentIds: number[] | undefined, html: (body: string) => string = toHtml) => {
+    let out = html(body.replace(/(<img\b[^>]*?\ssrc\s*=\s*["'])attachment:(\d+)(["'])/gi, (_, a: string, id: string, b: string) => `${a}/api/attachments/${id}${b}`))
+    const images = new Map<number, string>()
+    for (const id of inlineAttachmentIds(out)) {
+      const file = claim(id)
+      if (!file.mime.startsWith('image/')) throw new AppError(`File ${id} (${file.filename}) is not an image, so it cannot go in the body. Attach it with attachment_ids instead.`)
+      images.set(id, attachmentUrl(file.id, file.filename))
+    }
+    out = out.replace(/(<img\b[^>]*?\ssrc\s*=\s*["'])(?:https?:\/\/[^"'/]+)?\/api\/attachments\/(\d+)(?:[/?#][^"']*)?(["'])/gi, (_, a: string, id: string, b: string) => `${a}${images.get(Number(id))}${b}`)
+    const files = attachmentIds === undefined ? undefined : [...new Set(attachmentIds)].map((id) => claim(id).id)
+    return { html: out, attachmentIds: files }
+  }
+
   const server = new McpServer(
     { name: 'ansa', version: '1.0.0' },
     {
@@ -136,7 +190,9 @@ function buildServer(user: User) {
         'draft_reply is also safe: it writes a reply into the user\'s own draft for them to review and send from Ansa, and sends nothing. ' +
         'Prefer it when the user wants to check a reply first. ' +
         'To send a reply later, give reply_to_conversation a send_at time; list_scheduled_replies, cancel_scheduled_reply and send_scheduled_reply_now manage those. ' +
-        'get_attachment downloads a file attached to a message.',
+        'get_attachment downloads a file attached to a message. ' +
+        'To send files, upload each with upload_attachment, then pass their ids as attachment_ids to reply_to_conversation, draft_reply, add_note or create_conversation. ' +
+        'To show an image in the body itself, write <img src="attachment:ID" alt="…"> where it belongs instead. A file already on a message can be reused by its id.',
     },
   )
 
@@ -212,10 +268,12 @@ function buildServer(user: User) {
         'The signature is added automatically. `status` is what the conversation becomes after sending (default closed; a customer reply reopens it). ' +
         '`assignee_id` is who it is assigned to afterwards (null: unassigned); leave it out to follow the mailbox\'s setting. ' +
         'Send later: pass `send_at` to schedule the reply instead of sending it now; with `only_if_no_reply` it is held back if the customer writes first. ' +
-        'Until then it shows in the conversation as scheduled and can be cancelled with cancel_scheduled_reply.',
+        'Until then it shows in the conversation as scheduled and can be cancelled with cancel_scheduled_reply.' +
+        BODY_IMAGES,
       inputSchema: {
         id: z.number().int(),
         body: z.string().min(1),
+        attachment_ids: ATTACHMENT_IDS,
         status: z.enum(['active', 'waiting', 'pending', 'closed']).optional(),
         cc: z.array(z.string()).optional(),
         bcc: z.array(z.string()).optional(),
@@ -231,11 +289,9 @@ function buildServer(user: User) {
     safe((a) => {
       const sendAt = a.send_at === undefined ? undefined : futureTime(a.send_at, 'send_at')
       if (a.only_if_no_reply && sendAt === undefined) throw new Error('only_if_no_reply needs a send_at time.')
-      const replyId = addReply(
-        mine(a.id),
-        { bodyHtml: toHtml(a.body), status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id, sendAt, ifNoReply: a.only_if_no_reply },
-        actor,
-      )
+      const id = mine(a.id)
+      const { html, attachmentIds } = withFiles(a.body, a.attachment_ids)
+      const replyId = addReply(id, { bodyHtml: html, attachmentIds, status: a.status, cc: a.cc, bcc: a.bcc, assigneeId: a.assignee_id, sendAt, ifNoReply: a.only_if_no_reply }, actor)
       if (sendAt === undefined) return { sent: true, reply_id: replyId, conversation: brief(getConversation(a.id)) }
       return {
         sent: false,
@@ -294,13 +350,13 @@ function buildServer(user: User) {
     {
       title: 'Cancel a scheduled reply',
       description:
-        "Take back a reply that is waiting to be sent. Its text goes back into its writer's draft on the conversation (unless they already have one there); its attachments are removed.",
+        "Take back a reply that is waiting to be sent. Its text and files go back into its writer's draft on the conversation (unless they already have one there: then they are removed).",
       inputSchema: { reply_id: z.number().int().describe("From list_scheduled_replies, or a scheduled reply's id in get_conversation") },
       annotations: { destructiveHint: true },
     },
     safe((a) => {
       assertThread(user, a.reply_id)
-      cancelScheduled(a.reply_id, actor)
+      removeFiles(cancelScheduled(a.reply_id, actor))
       return { cancelled: true }
     }),
   )
@@ -367,27 +423,69 @@ function buildServer(user: User) {
   )
 
   server.registerTool(
+    'upload_attachment',
+    {
+      title: 'Upload a file',
+      description:
+        'Upload a file to send: attach it with attachment_ids on reply_to_conversation, draft_reply, add_note or create_conversation, ' +
+        'or show an image in the body with <img src="attachment:ID" alt="…">. Nothing is sent until the file is used on a message. ' +
+        'Give the file as `content_base64`, or as `text` for a text file. ' +
+        `Files can be up to ${Math.round(config.maxAttachmentBytes / 1048576)} MB. ` +
+        `With a shell, a large or local file is cheaper to upload by HTTP: curl -H "Authorization: Bearer <this server's token>" -F file=@path ${config.appUrl}/api/attachments (the reply's attachment.id is the id).`,
+      inputSchema: {
+        filename: z.string().min(1).describe('With its extension, e.g. invoice.pdf or screenshot.png'),
+        content_base64: z.string().optional().describe('The file, base64 encoded'),
+        text: z.string().optional().describe('The contents of a text file, instead of content_base64'),
+        mime: z.string().optional().describe('Its type, e.g. image/png. Left out, it follows the extension'),
+      },
+      annotations: { destructiveHint: false },
+    },
+    safe((a) => {
+      if ((a.content_base64 === undefined) === (a.text === undefined)) throw new Error('Give either content_base64 or text.')
+      const data = a.text !== undefined ? new TextEncoder().encode(a.text) : new Uint8Array(Buffer.from(a.content_base64!.replace(/^data:[^,]*,/, ''), 'base64'))
+      if (data.byteLength === 0) throw new Error('The file is empty.')
+      if (data.byteLength > config.maxAttachmentBytes) throw new AppError(`Files can be up to ${Math.round(config.maxAttachmentBytes / 1048576)} MB.`, 413)
+      const mime = a.mime?.trim() || (a.text !== undefined && mimeFromName(a.filename) === 'application/octet-stream' ? 'text/plain' : mimeFromName(a.filename))
+      const stored = storeAttachment(data, { filename: a.filename, mime, uploadedBy: user.id })
+      const image = mime.startsWith('image/')
+      return {
+        id: stored.id,
+        filename: stored.filename,
+        mime: stored.mime,
+        size: stored.size,
+        attach: `attachment_ids: [${stored.id}]`,
+        embed: image ? `<img src="attachment:${stored.id}" alt="${stored.filename.replace(/["<>&]/g, '')}">` : undefined,
+      }
+    }),
+  )
+
+  server.registerTool(
     'draft_reply',
     {
       title: 'Draft a reply for review',
       description:
         "Write a reply into the user's draft on a conversation, without sending anything. It shows in the conversation in Ansa as a draft " +
         'with an Edit button, ready to review and send. It replaces any draft they already had there (get_conversation shows it as your_draft). ' +
-        '`body` is plain text (blank lines separate paragraphs) or simple HTML; the signature is added when it is sent. `kind` "note" drafts an internal note instead.',
+        '`body` is plain text (blank lines separate paragraphs) or simple HTML; the signature is added when it is sent. `kind` "note" drafts an internal note instead. ' +
+        '`attachment_ids` are the files on the draft: left out, files already on it stay; [] removes them.' +
+        BODY_IMAGES,
       inputSchema: {
         id: z.number().int(),
         body: z.string().min(1),
         kind: z.enum(['reply', 'note']).optional().describe('Default reply'),
+        attachment_ids: ATTACHMENT_IDS,
       },
       annotations: { destructiveHint: false, idempotentHint: true },
     },
     safe((a) => {
       const id = mine(a.id)
-      saveDraft(id, user.id, a.kind ?? 'reply', toDraftHtml(a.body))
+      const { html, attachmentIds } = withFiles(a.body, a.attachment_ids, toDraftHtml)
+      saveDraft(id, user.id, a.kind ?? 'reply', html, attachmentIds)
       // An open conversation shows the draft at once (its reply box picks up a draft that appears while empty).
-      const c = getConversation(id)
+      const c = getConversation(id, { userId: user.id })
       publish({ type: 'conversation', id, mailboxId: c.mailboxId, reason: 'draft', actorId: user.id })
-      return { drafted: true, kind: a.kind ?? 'reply', url: c.url, note: 'Nothing was sent. The user can review and send it from Ansa.' }
+      const files = c.draft?.attachments.map((f) => ({ id: f.id, filename: f.filename, size: f.size })) ?? []
+      return { drafted: true, kind: a.kind ?? 'reply', images: inlineAttachmentIds(html).length, attachments: files, url: c.url, note: 'Nothing was sent. The user can review and send it from Ansa.' }
     }),
   )
 
@@ -395,12 +493,14 @@ function buildServer(user: User) {
     'add_note',
     {
       title: 'Add an internal note',
-      description: 'Add a private note to a conversation for the team. The customer never sees it. Good for summaries, findings and suggested replies.',
-      inputSchema: { id: z.number().int(), body: z.string().min(1) },
+      description: 'Add a private note to a conversation for the team. The customer never sees it. Good for summaries, findings and suggested replies.' + BODY_IMAGES,
+      inputSchema: { id: z.number().int(), body: z.string().min(1), attachment_ids: ATTACHMENT_IDS },
       annotations: { destructiveHint: false },
     },
     safe((a) => {
-      addNote(mine(a.id), { bodyHtml: toHtml(a.body) }, actor)
+      const id = mine(a.id)
+      const { html, attachmentIds } = withFiles(a.body, a.attachment_ids)
+      addNote(id, { bodyHtml: html, attachmentIds }, actor)
       return { saved: true, conversation: brief(getConversation(a.id)) }
     }),
   )
@@ -435,7 +535,8 @@ function buildServer(user: User) {
     {
       title: 'Start a conversation',
       description:
-        'Create a conversation. kind "email" sends a new email to the customer. kind "customer_message" logs a message received from the customer by another channel. kind "note" logs an internal note (a call, a chat) without emailing anyone.',
+        'Create a conversation. kind "email" sends a new email to the customer. kind "customer_message" logs a message received from the customer by another channel. kind "note" logs an internal note (a call, a chat) without emailing anyone.' +
+        BODY_IMAGES,
       inputSchema: {
         mailbox_id: z.number().int(),
         customer_email: z.string(),
@@ -443,6 +544,7 @@ function buildServer(user: User) {
         subject: z.string().min(1),
         body: z.string().min(1),
         kind: z.enum(['email', 'customer_message', 'note']),
+        attachment_ids: ATTACHMENT_IDS,
         tags: z.array(z.string()).optional(),
         assignee_id: z.number().int().nullable().optional(),
       },
@@ -451,13 +553,15 @@ function buildServer(user: User) {
     safe((a) => {
       assertMailbox(user, a.mailbox_id)
       const kind = a.kind === 'email' ? 'reply' : a.kind === 'customer_message' ? 'customer' : 'note'
+      const { html, attachmentIds } = withFiles(a.body, a.attachment_ids)
       const created = createConversation(
         {
           mailboxId: a.mailbox_id,
           customerEmail: a.customer_email,
           customerName: a.customer_name,
           subject: a.subject,
-          bodyHtml: toHtml(a.body),
+          bodyHtml: html,
+          attachmentIds,
           kind,
           tags: a.tags,
           assigneeId: a.assignee_id === undefined ? (kind === 'reply' ? user.id : null) : a.assignee_id,

@@ -40,6 +40,7 @@ const TOOLS: [string, string][] = [
   ['reply_to_conversation', 'Email the customer, now or later'],
   ['list_scheduled_replies', 'Replies waiting to send'],
   ['get_attachment', 'Download a file'],
+  ['upload_attachment', 'Attach a file or image'],
   ['add_note', 'Add an internal note'],
   ['update_conversation', 'Status, assignee, tags, snooze'],
   ['create_conversation', 'Start a conversation'],

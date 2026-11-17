@@ -24,6 +24,7 @@ The assistant acts as the teammate who created the token. Revoke the token to cu
 | `reply_to_conversation` | Email a reply to the customer  now, or at a set time (`send_at`), optionally only if the customer hasn't written by then (`only_if_no_reply`) |
 | `list_scheduled_replies`, `cancel_scheduled_reply`, `send_scheduled_reply_now` | See, take back or send early the replies waiting to go out |
 | `get_attachment` | Download a file from a message: images and text come back inline, other files as base64, files over 10 MB as a download link for the same token |
+| `upload_attachment` | Upload a file to send (base64, or text for a text file). Returns an id to attach, and for an image a tag to put it in the body |
 | `add_note` | Add an internal note |
 | `draft_reply` | Write a reply (or note) into your draft for you to review and send from Ansa. Sends nothing |
 | `update_conversation` | Change status, assignee, tags, subject, snooze |
@@ -33,6 +34,19 @@ The assistant acts as the teammate who created the token. Revoke the token to cu
 | `get_report` | Support metrics for the last N days |
 
 `reply_to_conversation` (without `send_at`), `send_scheduled_reply_now` and `create_conversation` (kind `email`) send real email. The server tells assistants to confirm with you first.
+
+### Files and images
+
+`reply_to_conversation`, `draft_reply`, `add_note` and `create_conversation` take `attachment_ids`: files from `upload_attachment`, or files already on a message in a conversation the assistant can see (those are copied, so a customer's screenshot can go into a note). To show an image inside the message, write `<img src="attachment:ID" alt="…">` in the body, on a line of its own in plain text or anywhere in HTML. In the email it goes out as part of the message, so it shows without loading anything from Ansa.
+
+An assistant with a shell can upload large or local files over HTTP instead, with the same token:
+
+```bash
+curl https://your-domain/api/attachments -H "Authorization: Bearer ansa_your_token" -F file=@screenshot.png
+# {"attachment":{"id":42,...}}  → attachment_ids: [42], or <img src="attachment:42">
+```
+
+A draft keeps its files: `draft_reply` without `attachment_ids` leaves the files already on the draft, and `[]` removes them.
 
 ## REST API
 
@@ -50,9 +64,10 @@ curl https://your-domain/api/conversations?folder=open \
 | `GET /api/conversations/:id` | One conversation with its thread |
 | `PATCH /api/conversations/:id` | `status`, `assigneeId`, `subject`, `addTags`, `removeTags`, `snoozedUntil`, `mailboxId` |
 | `POST /api/conversations/:id/reply` | `bodyHtml`, `status`, `cc`, `bcc`, `attachmentIds`, `assigneeId` (a user id, or `null` for unassigned; left out, the mailbox's "after sending" setting decides) |
-| `POST /api/conversations/:id/note` | `bodyHtml` |
+| `POST /api/conversations/:id/note` | `bodyHtml`, `attachmentIds` |
+| `PUT /api/conversations/:id/draft` | Your draft: `kind` (`reply` or `note`), `bodyHtml`, `attachmentIds` (left out, the draft's files stay) |
 | `POST /api/conversations/:id/merge` | `intoId` |
 | `GET /api/customers`, `GET/PATCH /api/customers/:id` | Customers |
 | `GET /api/tags`, `/api/saved-replies`, `/api/users`, `/api/mailboxes` | Reference data |
 | `GET /api/reports` | Query: `from`, `to` (ms), `mailbox`, `tz` |
-| `POST /api/attachments` | Multipart `file`. Returns an id for `attachmentIds` |
+| `POST /api/attachments` | Multipart `file`. Returns an id for `attachmentIds`, and a `url`: an image in `bodyHtml` as `<img src="{url}">` goes out inside the email |

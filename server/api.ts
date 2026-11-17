@@ -749,7 +749,8 @@ api.post('/conversations/:id/merge', async (c) => {
 api.put('/conversations/:id/draft', async (c) => {
   const data = await body(c)
   assertConversation(c.get('user'), idParam(c.req.param('id')))
-  saveDraft(idParam(c.req.param('id')), c.get('user').id, data.kind === 'note' ? 'note' : 'reply', String(data.bodyHtml ?? ''))
+  const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds.map(int) : undefined
+  saveDraft(idParam(c.req.param('id')), c.get('user').id, data.kind === 'note' ? 'note' : 'reply', String(data.bodyHtml ?? ''), attachmentIds)
   return c.json({ ok: true })
 })
 
@@ -839,7 +840,7 @@ api.post('/threads/:id/send-now', (c) => {
 })
 api.delete('/threads/:id/scheduled', (c) => {
   assertThread(c.get('user'), idParam(c.req.param('id')))
-  cancelScheduled(idParam(c.req.param('id')), actorOf(c))
+  removeFiles(cancelScheduled(idParam(c.req.param('id')), actorOf(c)))
   return c.json({ ok: true })
 })
 

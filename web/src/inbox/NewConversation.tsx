@@ -8,7 +8,7 @@ import { canSee } from '../lib/access'
 import { useDebounced, useSession, useUsers } from '../lib/hooks'
 import type { Conversation, Customer, Mailbox } from '../lib/types'
 import { Banner, Button, Field, Input, Modal, Select, cx } from '../ui'
-import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
+import { AttachButton, EditorArea, EditorToolbar, ImageButton, UploadList, editorHtml, isBodyImage, lineHtml, useBodyImages, useFileDrop, useRichEditor, useUploads } from './Editor'
 
 const splitEmails = (value: string) => value.split(/[,;\s]+/).filter(Boolean)
 
@@ -77,7 +77,7 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
   })
   /** Check what can be checked here, so Send later does not open for an email that cannot go out. */
   const ready = () => {
-    if (create.isPending || uploads.busy) return false
+    if (create.isPending || uploads.busy || bodyImages.busy) return false
     setError(null)
     if (!editorHtml(editor)) {
       setError(kind === 'reply' ? 'Write your message before sending.' : 'Write the note before saving.')
@@ -97,7 +97,18 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
   const submit = () => {
     if (ready()) create.mutate(undefined)
   }
-  const editor = useRichEditor({ placeholder: kind === 'reply' ? 'Write your message' : 'What happened? For example, notes from a phone call', onSubmit: submit })
+  const editor = useRichEditor({
+    placeholder: kind === 'reply' ? 'Write your message' : 'What happened? For example, notes from a phone call',
+    onSubmit: submit,
+    // Images go into the text where they were pasted or dropped; other files are attached.
+    onFiles: (files, at) => {
+      const images = files.filter(isBodyImage)
+      if (images.length) bodyImages.insert(images, at)
+      const others = files.filter((f) => !isBodyImage(f))
+      if (others.length) uploads.add(others)
+    },
+  })
+  const bodyImages = useBodyImages(editor)
   const existing = suggestions.data?.find((c) => c.emails.some((e) => e.toLowerCase() === email.trim().toLowerCase()))
   const addressButton = 'h-7 rounded-md px-1.5 text-[13px] font-medium text-fg-3 transition-colors hover:bg-sunken hover:text-fg'
   const addressRow = (label: 'Cc' | 'Bcc', value: string, onChange: (value: string) => void, onRemove: () => void) => (
@@ -123,11 +134,11 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
         <>
           <Button onClick={onClose}>Cancel</Button>
           {kind === 'reply' && (
-            <Button icon={<Clock />} disabled={create.isPending || uploads.busy} onClick={() => ready() && setLater(true)}>
+            <Button icon={<Clock />} disabled={create.isPending || uploads.busy || bodyImages.busy} onClick={() => ready() && setLater(true)}>
               Send later
             </Button>
           )}
-          <Button variant="primary" loading={create.isPending} disabled={uploads.busy} onClick={submit}>
+          <Button variant="primary" loading={create.isPending} disabled={uploads.busy || bodyImages.busy} onClick={submit}>
             {kind === 'reply' ? 'Send email' : 'Save conversation'}
           </Button>
           <SendLaterDialog
@@ -283,6 +294,7 @@ export function NewConversation({ prefill, mailboxes, onClose }: { prefill: Comp
             <EditorToolbar editor={editor}>
               <span className="mx-1 h-4 w-px bg-line" aria-hidden />
               <AttachButton onFiles={uploads.add} />
+              <ImageButton onFiles={(files) => bodyImages.insert(files)} />
             </EditorToolbar>
           </div>
         </div>
