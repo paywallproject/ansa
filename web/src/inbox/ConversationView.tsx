@@ -474,34 +474,6 @@ function Header({
 
         <Popover
           align="end"
-          width={248}
-          trigger={({ ref, ...props }) => (
-            <button ref={ref} type="button" {...props} className={cx(pill, STATUS_PILL[c.status])} aria-label={`Status: ${STATUS_LABEL[c.status]}`} disabled={busy}>
-              <StatusDot status={c.status} />
-              {STATUS_LABEL[c.status]}
-              <ChevronDown className="size-3.5 opacity-60" aria-hidden />
-            </button>
-          )}
-        >
-          {(close) =>
-            statusOptions().map((status) => (
-              <MenuItem
-                key={status}
-                icon={<StatusDot status={status} />}
-                checked={c.status === status}
-                onSelect={() => {
-                  close()
-                  onStatus(status)
-                }}
-              >
-                {STATUS_LABEL[status]} <span className="ml-1 text-fg-3">{(workspace().fourStatuses ? STATUS_HINT_FOUR : STATUS_HINT)[status]}</span>
-              </MenuItem>
-            ))
-          }
-        </Popover>
-
-        <Popover
-          align="end"
           width={230}
           trigger={({ ref, ...props }) => (
             <button ref={ref} type="button" {...props} className={cx(pill, 'pl-1.5')} aria-label={`Assignee: ${c.assignee?.name ?? 'nobody'}`}>
@@ -551,6 +523,34 @@ function Header({
               </MenuItem>
             </>
           )}
+        </Popover>
+
+        <Popover
+          align="end"
+          width={248}
+          trigger={({ ref, ...props }) => (
+            <button ref={ref} type="button" {...props} className={cx(pill, STATUS_PILL[c.status])} aria-label={`Status: ${STATUS_LABEL[c.status]}`} disabled={busy}>
+              <StatusDot status={c.status} />
+              {STATUS_LABEL[c.status]}
+              <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+            </button>
+          )}
+        >
+          {(close) =>
+            statusOptions().map((status) => (
+              <MenuItem
+                key={status}
+                icon={<StatusDot status={status} />}
+                checked={c.status === status}
+                onSelect={() => {
+                  close()
+                  onStatus(status)
+                }}
+              >
+                {STATUS_LABEL[status]} <span className="ml-1 text-fg-3">{(workspace().fourStatuses ? STATUS_HINT_FOUR : STATUS_HINT)[status]}</span>
+              </MenuItem>
+            ))
+          }
         </Popover>
 
         <Popover
