@@ -375,6 +375,10 @@ const migrations: string[] = [
     FROM threads t WHERE t.conversation_id = conversations.id AND t.type IN ('customer', 'reply', 'note') ORDER BY t.created_at DESC, t.id DESC LIMIT 1
   ), '');
   `,
+  `
+  -- Files attached to a draft (a JSON list of attachment ids), so they wait with it until it is sent.
+  ALTER TABLE drafts ADD COLUMN attachment_ids TEXT NOT NULL DEFAULT '[]';
+  `,
 ]
 
 export function migrate() {

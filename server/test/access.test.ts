@@ -9,7 +9,7 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ansa-access-test-'
 process.env.MAIL_DISABLED = '1'
 
 await import('../platform-node.ts')
-const { migrate, run, get } = await import('../db.ts')
+const { migrate, run, get, all } = await import('../db.ts')
 const { createApp } = await import('../app.ts')
 const { sha256, encrypt } = await import('../crypto.ts')
 const conversations = await import('../services/conversations.ts')
@@ -532,4 +532,101 @@ test('MCP: replies scheduled for later, and attachments downloaded', async () =>
   const billingConv = conversations.createConversation({ mailboxId: billing, customerEmail: 'y@example.com', subject: 'B', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' })
   const hidden = storeAttachment(new Uint8Array([1]), { filename: 'secret.bin', threadId: get<{ id: number }>('SELECT id FROM threads WHERE conversation_id = ?', billingConv.id)!.id })
   assert.equal((await tool('get_attachment', { id: hidden.id })).isError, true)
+})
+
+test('MCP: files uploaded, attached and shown in the body, on replies, notes and drafts', async () => {
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${agentToken}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    })
+    const text = await res.text()
+    const json = JSON.parse(text.startsWith('{') ? text : text.split('\n').find((l) => l.startsWith('data: '))!.slice(6))
+    const result = json.result as { isError?: boolean; content: any[] }
+    return { ...result, data: result.isError ? result.content[0].text : JSON.parse(result.content[0].text) }
+  }
+  const { storeAttachment } = await import('../services/attachments.ts')
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'files@example.com', subject: 'Files', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const customerThread = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'customer'`, conv.id)!.id
+  const theirs = storeAttachment(new Uint8Array([9, 9]), { filename: 'their-screenshot.png', mime: 'image/png', threadId: customerThread })
+
+  // Upload: as base64 or as text. The type follows the name.
+  const png = (await tool('upload_attachment', { filename: 'steps.png', content_base64: Buffer.from([137, 80, 78, 71]).toString('base64') })).data
+  assert.equal(png.mime, 'image/png')
+  assert.equal(png.embed, `<img src="attachment:${png.id}" alt="steps.png">`)
+  const csv = (await tool('upload_attachment', { filename: 'report.csv', text: 'a,b\n1,2' })).data
+  assert.deepEqual([csv.mime, csv.size, csv.embed], ['text/csv', 7, undefined])
+  assert.equal((await tool('upload_attachment', { filename: 'x.txt' })).isError, true)
+
+  // A reply in plain text with an image on its own line, a file attached, and the customer's file sent back.
+  const reply = (await tool('reply_to_conversation', { id: conv.id, body: `Here is how:\n\n${png.embed}\n\nThanks`, attachment_ids: [csv.id, theirs.id] })).data
+  assert.equal(reply.sent, true)
+  const thread = get<{ body_html: string }>('SELECT body_html FROM threads WHERE id = ?', reply.reply_id)!
+  assert.match(thread.body_html, new RegExp(`<p><img src="/api/attachments/${png.id}/steps.png" alt="steps.png" /></p>`))
+  const files = all<any>('SELECT id, filename, inline FROM attachments WHERE thread_id = ? ORDER BY id', reply.reply_id)
+  assert.deepEqual(files.map((f: any) => [f.filename, f.inline]), [['steps.png', 1], ['report.csv', 0], ['their-screenshot.png', 0]])
+  assert.notEqual(files[2].id, theirs.id, "the customer's file is copied, and stays on their message")
+  assert.equal(get<{ thread_id: number }>('SELECT thread_id FROM attachments WHERE id = ?', theirs.id)!.thread_id, customerThread)
+
+  // In the email: the image is a part of the message, linked by cid; the other files are plain attachments.
+  const nodemailer = (await import('nodemailer')).default as any
+  const { config } = await import('../config.ts')
+  const { deliverThread } = await import('../mail/outbound.ts')
+  const sent: any[] = []
+  const realCreate = nodemailer.createTransport
+  nodemailer.createTransport = () => ({ sendMail: async (mail: any) => void sent.push(mail), close() {} })
+  run(`UPDATE mailboxes SET smtp_host = 'smtp.acme.test' WHERE id = ?`, sales)
+  config.mailDisabled = false
+  try {
+    await deliverThread(reply.reply_id)
+  } finally {
+    config.mailDisabled = true
+    nodemailer.createTransport = realCreate
+  }
+  const cid = `ansa-${png.id}@acme.test`
+  assert.ok(sent[0].html.includes(`<img src="cid:${cid}"`), 'the image points at its part')
+  assert.ok(!sent[0].html.includes('/api/attachments/'), 'no link that needs a login')
+  assert.deepEqual(sent[0].attachments.map((a: any) => [a.filename, a.cid]), [['steps.png', cid], ['report.csv', undefined], ['their-screenshot.png', undefined]])
+
+  // Used files cannot be claimed again by id; an upload goes on one message only, so a second use copies it.
+  const note = (await tool('add_note', { id: conv.id, body: `<p>Sent them this:</p><img src="attachment:${png.id}">` })).data
+  assert.equal(note.saved, true)
+  const noteImage = get<any>(`SELECT a.id, a.inline FROM attachments a JOIN threads t ON t.id = a.thread_id WHERE t.conversation_id = ? AND t.type = 'note'`, conv.id)
+  assert.deepEqual([noteImage.inline, noteImage.id !== png.id], [1, true])
+
+  // Not a file that is not an image in the body, not someone else's upload, not a file in a mailbox the teammate cannot see.
+  assert.match((await tool('add_note', { id: conv.id, body: `<img src="attachment:${csv.id}">` })).data, /not an image/)
+  const adminUpload = storeAttachment(new Uint8Array([1]), { filename: 'admin.pdf', mime: 'application/pdf', uploadedBy: adminId })
+  assert.match((await tool('add_note', { id: conv.id, body: 'x', attachment_ids: [adminUpload.id] })).data, /not found/)
+  const billingConv = conversations.createConversation({ mailboxId: billing, customerEmail: 'z@example.com', subject: 'B', bodyHtml: '<p>x</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const hidden = storeAttachment(new Uint8Array([1]), { filename: 'secret.pdf', threadId: get<{ id: number }>('SELECT id FROM threads WHERE conversation_id = ?', billingConv.id)!.id })
+  assert.equal((await tool('add_note', { id: conv.id, body: 'x', attachment_ids: [hidden.id] })).isError, true)
+
+  // A draft keeps its image and its files; the app shows them, and sending it from the app sends them.
+  const shot = (await tool('upload_attachment', { filename: 'shot.jpg', content_base64: Buffer.from([255, 216]).toString('base64') })).data
+  const doc = (await tool('upload_attachment', { filename: 'guide.pdf', content_base64: Buffer.from([37, 80]).toString('base64') })).data
+  const drafted = (await tool('draft_reply', { id: conv.id, body: `Look:\n\n${shot.embed}`, attachment_ids: [doc.id] })).data
+  assert.deepEqual([drafted.images, drafted.attachments.map((f: any) => f.filename)], [1, ['guide.pdf']])
+  // Revising the text keeps its files.
+  await tool('draft_reply', { id: conv.id, body: `Look at this:\n\n${shot.embed}` })
+  const draft = (await call(agentToken, 'GET', `/conversations/${conv.id}`)).data.conversation.draft
+  assert.deepEqual(draft.attachments.map((f: any) => f.id), [doc.id])
+  assert.match(draft.bodyHtml, new RegExp(`/api/attachments/${shot.id}/shot.jpg`))
+  assert.deepEqual((await tool('get_conversation', { id: conv.id })).data.your_draft.attachments.map((f: any) => f.filename), ['guide.pdf'])
+  const fromApp = await call(agentToken, 'POST', `/conversations/${conv.id}/reply`, { bodyHtml: draft.bodyHtml, attachmentIds: draft.attachments.map((f: any) => f.id) })
+  assert.equal(fromApp.status, 201)
+  const last = fromApp.data.conversation.threads.at(-1)
+  assert.deepEqual(last.attachments.map((f: any) => [f.filename, f.inline]), [['shot.jpg', true], ['guide.pdf', false]])
+  assert.equal(fromApp.data.conversation.draft, null)
+
+  // Taken back from Send later, a reply's files return to the draft with its text.
+  const later = await tool('upload_attachment', { filename: 'later.txt', text: 'soon' })
+  const at = new Date(Date.now() + 86_400_000).toISOString()
+  const scheduled = (await tool('reply_to_conversation', { id: conv.id, body: 'Later', send_at: at, attachment_ids: [later.data.id] })).data
+  await tool('cancel_scheduled_reply', { reply_id: scheduled.reply_id })
+  assert.deepEqual((await call(agentToken, 'GET', `/conversations/${conv.id}`)).data.conversation.draft.attachments.map((f: any) => f.filename), ['later.txt'])
+  // Discarding it removes the files from the draft.
+  await call(agentToken, 'PUT', `/conversations/${conv.id}/draft`, { kind: 'reply', bodyHtml: '', attachmentIds: [] })
+  assert.equal((await call(agentToken, 'GET', `/conversations/${conv.id}`)).data.conversation.draft, null)
 })

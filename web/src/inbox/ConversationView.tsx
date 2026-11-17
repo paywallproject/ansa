@@ -1418,7 +1418,7 @@ function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdi
   const isNote = draft.kind === 'note'
   const discard = async () => {
     try {
-      await api.put(`/conversations/${conversation.id}/draft`, { kind: draft.kind, bodyHtml: '' })
+      await api.put(`/conversations/${conversation.id}/draft`, { kind: draft.kind, bodyHtml: '', attachmentIds: [] })
       client.setQueryData(['conversation', conversation.id], (old: any) => (old ? { ...old, conversation: { ...old.conversation, draft: null } } : old))
       void client.invalidateQueries({ queryKey: ['conversations'] })
       toast('Draft discarded')
@@ -1441,6 +1441,13 @@ function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdi
           )}
         </header>
         <div className="prose-mail mt-4" dangerouslySetInnerHTML={{ __html: lineHtml(draft.bodyHtml) }} />
+        {draft.attachments.length > 0 && (
+          <ul className="mt-4 flex flex-wrap gap-2" aria-label="Attached files">
+            {draft.attachments.map((file) => (
+              <AttachmentChip key={file.id} file={file} />
+            ))}
+          </ul>
+        )}
         <div className="mt-5 flex items-center gap-2">
           <Button onClick={onEdit}>Edit</Button>
           <Button variant="ghost" onClick={() => void discard()}>Discard</Button>

@@ -9,6 +9,7 @@ import { decrypt } from '../crypto.ts'
 import { publish } from '../events.ts'
 import { escapeHtml, htmlToText } from './html.ts'
 import { openPixel } from '../services/opens.ts'
+import { embedInlineImages } from '../services/attachments.ts'
 
 export interface SmtpSettings {
   host: string
@@ -221,7 +222,11 @@ export async function deliverThread(threadId: number): Promise<void> {
     )
     const isFirst = !get('SELECT 1 FROM threads WHERE conversation_id = ? AND type IN (\'customer\', \'reply\') AND id < ? LIMIT 1', conversation.id, threadId)
 
-    let html = thread.body_html as string
+    // The body's images go as parts of the email: a link to Ansa would need a login.
+    const files = all<any>('SELECT * FROM attachments WHERE thread_id = ?', threadId)
+    const domain = mailbox.email.split('@')[1] || 'ansa'
+    const cidOf = (a: any) => (a.content_id as string | null) || `ansa-${a.id}@${domain}`
+    let html = embedInlineImages(thread.body_html as string, files.filter((a) => a.inline).map((a) => ({ id: a.id, cid: cidOf(a) })))
     if (signature) html += `<br><div style="color: #57606a;">${signature}</div>`
     if (previous) {
       // Inline images point at this server and need a login, so they cannot travel in the quote.
@@ -234,9 +239,10 @@ export async function deliverThread(threadId: number): Promise<void> {
     // Open tracking: after everything else, so the image is the very last thing in the message.
     if (thread.via !== 'auto') html += openPixel(threadId)
 
-    const attachments = all<any>('SELECT * FROM attachments WHERE thread_id = ?', threadId).flatMap((a) => {
+    const attachments = files.flatMap((a) => {
       const content = blobs.get(a.storage_key)
-      return content ? [{ filename: a.filename as string, content: Buffer.from(content), contentType: a.mime as string }] : []
+      if (!content) return []
+      return [{ filename: a.filename as string, content: Buffer.from(content), contentType: a.mime as string, ...(a.inline ? { cid: cidOf(a) } : {}) }]
     })
 
     await sendMail(mailbox, {

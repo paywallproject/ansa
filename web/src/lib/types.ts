@@ -198,7 +198,8 @@ export interface Conversation extends Omit<ConversationSummary, 'customer'> {
   previousConversations: { id: number; subject: string; status: Status; updatedAt: number }[]
   /** All of the customer's conversations you can see, this one included. */
   conversationCount: number
-  draft: { kind: 'reply' | 'note'; bodyHtml: string; updatedAt?: number } | null
+  /** Your unsent draft. Its images are in the body; `attachments` are its other files. */
+  draft: { kind: 'reply' | 'note'; bodyHtml: string; attachments: Attachment[]; updatedAt?: number } | null
   /** Live chat only: true while the visitor has the chat open. Null for other conversations. */
   visitorOnline: boolean | null
   url: string

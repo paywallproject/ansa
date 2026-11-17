@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Bold, FileText, Italic, Link as LinkIcon, List, ListOrdered, Paperclip, TextQuote, Type, X } from 'lucide-react'
+import Image from '@tiptap/extension-image'
+import { Bold, FileText, ImagePlus, Italic, Link as LinkIcon, List, ListOrdered, Paperclip, TextQuote, Type, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { fileSize } from '../lib/format'
 import type { Attachment } from '../lib/types'
@@ -19,9 +20,15 @@ export function useRichEditor(options: {
   /** Runs when the text or the cursor position changes. */
   onCaret?: (editor: Editor) => void
   editable?: boolean
+  /**
+   * Files pasted or dropped into the text. Given, the editor shows images in the body and leaves every file
+   * to this (with the place it was dropped); left out, it shows no images and files are left to the page.
+   */
+  onFiles?: (files: File[], at?: number) => void
 }) {
   const latest = useRef(options)
   latest.current = options
+  const images = !!options.onFiles
   return useEditor({
     extensions: [
       StarterKit.configure({
@@ -30,10 +37,25 @@ export function useRichEditor(options: {
         link: { openOnClick: false, autolink: true, HTMLAttributes: { rel: 'noopener noreferrer nofollow', target: '_blank' } },
       }),
       Placeholder.configure({ placeholder: () => latest.current.placeholder }),
+      // Inline, so an image can sit in a line of text as in a mail app.
+      ...(images ? [Image.configure({ inline: true })] : []),
     ],
     content: options.content ?? '',
     editorProps: {
       attributes: { class: 'prose-mail', role: 'textbox', 'aria-multiline': 'true', 'aria-label': options.placeholder },
+      handlePaste: (_view, event) => {
+        const files = Array.from(event.clipboardData?.files ?? [])
+        if (!latest.current.onFiles || files.length === 0) return false
+        latest.current.onFiles(files)
+        return true
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        const files = Array.from(event.dataTransfer?.files ?? [])
+        if (moved || !latest.current.onFiles || files.length === 0) return false
+        event.preventDefault()
+        latest.current.onFiles(files, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos)
+        return true
+      },
       handleKeyDown: (_view, event) => {
         if (latest.current.onKeyDown?.(event)) return true
         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -168,9 +190,10 @@ interface Upload {
   size: number
   attachment?: Attachment
 }
+const fromAttachment = (a: Attachment): Upload => ({ key: `file-${a.id}`, name: a.filename, size: a.size, attachment: a })
 
-export function useUploads() {
-  const [uploads, setUploads] = useState<Upload[]>([])
+export function useUploads(initial: Attachment[] = []) {
+  const [uploads, setUploads] = useState<Upload[]>(() => initial.map(fromAttachment))
   const { toast } = useFeedback()
   const add = (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
@@ -190,9 +213,67 @@ export function useUploads() {
     add,
     remove: (key: string) => setUploads((list) => list.filter((u) => u.key !== key)),
     clear: () => setUploads([]),
+    /** Show these files, already uploaded (a draft's files). */
+    reset: (files: Attachment[]) => setUploads(files.map(fromAttachment)),
     busy: uploads.some((u) => !u.attachment),
+    /** The files uploaded so far. */
+    files: () => uploads.flatMap((u) => (u.attachment ? [u.attachment] : [])),
     ids: uploads.flatMap((u) => (u.attachment ? [u.attachment.id] : [])),
   }
+}
+
+/** Images a mail app shows in a message. Other files go as attachments. */
+const BODY_IMAGE = /^image\/(png|jpeg|gif|webp)$/
+export const isBodyImage = (file: File) => BODY_IMAGE.test(file.type)
+
+/**
+ * Images in the body of a message: each is uploaded, then put where the cursor (or the drop) was.
+ * Sending waits while one is on its way (`busy`).
+ */
+export function useBodyImages(editor: Editor | null) {
+  const [pending, setPending] = useState(0)
+  const { toast } = useFeedback()
+  const insert = (files: File[], at?: number) => {
+    if (!editor) return
+    // Where it goes is marked now: the cursor may move while the file uploads.
+    let place = at ?? editor.state.selection.to
+    for (const file of files) {
+      setPending((n) => n + 1)
+      api
+        .upload<{ attachment: Attachment }>('/attachments', file)
+        .then(({ attachment }) => {
+          if (editor.isDestroyed) return
+          const pos = Math.min(place, editor.state.doc.content.size)
+          editor.chain().focus().insertContentAt(pos, { type: 'image', attrs: { src: attachment.url, alt: attachment.filename } }).run()
+          place = editor.state.selection.to
+        })
+        .catch((err: Error) => toast(`${file.name}: ${err.message}`, { kind: 'error' }))
+        .finally(() => setPending((n) => n - 1))
+    }
+  }
+  return { insert, busy: pending > 0 }
+}
+
+export function ImageButton({ onFiles }: { onFiles: (files: File[]) => void }) {
+  const input = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <IconButton label="Insert image" size="sm" onClick={() => input.current?.click()}>
+        <ImagePlus className="size-4" />
+      </IconButton>
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files?.length) onFiles(Array.from(e.target.files))
+          e.target.value = ''
+        }}
+      />
+    </>
+  )
 }
 
 export function AttachButton({ onFiles }: { onFiles: (files: FileList) => void }) {
@@ -257,12 +338,15 @@ export function useFileDrop(onFiles: (files: File[]) => void) {
       onDrop: (e: React.DragEvent) => {
         depth.current = 0
         setOver(false)
+        // The editor took it (an image dropped into the text).
+        if (e.nativeEvent.defaultPrevented) return
         if (e.dataTransfer.files.length) {
           e.preventDefault()
           onFiles(Array.from(e.dataTransfer.files))
         }
       },
       onPaste: (e: React.ClipboardEvent) => {
+        if (e.nativeEvent.defaultPrevented) return
         const files = Array.from(e.clipboardData.files)
         if (files.length) {
           e.preventDefault()

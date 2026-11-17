@@ -5,11 +5,11 @@ import { PHONE } from '../lib/phone'
 import { api } from '../lib/api'
 import { canSee } from '../lib/access'
 import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
-import type { Conversation, Status, User, Viewer } from '../lib/types'
+import type { Attachment, Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
 import { STATUS_DOT, statusOptions } from '../lib/workspace'
 import { Avatar, Banner, Button, Input, MenuDivider, MenuItem, MenuLabel, Popover, cx, useFeedback } from '../ui'
-import { AttachButton, EditorArea, EditorToolbar, UploadList, editorHtml, lineHtml, paragraphHtml, useFileDrop, useRichEditor, useUploads } from './Editor'
+import { AttachButton, EditorArea, EditorToolbar, ImageButton, UploadList, editorHtml, isBodyImage, lineHtml, paragraphHtml, useBodyImages, useFileDrop, useRichEditor, useUploads } from './Editor'
 import { SendLaterDialog } from './SendLater'
 import { useZone, zonedLabel } from '../lib/timezone'
 
@@ -20,6 +20,10 @@ export interface ComposerHandle {
 type SendStatus = Exclude<Status, 'spam'>
 
 const splitEmails = (value: string) => value.split(/[,;\s]+/).filter(Boolean)
+
+/** What a saved draft holds, to tell whether one that arrives is new. */
+const draftKey = (draft: { bodyHtml: string; attachments: { id: number }[] } | null | undefined) =>
+  draft ? `${draft.bodyHtml}\u0000${draft.attachments.map((f) => f.id).join(',')}` : ''
 
 export function fillSavedReply(html: string, conversation: Pick<Conversation, 'customer' | 'id'>, agentName: string) {
   const first = conversation.customer.name.split(' ')[0] || 'there'
@@ -53,7 +57,10 @@ export const Composer = forwardRef<
   const [showBcc, setShowBcc] = useState(false)
   const [cc, setCc] = useState(conversation.cc.join(', '))
   const [bcc, setBcc] = useState('')
-  const uploads = useUploads()
+  const uploads = useUploads(conversation.draft?.attachments)
+  // The files to save with the draft: those uploaded so far. A ref, as a save can run from an earlier render's timer.
+  const draftFiles = useRef(uploads.files())
+  draftFiles.current = uploads.files()
   const savedReplies = useSavedReplies()
   const [filter, setFilter] = useState('')
   const draftTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -62,23 +69,23 @@ export const Composer = forwardRef<
   const modeRef = useRef(mode)
   modeRef.current = mode
 
-  // The draft as saved, mirrored into the conversation's cache so the thread's draft card shows it at once.
-  const lastSaved = useRef(conversation.draft?.bodyHtml ?? '')
-  const cacheDraft = (bodyHtml: string, kind: 'reply' | 'note') => {
-    lastSaved.current = bodyHtml
-    client.setQueryData(['conversation', conversation.id], (old: any) =>
-      old ? { ...old, conversation: { ...old.conversation, draft: bodyHtml ? { kind, bodyHtml, updatedAt: Date.now() } : null } } : old,
-    )
+  // The draft as saved (its text and files), mirrored into the conversation's cache so the thread's draft card shows it at once.
+  const lastSaved = useRef(draftKey(conversation.draft))
+  const cacheDraft = (bodyHtml: string, kind: 'reply' | 'note', attachments: Attachment[]) => {
+    const draft = bodyHtml || attachments.length ? { kind, bodyHtml, attachments, updatedAt: Date.now() } : null
+    lastSaved.current = draftKey(draft)
+    client.setQueryData(['conversation', conversation.id], (old: any) => (old ? { ...old, conversation: { ...old.conversation, draft } } : old))
     void client.invalidateQueries({ queryKey: ['conversations'] })
   }
-  const saveNow = (html: string, kind: 'reply' | 'note') => {
+  const saveNow = (html: string, kind: 'reply' | 'note', files = draftFiles.current) => {
     clearTimeout(draftTimer.current)
-    setSaveState(html ? 'saving' : 'idle')
+    const something = !!html || files.length > 0
+    setSaveState(something ? 'saving' : 'idle')
     return api
-      .put(`/conversations/${conversation.id}/draft`, { kind, bodyHtml: html })
+      .put(`/conversations/${conversation.id}/draft`, { kind, bodyHtml: html, attachmentIds: files.map((f) => f.id) })
       .then(() => {
-        setSaveState(html ? 'saved' : 'idle')
-        cacheDraft(html, kind)
+        setSaveState(something ? 'saved' : 'idle')
+        cacheDraft(html, kind, files)
       })
       .catch(() => setSaveState('idle'))
   }
@@ -107,6 +114,8 @@ export const Composer = forwardRef<
       setSaveState('idle')
       setFilled(false)
       lastSaved.current = ''
+      // Sending used the draft's files: nothing is left to save.
+      firstFiles.current = ''
       uploads.clear()
       setPickedAssignee(undefined)
       onTyping(false)
@@ -119,7 +128,7 @@ export const Composer = forwardRef<
   })
 
   const submit = () => {
-    if (send.isPending || uploads.busy) return
+    if (send.isPending || uploads.busy || bodyImages.busy) return
     if (!editorHtml(editor) && uploads.ids.length === 0) return
     send.mutate({ status: sendStatus })
   }
@@ -183,6 +192,7 @@ export const Composer = forwardRef<
       return false
     },
     onCaret: (ed) => trackMention(ed),
+    onFiles: (files, at) => placeFiles(files, at),
     onChange: (html) => {
       onTyping(!!html && modeRef.current === 'reply')
       setFilled(!!html)
@@ -193,25 +203,49 @@ export const Composer = forwardRef<
   })
   useEffect(() => () => clearTimeout(draftTimer.current), [])
 
-  // A draft changed somewhere else (an assistant's draft_reply, a reply taken back from Send later, Discard on
-  // the draft card): load it, unless the reply box is open with text in it, which is never overwritten.
-  const draftHtml = conversation.draft?.bodyHtml ?? ''
+  // Images go into the text where they were pasted or dropped; other files are attached.
+  const bodyImages = useBodyImages(editor)
+  const placeFiles = (files: File[], at?: number) => {
+    const images = files.filter(isBodyImage)
+    if (images.length) bodyImages.insert(images, at)
+    const others = files.filter((f) => !isBodyImage(f))
+    if (others.length) uploads.add(others)
+  }
+
+  // A file finished uploading or was removed: the draft keeps its files, so save it (if there is a draft to keep).
+  const fileKey = uploads.ids.join(',')
+  const firstFiles = useRef(fileKey)
   useEffect(() => {
-    if (!editor || draftHtml === lastSaved.current) return
-    lastSaved.current = draftHtml
-    if (open && !editor.isEmpty) return
+    if (fileKey === firstFiles.current) return
+    firstFiles.current = fileKey
+    const html = editorHtml(editor)
+    if (html || uploads.ids.length || lastSaved.current) void saveNow(html, modeRef.current)
+  }, [fileKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A draft changed somewhere else (an assistant's draft_reply, a reply taken back from Send later, Discard on
+  // the draft card): load it, unless the reply box is open with something in it, which is never overwritten.
+  const remoteKey = draftKey(conversation.draft)
+  useEffect(() => {
+    if (!editor || remoteKey === lastSaved.current) return
+    lastSaved.current = remoteKey
+    if (open && (!editor.isEmpty || uploads.uploads.length > 0)) return
+    const draftHtml = conversation.draft?.bodyHtml ?? ''
+    const files = conversation.draft?.attachments ?? []
     setMode(conversation.draft?.kind ?? 'reply')
     editor.commands.setContent(paragraphHtml(draftHtml), { emitUpdate: false })
+    // Loading them is not a change to save.
+    firstFiles.current = files.map((f) => f.id).join(',')
+    uploads.reset(files)
     setFilled(!!draftHtml)
-    setSaveState(draftHtml ? 'saved' : 'idle')
-  }, [draftHtml, editor]) // eslint-disable-line react-hooks/exhaustive-deps
+    setSaveState(draftHtml || files.length ? 'saved' : 'idle')
+  }, [remoteKey, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Save the draft and close the reply box. The draft then shows in the conversation, with Edit to reopen it. */
   const saveAndClose = () => {
     const html = editorHtml(editor)
     onOpenChange(false)
     onTyping(false)
-    if (!html) return
+    if (!html && uploads.ids.length === 0) return
     void saveNow(html, mode)
     toast('Draft saved')
   }
@@ -234,8 +268,9 @@ export const Composer = forwardRef<
     setSaveState('idle')
     setFilled(false)
     uploads.clear()
+    firstFiles.current = ''
     onTyping(false)
-    void saveNow('', mode)
+    void saveNow('', mode, [])
     onOpenChange(false)
   }
 
@@ -352,7 +387,7 @@ export const Composer = forwardRef<
             <X className="size-6" aria-hidden />
           </button>
           <h2 className="flex-1 text-center text-[17px] font-semibold">{isNote ? 'Note' : 'Reply'}</h2>
-          <Button variant="primary" size="lg" loading={send.isPending} disabled={uploads.busy} onClick={submit} className={cx('mr-1 rounded-xl transition-opacity', !filled && uploads.ids.length === 0 && 'opacity-45')}>
+          <Button variant="primary" size="lg" loading={send.isPending} disabled={uploads.busy || bodyImages.busy} onClick={submit} className={cx('mr-1 rounded-xl transition-opacity', !filled && uploads.ids.length === 0 && 'opacity-45')}>
             {isNote ? 'Save' : 'Send'}
           </Button>
         </header>
@@ -409,7 +444,7 @@ export const Composer = forwardRef<
                 <span className="text-fg-3">Cc/Bcc</span>
               </button>
             )}
-            <button type="button" className={row} disabled={send.isPending || uploads.busy} onClick={() => (hasContent() ? setLater(true) : toast('Write a reply first.', { kind: 'error' }))}>
+            <button type="button" className={row} disabled={send.isPending || uploads.busy || bodyImages.busy} onClick={() => (hasContent() ? setLater(true) : toast('Write a reply first.', { kind: 'error' }))}>
               <span className="flex-1 text-fg-3">Send later</span>
               <Clock className="size-5 text-fg-3" aria-hidden />
             </button>
@@ -445,6 +480,7 @@ export const Composer = forwardRef<
             {savedRepliesMenu}
           </Popover>
           <AttachButton onFiles={uploads.add} />
+          <ImageButton onFiles={(files) => bodyImages.insert(files)} />
           <EditorToolbar editor={editor} />
           <span className="flex-1" />
           <button type="button" aria-label="Hide keyboard" onClick={() => editor?.commands.blur()} className="flex size-11 items-center justify-center rounded-lg text-fg-3">
@@ -567,6 +603,7 @@ export const Composer = forwardRef<
             <EditorToolbar editor={editor}>
               <span className="mx-1.5 h-4 w-px bg-line" aria-hidden />
               <AttachButton onFiles={uploads.add} />
+              <ImageButton onFiles={(files) => bodyImages.insert(files)} />
               <Popover
                 side="top"
                 width={300}
@@ -587,7 +624,7 @@ export const Composer = forwardRef<
                 <Trash2 className="size-4" aria-hidden />
               </button>
               {isNote ? (
-                <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1.5" icon={<StickyNote className="size-3.5" aria-hidden />}>
+                <Button variant="primary" loading={send.isPending} disabled={uploads.busy || bodyImages.busy} onClick={submit} className="ml-1.5" icon={<StickyNote className="size-3.5" aria-hidden />}>
                   Add note
                 </Button>
               ) : (
@@ -619,13 +656,13 @@ export const Composer = forwardRef<
                     type="button"
                     aria-label="Send later"
                     title="Send later"
-                    disabled={send.isPending || uploads.busy}
+                    disabled={send.isPending || uploads.busy || bodyImages.busy}
                     onClick={() => (hasContent() ? setLater(true) : toast('Write a reply first.', { kind: 'error' }))}
                     className={cx(tool, 'ml-1 disabled:opacity-50')}
                   >
                     <Clock className="size-4" aria-hidden />
                   </button>
-                  <Button variant="primary" loading={send.isPending} disabled={uploads.busy} onClick={submit} className="ml-1" icon={<Send className="size-3.5" aria-hidden />}>
+                  <Button variant="primary" loading={send.isPending} disabled={uploads.busy || bodyImages.busy} onClick={submit} className="ml-1" icon={<Send className="size-3.5" aria-hidden />}>
                     Send
                   </Button>
                   <SendLaterDialog

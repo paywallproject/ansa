@@ -9,6 +9,7 @@ import { config } from '../config.ts'
 import { AppError, findOrCreateCustomer, getCustomer, isEmail, normEmail } from './customers.ts'
 import { notifyAssigned, notifyCustomerReply, notifyMentioned } from './notify.ts'
 import { brandName, getWorkspace } from './workspace.ts'
+import { attachmentUrl, inlineAttachmentIds } from './attachments.ts'
 
 /**
  * 'waiting' is only used when the workspace turns on four statuses. It means "waiting on us":
@@ -276,7 +277,7 @@ export function getConversation(id: number, opts: { userId?: number; mailboxIds?
   const customer = getCustomer(summary.customer.id)
   const history = listConversations({ customerId: customer.id, limit: 8, mailboxIds: opts.mailboxIds })
   const previous = history.items.filter((c) => c.id !== id)
-  const draft = opts.userId ? get<any>('SELECT kind, body_html, updated_at FROM drafts WHERE conversation_id = ? AND user_id = ?', id, opts.userId) : undefined
+  const draft = opts.userId ? get<any>('SELECT kind, body_html, attachment_ids, updated_at FROM drafts WHERE conversation_id = ? AND user_id = ?', id, opts.userId) : undefined
   return {
     ...summary,
     customer,
@@ -284,7 +285,9 @@ export function getConversation(id: number, opts: { userId?: number; mailboxIds?
     previousConversations: previous.map((c) => ({ id: c.id, subject: c.subject, status: c.status, updatedAt: c.updatedAt })),
     /** All of the customer's conversations this user can see, this one included: the list above stops at a few. */
     conversationCount: history.total,
-    draft: draft ? { kind: draft.kind as 'reply' | 'note', bodyHtml: draft.body_html as string, updatedAt: draft.updated_at as number } : null,
+    draft: draft
+      ? { kind: draft.kind as 'reply' | 'note', bodyHtml: draft.body_html as string, attachments: draftFiles(parseJson<number[]>(draft.attachment_ids, [])), updatedAt: draft.updated_at as number }
+      : null,
     /** Live chat only: the visitor has the chat open, so a reply reaches them there instead of by email. */
     visitorOnline: summary.source === 'chat' ? visitorOnline(id) : null,
     url: `${config.appUrl}/c/${id}`,
@@ -332,11 +335,19 @@ function addEvent(conversationId: number, actor: Actor, event: Record<string, un
   )
 }
 
-function attach(threadId: number, conversationId: number, attachmentIds: number[] | undefined) {
+/**
+ * Put uploaded files on a new message. Images its body shows become inline files of the message (sent as
+ * parts of the email, not listed as attachments); the rest are attached files.
+ */
+function attach(threadId: number, conversationId: number, attachmentIds: number[] | undefined, bodyHtml: string) {
+  for (const id of inlineAttachmentIds(bodyHtml)) run(`UPDATE attachments SET thread_id = ?, inline = 1 WHERE id = ? AND thread_id IS NULL AND mime LIKE 'image/%'`, threadId, id)
   if (!attachmentIds?.length) return
   for (const id of attachmentIds) run('UPDATE attachments SET thread_id = ? WHERE id = ? AND thread_id IS NULL', threadId, id)
   run('UPDATE conversations SET has_attachments = 1 WHERE id = ?', conversationId)
 }
+
+/** Whether a body says nothing: no text and no image. */
+const blank = (html: string, text: string) => !text.trim() && !/<img\b/i.test(html)
 
 const cleanList = (list: unknown): string[] =>
   Array.isArray(list) ? [...new Set(list.map((e) => String(e)).filter(isEmail).map(normEmail))] : []
@@ -478,7 +489,7 @@ const refsAfter = (last: any) => (last ? [...String(last.refs || '').split(/\s+/
 export function addReply(conversationId: number, input: ReplyInput, actor: Actor): number {
   const bodyHtml = cleanHtml(input.bodyHtml)
   const text = htmlToText(bodyHtml)
-  if (!text.trim() && !input.attachmentIds?.length) throw new AppError('Write a reply before sending.')
+  if (blank(bodyHtml, text) && !input.attachmentIds?.length) throw new AppError('Write a reply before sending.')
   const at = input.createdAt ?? now()
   // A time that has passed, or is seconds away, means "send now".
   const sendAt = input.sendAt && input.sendAt > now() + 30_000 && actor.via !== 'auto' ? input.sendAt : null
@@ -521,7 +532,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       at,
       sendAt,
     )
-    attach(id, conversationId, input.attachmentIds)
+    attach(id, conversationId, input.attachmentIds, bodyHtml)
     if (assignee !== conv.assignee_id && actor.via !== 'auto') {
       // Taking an unassigned conversation by answering it is routine; any other change is shown in the timeline.
       const quiet = conv.assignee_id === null && assignee === actor.userId
@@ -609,25 +620,34 @@ export function sendScheduledNow(threadId: number, actor: Actor) {
   if (releaseScheduled(threadId, actor)) queueDelivery(threadId)
 }
 
-/** Take a scheduled reply back. Its text returns to the writer as a draft; its attachments are removed. */
-export function cancelScheduled(threadId: number, actor: Actor) {
+/**
+ * Take a scheduled reply back. Its text and files return to the writer as a draft (unless they have one there
+ * already: then its files are removed). Returns the storage keys of removed files, for the caller to delete.
+ */
+export function cancelScheduled(threadId: number, actor: Actor): string[] {
   const t = scheduledThread(threadId)
   const conv = get<any>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)
-  tx(() => {
-    if (t.user_id) {
+  const removed = tx(() => {
+    const files = all<{ id: number; inline: number; storage_key: string }>('SELECT id, inline, storage_key FROM attachments WHERE thread_id = ?', threadId)
+    const drafted =
+      !!t.user_id &&
       run(
-        `INSERT INTO drafts (conversation_id, user_id, kind, body_html, updated_at) VALUES (?, ?, 'reply', ?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`,
+        `INSERT INTO drafts (conversation_id, user_id, kind, body_html, attachment_ids, updated_at) VALUES (?, ?, 'reply', ?, ?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`,
         t.conversation_id,
         t.user_id,
         t.body_html,
+        JSON.stringify(files.filter((f) => !f.inline).map((f) => f.id)),
         now(),
-      )
-    }
+      ).changes > 0
+    // Back in the draft, the files are unsent uploads of its writer again, so they outlive the thread.
+    if (drafted) run('UPDATE attachments SET thread_id = NULL, inline = 0, uploaded_by = ? WHERE thread_id = ?', t.user_id, threadId)
     run('DELETE FROM threads WHERE id = ?', threadId)
     run('UPDATE conversations SET thread_count = MAX(0, thread_count - 1), updated_at = ? WHERE id = ?', now(), t.conversation_id)
     reindex(t.conversation_id)
+    return drafted ? [] : files.map((f) => f.storage_key)
   })
   touch(t.conversation_id, conv.mailbox_id, 'updated', actor)
+  return removed
 }
 
 /** The customer wrote: hold back replies that were to go out only if they stayed quiet. */
@@ -663,7 +683,7 @@ export interface NoteInput {
 export function addNote(conversationId: number, input: NoteInput, actor: Actor): number {
   const bodyHtml = cleanHtml(input.bodyHtml)
   const text = htmlToText(bodyHtml)
-  if (!text.trim() && !input.attachmentIds?.length) throw new AppError('Write a note before saving.')
+  if (blank(bodyHtml, text) && !input.attachmentIds?.length) throw new AppError('Write a note before saving.')
   const at = input.createdAt ?? now()
   let mailboxId = 0
   const threadId = tx(() => {
@@ -679,7 +699,7 @@ export function addNote(conversationId: number, input: NoteInput, actor: Actor):
       actor.via,
       at,
     )
-    attach(id, conversationId, input.attachmentIds)
+    attach(id, conversationId, input.attachmentIds, bodyHtml)
     run('UPDATE conversations SET thread_count = thread_count + 1, updated_at = ? WHERE id = ?', at, conversationId)
     // The inbox shows the note, unless an imported note is older than a message already there.
     run(
@@ -803,7 +823,7 @@ export function createConversation(input: CreateInput, actor: Actor): { id: numb
     let threadId: number
     if (input.kind === 'customer') {
       threadId = addCustomerMessage(id, { customerId: customer.id, bodyHtml: cleanHtml(input.bodyHtml), cc, createdAt: input.createdAt, via: actor.via, ...input.email })
-      attach(threadId, id, input.attachmentIds)
+      attach(threadId, id, input.attachmentIds, input.bodyHtml)
       if (input.status && input.status !== 'active') run('UPDATE conversations SET status = ? WHERE id = ?', input.status, id)
     } else if (input.kind === 'reply') {
       threadId = addReply(
@@ -1055,19 +1075,40 @@ export function wakeSnoozed() {
   }
 }
 
-export function saveDraft(conversationId: number, userId: number, kind: 'reply' | 'note', bodyHtml: string) {
+/**
+ * Save a user's draft. `attachmentIds` are the files attached to it (images shown in the body are not listed:
+ * the body holds them). Left out, the files already on the draft stay.
+ */
+export function saveDraft(conversationId: number, userId: number, kind: 'reply' | 'note', bodyHtml: string, attachmentIds?: number[]) {
   const clean = cleanHtml(bodyHtml)
-  if (!htmlToText(clean).trim()) {
+  // Only the writer's own files that are not on a message yet.
+  const files =
+    attachmentIds === undefined
+      ? draftFileIds(conversationId, userId)
+      : [...new Set(attachmentIds)].filter((id) => get('SELECT 1 FROM attachments WHERE id = ? AND thread_id IS NULL AND uploaded_by = ?', id, userId))
+  if (blank(clean, htmlToText(clean)) && files.length === 0) {
     run('DELETE FROM drafts WHERE conversation_id = ? AND user_id = ?', conversationId, userId)
     return
   }
   run(
-    `INSERT INTO drafts (conversation_id, user_id, kind, body_html, updated_at) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(conversation_id, user_id) DO UPDATE SET kind = excluded.kind, body_html = excluded.body_html, updated_at = excluded.updated_at`,
+    `INSERT INTO drafts (conversation_id, user_id, kind, body_html, attachment_ids, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(conversation_id, user_id) DO UPDATE SET kind = excluded.kind, body_html = excluded.body_html, attachment_ids = excluded.attachment_ids, updated_at = excluded.updated_at`,
     conversationId,
     userId,
     kind,
     clean,
+    JSON.stringify(files),
     now(),
   )
+}
+
+const draftFileIds = (conversationId: number, userId: number) =>
+  parseJson<number[]>(get<{ attachment_ids: string }>('SELECT attachment_ids FROM drafts WHERE conversation_id = ? AND user_id = ?', conversationId, userId)?.attachment_ids, [])
+
+/** The files attached to a draft, skipping any that have since gone out on a message or been removed. */
+function draftFiles(ids: number[]) {
+  return ids.flatMap((id) => {
+    const a = get<any>('SELECT id, filename, mime, size FROM attachments WHERE id = ? AND thread_id IS NULL', id)
+    return a ? [{ id: a.id as number, filename: a.filename as string, mime: a.mime as string, size: a.size as number, inline: false, url: attachmentUrl(a.id, a.filename) }] : []
+  })
 }
