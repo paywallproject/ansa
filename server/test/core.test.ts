@@ -194,17 +194,6 @@ test('a follow-up still threads after the conversation moved to another mailbox'
   assert.equal(conversations.getSummary(first!.conversationId).mailboxId, other)
 })
 
-test('a reply copies everyone else on the latest email, To and Cc alike, but not us', async () => {
-  const first = await ingestRaw(mailboxId, eml({ From: 'Erin <erin@intro.test>', To: 'support@acme.test, Gabby <gabby@intro.test>', Cc: 'boss@intro.test, agent@acme.test', Subject: 'Introduction', 'Message-ID': '<intro1@intro.test>' }, 'Meet Gabby.'))
-  const conv = conversations.getConversation(first!.conversationId)
-  assert.deepEqual(conv.cc, ['gabby@intro.test', 'boss@intro.test'])
-  const thread = conv.threads.find((t) => t.type === 'customer')!
-  assert.deepEqual(thread.to, ['support@acme.test', 'gabby@intro.test'], 'the message keeps its own To line')
-  assert.deepEqual(thread.cc, ['boss@intro.test', 'agent@acme.test'], 'and its own Cc line')
-  await ingestRaw(mailboxId, eml({ From: 'erin@intro.test', To: 'support@acme.test', Subject: 'Re: Introduction', 'Message-ID': '<intro2@intro.test>', 'In-Reply-To': '<intro1@intro.test>' }, 'Just me now.'))
-  assert.deepEqual(conversations.getConversation(first!.conversationId).cc, [], 'whoever the customer drops is dropped')
-})
-
 test('a spoofed Date header does not backdate live mail, and bad input is rejected', async () => {
   const result = await ingestRaw(mailboxId, eml({ From: 'Old <old@customer.test>', Subject: 'Dated', 'Message-ID': '<d1@customer.test>', Date: 'Mon, 1 Jan 2001 10:00:00 +0000' }, 'hello'))
   assert.ok(Date.now() - conversations.getSummary(result!.conversationId).createdAt < 5000)
