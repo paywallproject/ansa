@@ -1457,6 +1457,15 @@ function DraftCard({ conversation, onEdit }: { conversation: Conversation; onEdi
   )
 }
 
+/** The parts of the line under a message's sender, with dots between. */
+const metaLine = (parts: ReactNode[]) =>
+  parts.map((part, index) => (
+    <Fragment key={index}>
+      {index > 0 && <span className="mx-1.5" aria-hidden>·</span>}
+      {part}
+    </Fragment>
+  ))
+
 function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean; onToggle: () => void }) {
   const client = useQueryClient()
   const { toast, confirm } = useFeedback()
@@ -1497,6 +1506,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const [original, setOriginal] = useState(false)
   // The customer's signature folds away behind "⋯", as in Help Scout.
   const [showSignature, setShowSignature] = useState(false)
+  const [showRecipients, setShowRecipients] = useState(false)
   const isNote = thread.type === 'note'
   const isCustomer = thread.type === 'customer'
   const name = thread.author.name
@@ -1512,8 +1522,14 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const sender = thread.from || (thread.author.kind === 'customer' ? thread.author.email : '')
   if (isCustomer && sender) meta.push(<><span className="font-medium text-fg-2">From</span> {sender}</>)
   // A customer's email names its To line only when it went to someone besides us.
-  if ((thread.type === 'reply' ? thread.to.length > 0 : isCustomer && thread.to.length > 1)) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
-  if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
+  const toList = thread.type === 'reply' ? thread.to : isCustomer && thread.to.length > 1 ? thread.to : []
+  const ccList = isNote ? [] : thread.cc
+  const recipients: ReactNode[] = []
+  if (toList.length > 0) recipients.push(<><span className="font-medium text-fg-2">To</span> {toList.join(', ')}</>)
+  if (ccList.length > 0) recipients.push(<><span className="font-medium text-fg-2">Cc</span> {ccList.join(', ')}</>)
+  // Where they go in the line: after From. On a phone, more than one address folds into a count to tap.
+  const recipientsAt = meta.length
+  const recipientCount = toList.length + ccList.length
   if (isNote) meta.push(<>Only your team sees this</>)
   // Open tracking, shown under the message, as Help Scout does.
   const viewed =
@@ -1627,14 +1643,30 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
           ) : (
             (meta.length > 0 || how) && (
               <div className={cx('mt-1 flex items-baseline gap-3 text-[13px]', isNote ? 'text-note-fg' : 'text-fg-3')}>
-                <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-                  {meta.map((part, index) => (
-                    <Fragment key={index}>
-                      {index > 0 && <span className="mx-1.5" aria-hidden>·</span>}
-                      {part}
-                    </Fragment>
-                  ))}
-                </p>
+                <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  <p className={cx(recipientCount > 1 && 'phone:hidden')}>{metaLine([...meta.slice(0, recipientsAt), ...recipients, ...meta.slice(recipientsAt)])}</p>
+                  {recipientCount > 1 && (
+                    <>
+                      <p className="hidden phone:block">
+                        {metaLine([
+                          ...meta.slice(0, recipientsAt),
+                          <button key="r" type="button" className="font-medium text-fg-2" aria-expanded={showRecipients} onClick={() => setShowRecipients((v) => !v)}>
+                            {recipientCount} recipients
+                            <ChevronDown className={cx('ml-0.5 inline size-3.5 align-[-2px] transition-transform', showRecipients && 'rotate-180')} aria-hidden />
+                          </button>,
+                          ...meta.slice(recipientsAt),
+                        ])}
+                      </p>
+                      {showRecipients && (
+                        <div className="mt-1 hidden space-y-0.5 phone:block">
+                          {recipients.map((part, index) => (
+                            <p key={index}>{part}</p>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
                 {how && (
                   <span className="shrink-0" title={sentStatus ? `This message set the conversation to ${how.toLowerCase()}` : undefined}>
                     {how}
