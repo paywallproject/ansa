@@ -160,6 +160,7 @@ class MailboxWorker {
         const validity = String(box.uidValidity)
         let lastUid = mailbox.imap_last_uid
         let historicalUpTo = 0
+        const firstConnection = lastUid === null
         if (lastUid === null || mailbox.imap_uidvalidity !== validity) {
           // First connection, or the server renumbered the folder: decide where to start.
           const top = Math.max(0, Number(box.uidNext) - 1)
@@ -202,6 +203,7 @@ class MailboxWorker {
             run('UPDATE mailboxes SET imap_last_uid = ? WHERE id = ?', uid, this.mailboxId)
           }
         }
+        await this.backfillOwnMail(client, validity, firstConnection)
         // A check that was stopped for taking too long must not report success when it finally returns.
         if (!this.stopped) this.setStatus('ok')
       } finally {
@@ -217,6 +219,52 @@ class MailboxWorker {
         void this.sync()
       }
     }
+  }
+
+  /**
+   * One-off catch-up: mail sent as the mailbox's own address (a store's "New purchase!", WordPress notices) used to be
+   * skipped. Import what was skipped since the mailbox was added. Progress is kept, so a check that runs out of time
+   * carries on next time; Message-IDs keep anything already imported from coming in twice.
+   */
+  private async backfillOwnMail(client: ImapFlow, validity: string, firstConnection: boolean) {
+    const key = `own_mail_backfill_${this.mailboxId}`
+    const mailbox = this.mailbox()
+    if (!mailbox || mailbox.imap_last_uid === null) return
+    let state = getSetting<{ validity: string; until: number; after: number; done?: boolean } | null>(key, null)
+    if (state?.done) return
+    // A newly connected mailbox never skipped anything; a renumbered folder already looked back on its own.
+    if (firstConnection || (state && state.validity !== validity)) {
+      setSetting(key, { validity, until: 0, after: 0, done: true })
+      return
+    }
+    if (!state) {
+      state = { validity, until: mailbox.imap_last_uid, after: 0 }
+      setSetting(key, state)
+    }
+    const { until } = state
+    let after = state.after
+    if (until > after) {
+      const since = new Date(mailbox.created_at - (mailbox.import_existing ? IMPORT_DAYS : 1) * 86_400_000)
+      const found = ((await client.search({ uid: `${after + 1}:${until}`, since, from: mailbox.email }, { uid: true })) || [])
+        .filter((uid) => uid > after && uid <= until)
+        .sort((a, b) => a - b)
+      if (found.length) console.log(`[imap ${mailbox.email}] checking ${found.length} earlier message(s) sent as the mailbox's own address`)
+      for (const uid of found) {
+        if (this.stopped) return
+        const message = await client.fetchOne(String(uid), { source: true }, { uid: true })
+        if (message && message.source) {
+          try {
+            await ingestRaw(this.mailboxId, message.source, { historical: true })
+          } catch (err) {
+            // A catch-up must not hold up new mail: skip a message that will not import.
+            console.error(`[imap ${mailbox.email}] could not import earlier message uid ${uid}:`, (err as Error).message)
+          }
+        }
+        after = uid
+        setSetting(key, { validity, until, after })
+      }
+    }
+    setSetting(key, { validity, until, after, done: true })
   }
 }
 
