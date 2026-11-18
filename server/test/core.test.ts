@@ -121,6 +121,12 @@ test('our own mail, notifications and automated senders are handled safely', asy
   assert.ok(store?.created)
   assert.equal(conversations.getConversation(store.conversationId).customer.email, 'support@acme.test')
   assert.equal(all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length, before, 'never auto-reply to our own address')
+  // Every mailbox, not only the first: each keeps mail sent as its own address.
+  const other = run(`INSERT INTO mailboxes (name, email, auto_reply_enabled, auto_reply_body, created_at) VALUES ('Glue', 'help@glue.test', 1, 'Got it.', 1)`).id
+  const glue = await ingestRaw(other, eml({ From: 'Glue Store <help@glue.test>', To: 'help@glue.test', Subject: 'New User Registration', 'Message-ID': '<reg-1@glue.test>' }, 'New user'))
+  assert.ok(glue?.created)
+  assert.equal(conversations.getConversation(glue.conversationId).customer.email, 'help@glue.test')
+  assert.equal(all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length, before, 'and no auto reply there either')
   // Ansa's own sent replies are known by Message-ID, and our side of an existing thread is not a customer message.
   const pat = await ingestRaw(mailboxId, eml({ From: 'pat@customer.test', Subject: 'Help', 'Message-ID': '<pat1@customer.test>' }, 'Help me.'))
   conversations.addReply(pat!.conversationId, { bodyHtml: '<p>On it.</p>' }, { userId: agentId, via: 'web' })
