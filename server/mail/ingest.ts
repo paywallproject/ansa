@@ -111,7 +111,9 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
   const sender = useReplyTo ? { address: replyTo!.address, name: replyTo!.name || fromHeader?.name || '' } : fromHeader
   if (!sender?.address || !isEmail(sender.address)) return null
   const from = normEmail(sender.address)
-  if (from === mailbox.email.toLowerCase()) return null // our own outgoing mail
+  // Mail from the mailbox's own address: a store or WordPress site sending as support@ ("New purchase!", "New User
+  // Registration"). Ansa's own sends are already known by Message-ID below, so these are kept as new conversations.
+  const fromSelf = from === mailbox.email.toLowerCase()
   if (mail.headers.has('x-ansa-notification')) return null
 
   const messageId = mail.messageId || null
@@ -152,6 +154,8 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
     if (ref) return teammateReply(mailbox, mail, ref, !!opts.historical)
   }
   const created = conversationId === null
+  // Our side of an existing thread, written outside Ansa (a copy of a webmail reply): not a customer message.
+  if (fromSelf && !created) return null
 
   let full: string
   let stripped: string | null = null
@@ -238,7 +242,7 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
   }
 
   const automated = isAutomated(mail)
-  if (created && !automated && !historical && !opts.historical && !spam && mailbox.auto_reply_enabled && mailbox.auto_reply_body.trim()) {
+  if (created && !automated && !fromSelf && !historical && !opts.historical && !spam && mailbox.auto_reply_enabled && mailbox.auto_reply_body.trim()) {
     for (const [address, at] of autoReplyLog) if (Date.now() - at > 10 * 60_000) autoReplyLog.delete(address)
     const last = autoReplyLog.get(from) ?? 0
     if (Date.now() - last > 10 * 60_000) {
