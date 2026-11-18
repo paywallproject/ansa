@@ -115,11 +115,22 @@ test('a reply threads by In-Reply-To or References, reopens the conversation and
 })
 
 test('our own mail, notifications and automated senders are handled safely', async () => {
-  assert.equal(await ingestRaw(mailboxId, eml({ From: 'support@acme.test', Subject: 'loop', 'Message-ID': '<own@x>' }, 'x')), null)
   const before = all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length
+  // A site sending as the mailbox's own address ("New purchase!") is kept, without an auto reply to ourselves.
+  const store = await ingestRaw(mailboxId, eml({ From: 'Acme Store <support@acme.test>', To: 'support@acme.test', Subject: 'New purchase! - $0.00', 'Message-ID': '<purchase-1@acme.test>' }, 'Order #1'))
+  assert.ok(store?.created)
+  assert.equal(conversations.getConversation(store.conversationId).customer.email, 'support@acme.test')
+  assert.equal(all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length, before, 'never auto-reply to our own address')
+  // Ansa's own sent replies are known by Message-ID, and our side of an existing thread is not a customer message.
+  const pat = await ingestRaw(mailboxId, eml({ From: 'pat@customer.test', Subject: 'Help', 'Message-ID': '<pat1@customer.test>' }, 'Help me.'))
+  conversations.addReply(pat!.conversationId, { bodyHtml: '<p>On it.</p>' }, { userId: agentId, via: 'web' })
+  const sent = get<{ message_id: string }>(`SELECT message_id FROM threads WHERE conversation_id = ? AND via = 'web'`, pat!.conversationId)!
+  assert.equal(await ingestRaw(mailboxId, eml({ From: 'support@acme.test', Subject: 'Re: Help', 'Message-ID': sent.message_id }, 'On it.')), null)
+  assert.equal(await ingestRaw(mailboxId, eml({ From: 'support@acme.test', Subject: 'Re: Help', 'Message-ID': '<webmail-1@acme.test>', 'In-Reply-To': '<pat1@customer.test>' }, 'Sent from webmail')), null)
+  const autoAfterSelf = all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length
   const bounce = await ingestRaw(mailboxId, eml({ From: 'MAILER-DAEMON@mx.test', Subject: 'Undeliverable', 'Message-ID': '<b1@x>', 'Auto-Submitted': 'auto-replied' }, 'bounce'))
   assert.ok(bounce?.created)
-  assert.equal(all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length, before, 'never auto-reply to automated mail')
+  assert.equal(all(`SELECT id FROM threads WHERE type = 'reply' AND via = 'auto'`).length, autoAfterSelf, 'never auto-reply to automated mail')
 })
 
 test('search, folders, snooze and merge behave', async () => {
