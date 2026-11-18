@@ -1511,7 +1511,8 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const meta: ReactNode[] = []
   const sender = thread.from || (thread.author.kind === 'customer' ? thread.author.email : '')
   if (isCustomer && sender) meta.push(<><span className="font-medium text-fg-2">From</span> {sender}</>)
-  if (thread.type === 'reply' && thread.to.length > 0) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
+  // A customer's email names its To line only when it went to someone besides us.
+  if ((thread.type === 'reply' ? thread.to.length > 0 : isCustomer && thread.to.length > 1)) meta.push(<><span className="font-medium text-fg-2">To</span> {thread.to.join(', ')}</>)
   if (!isNote && thread.cc.length > 0) meta.push(<><span className="font-medium text-fg-2">Cc</span> {thread.cc.join(', ')}</>)
   if (isNote) meta.push(<>Only your team sees this</>)
   // Open tracking, shown under the message, as Help Scout does.

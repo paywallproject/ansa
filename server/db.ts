@@ -379,6 +379,25 @@ const migrations: string[] = [
   -- Files attached to a draft (a JSON list of attachment ids), so they wait with it until it is sent.
   ALTER TABLE drafts ADD COLUMN attachment_ids TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  -- A reply copies everyone else on the customer's latest email, To and Cc alike, as reply-all does.
+  -- Only where that email came after our last reply: otherwise the Cc we chose stands.
+  UPDATE conversations SET cc = (
+    SELECT json_group_array(a) FROM (
+      SELECT DISTINCT lower(j.value) AS a FROM threads t, json_each(t.to_addrs) j WHERE t.id = (
+        SELECT id FROM threads WHERE conversation_id = conversations.id AND type = 'customer' AND via = 'email' ORDER BY created_at DESC, id DESC LIMIT 1
+      ) AND lower(j.value) <> lower(t.from_addr)
+      UNION
+      SELECT lower(j.value) FROM threads t, json_each(t.cc) j WHERE t.id = (
+        SELECT id FROM threads WHERE conversation_id = conversations.id AND type = 'customer' AND via = 'email' ORDER BY created_at DESC, id DESC LIMIT 1
+      ) AND lower(j.value) <> lower(t.from_addr)
+    ) WHERE a NOT IN (SELECT lower(email) FROM mailboxes UNION SELECT lower(email) FROM users)
+  )
+  WHERE EXISTS (
+    SELECT 1 FROM threads t WHERE t.conversation_id = conversations.id AND t.type = 'customer' AND t.via = 'email'
+      AND t.created_at > COALESCE((SELECT MAX(r.created_at) FROM threads r WHERE r.conversation_id = conversations.id AND r.type = 'reply'), 0)
+  );
+  `,
 ]
 
 export function migrate() {
