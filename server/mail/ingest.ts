@@ -4,7 +4,7 @@ import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
 import { get, run, getSetting, setSetting } from '../db.ts'
 import { cleanHtml, fitStored, fillTemplate, textToHtmlWithSignature, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
 import type { MailboxRow } from './outbound.ts'
-import { addCustomerMessage, addReply, createConversation } from '../services/conversations.ts'
+import { addCustomerMessage, addReply, createConversation, othersOnEmail } from '../services/conversations.ts'
 import { findOrCreateCustomer, isEmail, normEmail } from '../services/customers.ts'
 import { storeAttachment } from '../services/attachments.ts'
 import { runWorkflows } from '../services/workflows.ts'
@@ -176,6 +176,7 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
   const customer = findOrCreateCustomer(from, sender.name)
   const to = addresses(mail.to)
   const cc = addresses(mail.cc).filter((a) => a !== mailbox.email.toLowerCase())
+  const replyCc = othersOnEmail(from, to, cc)
   // The Date header is the sender's claim. Trust it only while importing old mail; live mail is stamped on arrival.
   const sentAt = mail.date?.getTime()
   const historical = !!opts.historical && !!sentAt && sentAt < Date.now() - 10 * 60_000 && sentAt > Date.UTC(2000, 0, 1)
@@ -186,6 +187,7 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
     bodyText: htmlToText(bodyHtml),
     from,
     to,
+    replyCc,
     messageId,
     inReplyTo: mail.inReplyTo || null,
     refs: references.join(' ') || null,

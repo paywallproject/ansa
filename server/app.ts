@@ -7,7 +7,7 @@ import { userFromBearer, pruneSessions } from './auth.ts'
 import { prunePresence, pruneVisitors } from './events.ts'
 import { handleMcp } from './mcp.ts'
 import { migrate, run } from './db.ts'
-import { dispatchScheduled, wakeSnoozed } from './services/conversations.ts'
+import { backfillReplyCc, dispatchScheduled, wakeSnoozed } from './services/conversations.ts'
 
 export const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
@@ -58,6 +58,7 @@ export function prepareData() {
   // Replies that were mid-send when the process stopped were never delivered. Flag them so an agent can re-send.
   const interrupted = run(`UPDATE threads SET state = 'failed', error = 'Ansa restarted before this reply was sent. Send it again.' WHERE state = 'sending'`).changes
   if (interrupted) console.log(`[mail] ${interrupted} unsent repl${interrupted === 1 ? 'y was' : 'ies were'} flagged for re-sending`)
+  backfillReplyCc()
 }
 
 let timersPaused = false

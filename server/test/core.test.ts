@@ -194,6 +194,30 @@ test('a follow-up still threads after the conversation moved to another mailbox'
   assert.equal(conversations.getSummary(first!.conversationId).mailboxId, other)
 })
 
+test('a reply copies everyone else on the latest email, To and Cc alike, but not us', async () => {
+  const first = await ingestRaw(mailboxId, eml({ From: 'Erin <erin@intro.test>', To: 'support@acme.test, Gabby <gabby@intro.test>', Cc: 'boss@intro.test, agent@acme.test', Subject: 'Introduction', 'Message-ID': '<intro1@intro.test>' }, 'Meet Gabby.'))
+  const conv = conversations.getConversation(first!.conversationId)
+  assert.deepEqual(conv.cc, ['gabby@intro.test', 'boss@intro.test'])
+  const thread = conv.threads.find((t) => t.type === 'customer')!
+  assert.deepEqual(thread.to, ['support@acme.test', 'gabby@intro.test'], 'the message keeps its own To line')
+  assert.deepEqual(thread.cc, ['boss@intro.test', 'agent@acme.test'], 'and its own Cc line')
+  await ingestRaw(mailboxId, eml({ From: 'erin@intro.test', To: 'support@acme.test', Subject: 'Re: Introduction', 'Message-ID': '<intro2@intro.test>', 'In-Reply-To': '<intro1@intro.test>' }, 'Just me now.'))
+  assert.deepEqual(conversations.getConversation(first!.conversationId).cc, [], 'whoever the customer drops is dropped')
+})
+
+test('the reply Cc backfill fills open conversations the customer answered last, and skips odd rows', () => {
+  const ok = conversations.createConversation({ mailboxId, customerEmail: 'old@intro.test', subject: 'Before', bodyHtml: '<p>hi</p>', kind: 'customer', email: { from: 'old@intro.test', to: ['support@acme.test', 'pal@intro.test'] } }, { userId: null, via: 'email' })
+  const odd = conversations.createConversation({ mailboxId, customerEmail: 'odd@intro.test', subject: 'Odd', bodyHtml: '<p>hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  run(`UPDATE conversations SET cc = '[]' WHERE id IN (?, ?)`, ok.id, odd.id)
+  run(`UPDATE threads SET to_addrs = 'not json' WHERE id = ?`, odd.threadId)
+  conversations.backfillReplyCc()
+  assert.deepEqual(conversations.getConversation(ok.id).cc, ['pal@intro.test'])
+  assert.deepEqual(conversations.getConversation(odd.id).cc, [])
+  run(`UPDATE conversations SET cc = '[]' WHERE id = ?`, ok.id)
+  conversations.backfillReplyCc()
+  assert.deepEqual(conversations.getConversation(ok.id).cc, [], 'it runs once')
+})
+
 test('a spoofed Date header does not backdate live mail, and bad input is rejected', async () => {
   const result = await ingestRaw(mailboxId, eml({ From: 'Old <old@customer.test>', Subject: 'Dated', 'Message-ID': '<d1@customer.test>', Date: 'Mon, 1 Jan 2001 10:00:00 +0000' }, 'hello'))
   assert.ok(Date.now() - conversations.getSummary(result!.conversationId).createdAt < 5000)
