@@ -1,4 +1,4 @@
-import { all, allNamed, get, run, tx, now, parseJson } from '../db.ts'
+import { all, allNamed, get, run, tx, now, parseJson, getSetting, setSetting } from '../db.ts'
 import { publish, visitorOnline } from '../events.ts'
 import { avatarUrl } from '../auth.ts'
 import { mailboxFilterSql, memberOf } from './access.ts'
@@ -355,6 +355,49 @@ const cleanList = (list: unknown): string[] =>
 // ---------------------------------------------------------------------------------------------
 // Writing threads
 // ---------------------------------------------------------------------------------------------
+
+/** Who a reply to this email copies: everyone else it went to, To and Cc alike, as reply-all does. Not the sender, and not us (our mailboxes or teammates). */
+export function othersOnEmail(from: string, to: string[], cc: string[]): string[] {
+  const ours = new Set(all<{ email: string }>('SELECT email FROM mailboxes UNION SELECT email FROM users').map((r) => r.email.toLowerCase()))
+  const sender = from.toLowerCase()
+  return [...new Set([...to, ...cc].map((a) => String(a).toLowerCase()))].filter((a) => isEmail(a) && a !== sender && !ours.has(a))
+}
+
+/**
+ * Once: open conversations where the customer wrote last get their reply Cc from that email, as new mail now does.
+ * Row by row, so one odd row is skipped rather than stopping the rest, and a failure never keeps the app from starting.
+ */
+export function backfillReplyCc() {
+  const DONE = 'backfill_reply_cc'
+  try {
+    if (getSetting(DONE, false)) return
+    const rows = all<{ id: number; cc: string; tid: number | null; last_reply: number | null }>(
+      `SELECT c.id, c.cc,
+         (SELECT t.id FROM threads t WHERE t.conversation_id = c.id AND t.type = 'customer' AND t.via = 'email' ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS tid,
+         (SELECT MAX(r.created_at) FROM threads r WHERE r.conversation_id = c.id AND r.type = 'reply') AS last_reply
+       FROM conversations c WHERE c.status IN ('active', 'waiting', 'pending')`,
+    )
+    let changed = 0
+    for (const row of rows) {
+      try {
+        if (!row.tid) continue
+        const t = get<{ from_addr: string; to_addrs: string; cc: string; created_at: number }>('SELECT from_addr, to_addrs, cc, created_at FROM threads WHERE id = ?', row.tid)
+        if (!t || (row.last_reply != null && row.last_reply >= t.created_at)) continue
+        const list = (v: string) => { const x = parseJson<unknown>(v, []); return Array.isArray(x) ? x.map(String) : [] }
+        const cc = othersOnEmail(t.from_addr || '', list(t.to_addrs), list(t.cc))
+        if (JSON.stringify(cc) === row.cc) continue
+        run('UPDATE conversations SET cc = ? WHERE id = ?', JSON.stringify(cc), row.id)
+        changed++
+      } catch (err) {
+        console.warn(`[backfill] reply cc skipped conversation ${row.id}:`, (err as Error).message)
+      }
+    }
+    setSetting(DONE, true)
+    console.log(`[backfill] reply cc set on ${changed} conversation${changed === 1 ? '' : 's'}`)
+  } catch (err) {
+    console.warn('[backfill] reply cc did not run:', (err as Error).message)
+  }
+}
 
 export interface CustomerMessageInput {
   customerId: number
