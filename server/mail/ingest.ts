@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { blobs } from '../blobs.ts'
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
-import { all, get, run, getSetting, setSetting } from '../db.ts'
+import { get, run, getSetting, setSetting } from '../db.ts'
 import { cleanHtml, fitStored, fillTemplate, textToHtmlWithSignature, htmlToText, replyAboveMarker, replyAboveMarkerText, stripHelpdeskNotification, stripQuotedHtml, stripQuotedText, textToHtml } from './html.ts'
 import type { MailboxRow } from './outbound.ts'
 import { addCustomerMessage, addReply, createConversation } from '../services/conversations.ts'
@@ -176,9 +176,6 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
   const customer = findOrCreateCustomer(from, sender.name)
   const to = addresses(mail.to)
   const cc = addresses(mail.cc).filter((a) => a !== mailbox.email.toLowerCase())
-  // A reply copies everyone else on the email, To and Cc alike, as reply-all does. Not us: our mailboxes or teammates.
-  const ours = new Set(all<{ email: string }>('SELECT email FROM mailboxes UNION SELECT email FROM users').map((r) => r.email.toLowerCase()))
-  const replyCc = [...new Set([...to, ...cc])].filter((a) => a !== from && !ours.has(a))
   // The Date header is the sender's claim. Trust it only while importing old mail; live mail is stamped on arrival.
   const sentAt = mail.date?.getTime()
   const historical = !!opts.historical && !!sentAt && sentAt < Date.now() - 10 * 60_000 && sentAt > Date.UTC(2000, 0, 1)
@@ -189,7 +186,6 @@ export async function ingestRaw(mailboxId: number, source: Buffer | string, opts
     bodyText: htmlToText(bodyHtml),
     from,
     to,
-    replyCc,
     messageId,
     inReplyTo: mail.inReplyTo || null,
     refs: references.join(' ') || null,

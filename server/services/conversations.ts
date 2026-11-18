@@ -364,8 +364,6 @@ export interface CustomerMessageInput {
   from?: string
   to?: string[]
   cc?: string[]
-  /** Who a reply copies: everyone else this email went to, on its To or Cc line. Replaces the conversation's Cc, as reply-all would. */
-  replyCc?: string[]
   messageId?: string | null
   inReplyTo?: string | null
   refs?: string | null
@@ -413,7 +411,6 @@ export function addCustomerMessage(conversationId: number, input: CustomerMessag
       at,
       conversationId,
     )
-    if (input.replyCc) run('UPDATE conversations SET cc = ? WHERE id = ?', JSON.stringify(cleanList(input.replyCc)), conversationId)
     holdScheduled(conversationId)
     reindex(conversationId)
     return id
@@ -798,7 +795,7 @@ export interface CreateInput {
   skipDelivery?: boolean
   /** kind 'reply' only: send the first email later, at this time. */
   sendAt?: number
-  email?: Pick<CustomerMessageInput, 'bodyFullHtml' | 'bodyText' | 'from' | 'to' | 'replyCc' | 'messageId' | 'inReplyTo' | 'refs' | 'historical'>
+  email?: Pick<CustomerMessageInput, 'bodyFullHtml' | 'bodyText' | 'from' | 'to' | 'messageId' | 'inReplyTo' | 'refs' | 'historical'>
 }
 
 export function createConversation(input: CreateInput, actor: Actor): { id: number; threadId: number } {
