@@ -277,6 +277,29 @@ export const Composer = forwardRef<
   const drop = useFileDrop(uploads.add)
   const phone = useIsPhone()
   const [phoneCc, setPhoneCc] = useState(false)
+  // Writing on a phone: the keyboard takes half the screen, so the option rows fold into one line to leave the
+  // text room. Losing focus waits a moment, as the formatting buttons take it and hand it straight back.
+  const [writing, setWriting] = useState(false)
+  useEffect(() => {
+    if (!editor || !phone) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onFocus = () => {
+      clearTimeout(timer)
+      setWriting(true)
+    }
+    const onBlur = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => setWriting(false), 200)
+    }
+    if (editor.isFocused) setWriting(true)
+    editor.on('focus', onFocus)
+    editor.on('blur', onBlur)
+    return () => {
+      clearTimeout(timer)
+      editor.off('focus', onFocus)
+      editor.off('blur', onBlur)
+    }
+  }, [editor, phone])
   // On a phone, ✕ on a reply with something in it asks what to do with it, as in Help Scout's app.
   const [askClose, setAskClose] = useState(false)
   const closePhone = () => {
@@ -391,7 +414,21 @@ export const Composer = forwardRef<
             {isNote ? 'Save' : 'Send'}
           </Button>
         </header>
-        {!isNote && (
+        {!isNote && writing && (
+          // The rows, folded while writing. Tapping puts the keyboard away and brings them back.
+          <button type="button" onClick={() => editor?.commands.blur()} className="flex h-11 w-full shrink-0 items-center gap-2 border-b border-line px-4 text-left text-[15px] text-fg-3">
+            <span className="min-w-0 truncate">
+              To <span className="text-fg">{customerName}</span>
+              {(showCc && splitEmails(cc).length > 0) || (showBcc && splitEmails(bcc).length > 0) ? ` +${(showCc ? splitEmails(cc).length : 0) + (showBcc ? splitEmails(bcc).length : 0)}` : ''}
+            </span>
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              <span className={cx('size-2 rounded-full', STATUS_DOT[sendStatus])} aria-hidden />
+              {STATUS_LABEL[sendStatus]}
+            </span>
+            <ChevronDown className="size-4 shrink-0" aria-hidden />
+          </button>
+        )}
+        {!isNote && !writing && (
           <div className="shrink-0">
             <div className={row}>
               <span className="text-fg-3">To:</span>
