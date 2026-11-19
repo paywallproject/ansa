@@ -1009,7 +1009,7 @@ const serializeWorkflow = (w: any) => ({
 
 const FIELDS = ['subject', 'body', 'from', 'to', 'customer_name']
 const OPS = ['contains', 'not_contains', 'is', 'starts_with', 'ends_with']
-const ACTIONS = ['add_tag', 'assign', 'set_status', 'add_note']
+const ACTIONS = ['add_tag', 'assign', 'set_status', 'add_note', 'move_mailbox']
 
 function workflowFields(data: Record<string, any>) {
   const conditions = (Array.isArray(data.conditions) ? data.conditions : [])
@@ -1020,6 +1020,11 @@ function workflowFields(data: Record<string, any>) {
     .map((x: any) => ({ type: x.type, value: str(String(x.value), 2000) }))
   if (!str(data.name, 100)) throw new AppError('Give the workflow a name.')
   if (actions.length === 0) throw new AppError('Add at least one action.')
+  for (const a of actions) {
+    if (a.type !== 'move_mailbox') continue
+    if (!get('SELECT 1 FROM mailboxes WHERE id = ?', Number(a.value))) throw new AppError('Pick a mailbox to move conversations to.')
+    if (data.mailboxId && Number(a.value) === Number(data.mailboxId)) throw new AppError('This workflow already runs in that mailbox. Pick another one to move conversations to.')
+  }
   return {
     name: str(data.name, 100),
     mailboxId: data.mailboxId ? int(data.mailboxId) : null,
