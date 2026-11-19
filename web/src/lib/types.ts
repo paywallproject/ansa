@@ -227,7 +227,7 @@ export interface WorkflowCondition {
   value: string
 }
 export interface WorkflowAction {
-  type: 'add_tag' | 'assign' | 'set_status' | 'add_note'
+  type: 'add_tag' | 'assign' | 'set_status' | 'add_note' | 'move_mailbox'
   value: string
 }
 export interface Workflow {

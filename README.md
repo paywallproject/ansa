@@ -85,7 +85,7 @@ the chat button hides until you're back.
 ### Answer faster
 
 - **Saved replies** with placeholders such as `{{customer.firstName}}`.
-- **Workflows.** Rules that tag, assign, close or annotate incoming email.
+- **Workflows.** Rules that tag, assign, close, annotate or move incoming email to another mailbox.
 - **Auto reply** for new conversations.
 - **Reply by email.** Teammates get a notification email for new assignments, customer replies and
   mentions. Reply to it from your mail client, and Ansa sends your answer to the customer.

@@ -119,7 +119,7 @@ function SavedReplyForm({ reply, onClose }: { reply: SavedReply | null; onClose:
 
 const FIELD_LABEL: Record<WorkflowCondition['field'], string> = { subject: 'Subject', body: 'Message', from: 'Sender email', to: 'Sent to', customer_name: 'Customer name' }
 const OP_LABEL: Record<WorkflowCondition['op'], string> = { contains: 'contains', not_contains: 'does not contain', is: 'is exactly', starts_with: 'starts with', ends_with: 'ends with' }
-const ACTION_LABEL: Record<WorkflowAction['type'], string> = { add_tag: 'Add tag', assign: 'Assign to', set_status: 'Set status to', add_note: 'Add note' }
+const ACTION_LABEL: Record<WorkflowAction['type'], string> = { add_tag: 'Add tag', assign: 'Assign to', set_status: 'Set status to', add_note: 'Add note', move_mailbox: 'Move to mailbox' }
 const TRIGGER_LABEL: Record<Workflow['trigger'], string> = { new: 'A new conversation arrives', customer_reply: 'A customer replies', any: 'Any customer message arrives' }
 
 export function WorkflowsSettings() {
@@ -134,7 +134,7 @@ export function WorkflowsSettings() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Workflows"
-        description="Rules that tag, assign or sort incoming email for you."
+        description="Rules that tag, assign, move or sort incoming email for you."
         action={
           <Button variant="primary" icon={<Plus className="size-4" aria-hidden />} onClick={() => setEditing('new')}>
             New workflow
@@ -195,6 +195,11 @@ function WorkflowForm({ workflow, onClose }: { workflow: Workflow | null; onClos
   const setCondition = (i: number, patch: Partial<WorkflowCondition>) => setForm((f) => ({ ...f, conditions: f.conditions.map((c, n) => (n === i ? { ...c, ...patch } : c)) }))
   const setAction = (i: number, patch: Partial<WorkflowAction>) => setForm((f) => ({ ...f, actions: f.actions.map((a, n) => (n === i ? { ...a, ...patch } : a)) }))
   const activeUsers = (users.data ?? []).filter((u) => !u.disabled)
+  // Moving needs somewhere to go; keep the option on a workflow that already uses it.
+  const actionTypes = (Object.keys(ACTION_LABEL) as WorkflowAction['type'][]).filter(
+    (t) => t !== 'move_mailbox' || (mailboxes.data?.length ?? 0) > 1 || form.actions.some((a) => a.type === 'move_mailbox'),
+  )
+  const moveTargets = (mailboxes.data ?? []).filter((m) => m.id !== form.mailboxId)
 
   return (
     <Modal
@@ -294,10 +299,13 @@ function WorkflowForm({ workflow, onClose }: { workflow: Workflow | null; onClos
                 value={a.type}
                 onChange={(e) => {
                   const type = e.target.value as WorkflowAction['type']
-                  setAction(i, { type, value: type === 'set_status' ? 'closed' : type === 'assign' ? String(activeUsers[0]?.id ?? '') : '' })
+                  setAction(i, {
+                    type,
+                    value: type === 'set_status' ? 'closed' : type === 'assign' ? String(activeUsers[0]?.id ?? '') : type === 'move_mailbox' ? String(moveTargets[0]?.id ?? '') : '',
+                  })
                 }}
               >
-                {(Object.keys(ACTION_LABEL) as WorkflowAction['type'][]).map((t) => (
+                {actionTypes.map((t) => (
                   <option key={t} value={t}>
                     {ACTION_LABEL[t]}
                   </option>
@@ -308,6 +316,14 @@ function WorkflowForm({ workflow, onClose }: { workflow: Workflow | null; onClos
                   {activeUsers.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : a.type === 'move_mailbox' ? (
+                <Select aria-label="Mailbox" className="min-w-0 flex-1" value={a.value} onChange={(e) => setAction(i, { value: e.target.value })}>
+                  {moveTargets.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
                     </option>
                   ))}
                 </Select>

@@ -96,6 +96,29 @@ test('incoming email creates a conversation, auto-replies once, and runs workflo
   assert.equal(await ingestRaw(mailboxId, eml({ From: 'jane@customer.test', Subject: 'Refund for order 7', 'Message-ID': '<m1@customer.test>' }, 'dup')), null, 'the same Message-ID is imported once')
 })
 
+test('a workflow moves a conversation to another mailbox, which runs its own workflows once', async () => {
+  const billing = run(`INSERT INTO mailboxes (name, email, created_at) VALUES ('Billing', 'billing@acme.test', 1)`).id
+  const wf = (name: string, mailbox: number, conditions: object[], actions: object[]) =>
+    run(`INSERT INTO workflows (mailbox_id, name, trigger, match, conditions, actions, created_at) VALUES (?, ?, 'any', 'all', ?, ?, 1)`, mailbox, name, JSON.stringify(conditions), JSON.stringify(actions)).id
+  const invoice = [{ field: 'subject', op: 'contains', value: 'invoice' }]
+  const ids = [
+    wf('Send invoices to billing', mailboxId, invoice, [{ type: 'move_mailbox', value: String(billing) }, { type: 'add_tag', value: 'moved' }]),
+    wf('Support only', mailboxId, invoice, [{ type: 'add_tag', value: 'support-only' }]),
+    wf('Billing tags', billing, invoice, [{ type: 'add_tag', value: 'billing' }, { type: 'move_mailbox', value: String(mailboxId) }]),
+  ]
+  const result = await ingestRaw(mailboxId, eml({ From: 'Bo <bo@customer.test>', Subject: 'Invoice 42 is wrong', 'Message-ID': '<inv1@customer.test>' }, 'Please fix.'))
+  const conv = conversations.getConversation(result!.conversationId)
+  assert.equal(conv.mailboxId, billing, 'moved, and not bounced back to Support')
+  assert.deepEqual(conv.tags.map((t) => t.name), ['billing', 'moved'], "the rest of the moving workflow runs; Support's later workflows do not")
+  assert.ok(conv.threads.some((t) => t.type === 'event' && t.event?.kind === 'moved'))
+
+  // A reply that comes in through Support's inbox runs Billing's workflows, where the conversation is now.
+  conversations.updateConversation(conv.id, { removeTags: ['billing'] }, { userId: null, via: 'web' })
+  await ingestRaw(mailboxId, eml({ From: 'bo@customer.test', Subject: 'Re: Invoice 42 is wrong', 'Message-ID': '<inv2@customer.test>', 'In-Reply-To': '<inv1@customer.test>' }, 'Any news?'))
+  assert.ok(conversations.getConversation(conv.id).tags.some((t) => t.name === 'billing'))
+  for (const id of ids) run('UPDATE workflows SET enabled = 0 WHERE id = ?', id)
+})
+
 test('a reply threads by In-Reply-To or References, reopens the conversation and trims the quote', async () => {
   const first = await ingestRaw(mailboxId, eml({ From: 'Sam <sam@customer.test>', Subject: 'Login broken', 'Message-ID': '<s1@customer.test>' }, 'I cannot log in.'))
   const id = first!.conversationId
