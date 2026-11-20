@@ -1,4 +1,4 @@
-import { all, allNamed, get, run, tx, now, parseJson, getSetting, setSetting } from '../db.ts'
+import { all, allNamed, get, run, tx, now, parseJson, getSetting, setSetting, type SqlValue } from '../db.ts'
 import { publish, visitorOnline } from '../events.ts'
 import { avatarUrl } from '../auth.ts'
 import { mailboxFilterSql, memberOf } from './access.ts'
@@ -235,9 +235,12 @@ function serializeThread(t: any, attachments: any[], reactions: Reaction[] = [])
     to: parseJson<string[]>(t.to_addrs, []),
     cc: parseJson<string[]>(t.cc, []),
     bcc: parseJson<string[]>(t.bcc, []),
-    state: t.state as 'sent' | 'sending' | 'failed' | 'scheduled',
+    // A reply in its undo window is on its way, as far as anyone looking can tell.
+    state: (t.state === 'scheduled' && undoOf(t.event) ? 'sending' : t.state) as 'sent' | 'sending' | 'failed' | 'scheduled',
+    /** Until when its writer can still take a reply back (Undo, right after sending). Null otherwise. */
+    undoUntil: t.state === 'scheduled' ? (undoOf(t.event)?.until ?? null) : null,
     /** When a scheduled reply goes out. Null once it is sent, or while it is held back. */
-    sendAt: (t.send_at as number | null) ?? null,
+    sendAt: t.state === 'scheduled' && undoOf(t.event) ? null : ((t.send_at as number | null) ?? null),
     error: t.error as string | null,
     event: parseJson<Record<string, any> | null>(t.event, null),
     via: t.via as string,
@@ -352,15 +355,15 @@ function announceAgentThread(event: 'conversation.agent_replied' | 'conversation
   emitAppEvent(event, conversationId, { threadId, historical })
 }
 
-function addEvent(conversationId: number, actor: Actor, event: Record<string, unknown>, at = now()) {
-  run(
+function addEvent(conversationId: number, actor: Actor, event: Record<string, unknown>, at = now()): number {
+  return run(
     `INSERT INTO threads (conversation_id, type, user_id, event, via, created_at) VALUES (?, 'event', ?, ?, ?, ?)`,
     conversationId,
     actor.userId,
     JSON.stringify(event),
     actor.via,
     at,
-  )
+  ).id
 }
 
 /**
@@ -512,7 +515,23 @@ export interface ReplyInput {
   ifNoReply?: boolean
   /** Who the conversation goes to once this is sent (null: nobody). Left out, the mailbox's setting decides. */
   assigneeId?: number | null
+  /** Hold the email for a few seconds, so its writer can take it back (Undo, as in Help Scout). */
+  undoable?: boolean
 }
+
+/** How long a reply waits before it goes out, so it can be taken back. The app's Undo shows for less than this. */
+export const UNDO_MS = 10_000
+
+/** What a reply in its undo window remembers, to put the conversation back as it was. */
+interface UndoState {
+  until: number
+  /** The conversation's fields before the reply changed them. */
+  prev: Record<string, SqlValue>
+  /** Timeline events the reply added (an assignment). */
+  events: number[]
+}
+const UNDO_FIELDS = ['status', 'assignee_id', 'snoozed_until', 'cc', 'preview', 'note_preview', 'last_agent_at', 'first_reply_at', 'waiting_since', 'closed_at', 'closed_by', 'updated_at'] as const
+const undoOf = (event: unknown): UndoState | null => parseJson<{ undo?: UndoState } | null>(event as string, null)?.undo ?? null
 
 /** A conversation can only be assigned to someone who can see its mailbox. */
 function assertMember(userId: number, mailboxId: number) {
@@ -570,6 +589,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
   if (sendAt && sendAt > now() + 366 * 86_400_000) throw new AppError('Choose a time within the next year.')
   let mailboxId = 0
   let inChat = false
+  let held = false
   const after: { assigned?: { from: number | null; to: number | null; toName: string | null } } = {}
   const threadId = tx(() => {
     const conv = get<any>('SELECT c.*, cu.email AS customer_email FROM conversations c JOIN customers cu ON cu.id = c.customer_id WHERE c.id = ?', conversationId)
@@ -586,6 +606,9 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     // A live chat reply reaches the visitor in the widget while they are there. Once they have left, it goes by email.
     const channel = conv.source === 'chat' && !sendAt ? (visitorOnline(conversationId) ? 'chat' : 'email') : null
     if (channel === 'chat') inChat = true
+    // A live chat answer goes at once; an email can wait a moment to be taken back.
+    held = !!input.undoable && !sendAt && !inChat && !input.skipDelivery && actor.via !== 'auto' && !!actor.userId
+    const undo: UndoState | null = held ? { until: at + UNDO_MS, prev: Object.fromEntries(UNDO_FIELDS.map((f) => [f, conv[f] ?? null])), events: [] } : null
     const { id } = run(
       `INSERT INTO threads (conversation_id, type, user_id, body_html, body_text, from_addr, to_addrs, cc, bcc, message_id, in_reply_to, refs, state, event, via, created_at, send_at)
        VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -600,18 +623,21 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       newMessageId(mailbox.email),
       last?.message_id ?? null,
       refs,
-      sendAt ? 'scheduled' : input.skipDelivery || config.mailDisabled || channel === 'chat' ? 'sent' : 'sending',
+      sendAt || undo ? 'scheduled' : input.skipDelivery || config.mailDisabled || channel === 'chat' ? 'sent' : 'sending',
       JSON.stringify(sendAt ? { status, ifNoReply: !!input.ifNoReply } : channel ? { status, channel } : { status }),
       actor.via,
       at,
-      sendAt,
+      sendAt ?? (undo ? undo.until : null),
     )
     attach(id, conversationId, input.attachmentIds, bodyHtml)
     if (assignee !== conv.assignee_id && actor.via !== 'auto') {
       // Taking an unassigned conversation by answering it is routine; any other change is shown in the timeline.
       const quiet = conv.assignee_id === null && assignee === actor.userId
       const name = assignee === null ? null : (get<{ name: string }>('SELECT name FROM users WHERE id = ?', assignee)?.name ?? null)
-      if (!quiet) addEvent(conversationId, actor, { kind: 'assigned', to: assignee, toName: name }, at)
+      if (!quiet) {
+        const eventId = addEvent(conversationId, actor, { kind: 'assigned', to: assignee, toName: name }, at)
+        undo?.events.push(eventId)
+      }
       after.assigned = { from: conv.assignee_id, to: assignee, toName: name }
     }
     if (sendAt) {
@@ -627,6 +653,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       return id
     }
     markReplied(conversationId, { status, assignee, cc, text, at, closedBy: actor.userId })
+    if (undo) run('UPDATE threads SET event = ? WHERE id = ?', JSON.stringify({ status, undo }), id)
     if (actor.userId) run('DELETE FROM drafts WHERE conversation_id = ? AND user_id = ?', conversationId, actor.userId)
     reindex(conversationId)
     return id
@@ -641,6 +668,13 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     return threadId
   }
   touch(conversationId, mailboxId, 'reply', actor)
+  if (held) {
+    // Apps hear of it, and the email goes, once the undo window has passed. The timer is the quick way;
+    // the regular check (or the alarm, on Cloudflare) sends it if this process is gone by then.
+    const timer = setTimeout(() => void dispatchScheduled().catch((err) => console.error('[undo send]', err)), UNDO_MS + 100) as { unref?: () => void }
+    timer.unref?.()
+    return threadId
+  }
   announceAgentThread('conversation.agent_replied', conversationId, threadId, input.createdAt !== undefined)
   if (!input.skipDelivery && !config.mailDisabled && !inChat) queueDelivery(threadId)
   return threadId
@@ -667,6 +701,11 @@ function releaseScheduled(threadId: number, actor: Actor): boolean {
     const at = now()
     const event = parseJson<{ status?: Status }>(t.event, {})
     const status: Status = event.status && STATUSES.includes(event.status) ? event.status : 'closed'
+    if (undoOf(t.event)) {
+      // The undo window passed: the conversation already shows the reply, so only the email is left to send.
+      run(`UPDATE threads SET state = ?, send_at = NULL, event = ? WHERE id = ?`, config.mailDisabled ? 'sent' : 'sending', JSON.stringify({ status }), threadId)
+      return
+    }
     // Answer the newest message, which may have arrived after this reply was written.
     const last = lastMailOf(conv.id)
     run(
@@ -700,6 +739,31 @@ export function sendScheduledNow(threadId: number, actor: Actor) {
  */
 export function cancelScheduled(threadId: number, actor: Actor): string[] {
   const t = scheduledThread(threadId)
+  if (undoOf(t.event)) return undoReply(threadId, actor)
+  return takeBack(t, actor)
+}
+
+/**
+ * Undo a reply just sent, before its email goes: the conversation is put back as it was (status, assignee,
+ * timers), and the text returns to the reply box. Only its writer can, and only for a few seconds.
+ * Returns the storage keys of removed files, for the caller to delete.
+ */
+export function undoReply(threadId: number, actor: Actor): string[] {
+  const t = get<any>(`SELECT * FROM threads WHERE id = ? AND type = 'reply'`, threadId)
+  if (!t) throw new AppError('Reply not found.', 404)
+  const undo = t.state === 'scheduled' ? undoOf(t.event) : null
+  if (!undo) throw new AppError('Too late to undo: the reply has been sent.')
+  if (t.user_id !== actor.userId) throw new AppError('Only the person who sent this reply can undo it.', 403)
+  return takeBack(t, actor, () => {
+    const fields = UNDO_FIELDS.filter((f) => f in undo.prev)
+    run(`UPDATE conversations SET ${fields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, ...fields.map((f) => undo.prev[f]), t.conversation_id)
+    for (const id of undo.events) run(`DELETE FROM threads WHERE id = ? AND type = 'event'`, id)
+  })
+}
+
+/** Remove a reply that has not gone out, and give its text and files back to its writer as a draft. */
+function takeBack(t: any, actor: Actor, restore?: () => void): string[] {
+  const threadId = t.id as number
   const conv = get<any>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)
   const removed = tx(() => {
     const files = all<{ id: number; inline: number; storage_key: string }>('SELECT id, inline, storage_key FROM attachments WHERE thread_id = ?', threadId)
@@ -717,6 +781,7 @@ export function cancelScheduled(threadId: number, actor: Actor): string[] {
     if (drafted) run('UPDATE attachments SET thread_id = NULL, inline = 0, uploaded_by = ? WHERE thread_id = ?', t.user_id, threadId)
     run('DELETE FROM threads WHERE id = ?', threadId)
     run('UPDATE conversations SET thread_count = MAX(0, thread_count - 1), updated_at = ? WHERE id = ?', now(), t.conversation_id)
+    restore?.()
     reindex(t.conversation_id)
     return drafted ? [] : files.map((f) => f.storage_key)
   })

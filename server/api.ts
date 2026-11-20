@@ -38,6 +38,7 @@ import {
   deleteNote,
   editNote,
   toggleReaction,
+  undoReply,
   saveDraft,
   updateConversation,
   type Actor,
@@ -724,6 +725,7 @@ api.post('/conversations/:id/reply', async (c) => {
       sendAt: Number.isFinite(Number(data.sendAt)) && Number(data.sendAt) > 0 ? Number(data.sendAt) : undefined,
       ifNoReply: data.ifNoReply === true,
       assigneeId: data.assigneeId === undefined ? undefined : data.assigneeId === null ? null : int(data.assigneeId),
+      undoable: data.undoable === true,
     },
     actorOf(c),
   )
@@ -825,6 +827,14 @@ api.delete('/threads/:id', (c) => {
   const id = idParam(c.req.param('id'))
   assertThread(c.get('user'), id)
   removeFiles(deleteNote(id, actorOf(c), c.get('user').role === 'admin'))
+  return c.json({ ok: true })
+})
+
+// Undo a reply in the seconds before its email goes. The text returns to the writer's draft.
+api.post('/threads/:id/undo', (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  removeFiles(undoReply(id, actorOf(c)))
   return c.json({ ok: true })
 })
 
