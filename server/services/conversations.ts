@@ -1101,6 +1101,32 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
   return files
 }
 
+/**
+ * Rewrite an internal note. Only its author may, so an integration can keep one running summary up to date.
+ * Only the text changes: the note keeps its place and its files.
+ */
+export function editNote(threadId: number, input: { bodyHtml: string }, actor: Actor): number {
+  const bodyHtml = cleanHtml(input.bodyHtml)
+  const text = htmlToText(bodyHtml)
+  const t = get<{ conversation_id: number; type: string; user_id: number | null }>('SELECT conversation_id, type, user_id FROM threads WHERE id = ?', threadId)
+  if (!t) throw new AppError('Note not found.', 404)
+  if (t.type !== 'note') throw new AppError('Only notes can be edited. Messages to and from the customer stay as they were sent.')
+  if (actor.userId === null || t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note can edit it.', 403)
+  const hasFiles = !!get('SELECT 1 FROM attachments WHERE thread_id = ?', threadId)
+  if (blank(bodyHtml, text) && !hasFiles) throw new AppError('Write a note before saving.')
+  const mailboxId = tx(() => {
+    run('UPDATE threads SET body_html = ?, body_text = ? WHERE id = ?', bodyHtml, text, threadId)
+    // The inbox shows the newest note, if nothing has been said since.
+    const newest = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply', 'note') ORDER BY created_at DESC, id DESC LIMIT 1`, t.conversation_id)
+    if (newest?.id === threadId) run('UPDATE conversations SET note_preview = ? WHERE id = ?', previewOf(text) || 'Attached a file', t.conversation_id)
+    run('UPDATE conversations SET updated_at = ? WHERE id = ?', now(), t.conversation_id)
+    reindex(t.conversation_id)
+    return get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)!.mailbox_id
+  })
+  touch(t.conversation_id, mailboxId, 'updated', actor)
+  return t.conversation_id
+}
+
 /** Retry a reply that failed to send. */
 export function retryDelivery(threadId: number) {
   const t = get<any>(`SELECT id, conversation_id FROM threads WHERE id = ? AND type = 'reply' AND state = 'failed'`, threadId)
