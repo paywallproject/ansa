@@ -177,6 +177,8 @@ export interface Thread {
   bcc: string[]
   state: 'sent' | 'sending' | 'failed' | 'scheduled'
   sendAt: number | null
+  /** Until when its writer can still take a reply back with Undo. */
+  undoUntil: number | null
   error: string | null
   event: Record<string, any> | null
   via: string

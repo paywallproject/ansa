@@ -79,7 +79,7 @@ export function InboxPage({ search = false }: { search?: boolean }) {
   const items = useMemo(() => (leaving.size ? fetched.filter((c) => !leaving.has(c.id)) : fetched), [fetched, leaving])
   const total = Math.max(0, (list.data?.pages[0]?.total ?? 0) - (fetched.length - items.length))
 
-  const open = (id: number | null) => navigate(id ? `${base}/${id}${suffix}` : `${base}${suffix}`)
+  const open = (id: number | null, state?: { compose: 'reply' }) => navigate(id ? `${base}/${id}${suffix}` : `${base}${suffix}`, { state })
   const step = (delta: number) => {
     if (items.length === 0) return
     const index = items.findIndex((c) => c.id === selectedId)
@@ -87,10 +87,14 @@ export function InboxPage({ search = false }: { search?: boolean }) {
     if (next && next.id !== selectedId) open(next.id)
   }
   /** After closing a conversation, go back to the list, as in Help Scout, with a way to look at it again. */
-  const done = (message: string, undo?: () => void) => {
+  const done = (message: string, undo?: () => Promise<unknown> | void, reopen?: boolean) => {
     const id = selectedId
     open(null)
-    toast(message, { action: undo ? { label: 'Undo', run: undo } : id ? { label: 'View', run: () => open(id) } : undefined })
+    const run = undo && (async () => {
+      // Undoing a reply goes back to it, with its text in the reply box.
+      if ((await undo()) !== false && reopen && id) open(id, { compose: 'reply' })
+    })
+    toast(message, { action: run ? { label: 'Undo', run: () => void run() } : id ? { label: 'View', run: () => open(id) } : undefined })
   }
   useHotkeys({ j: () => step(1), k: () => step(-1), escape: () => selectedId && !document.querySelector('[role=dialog], [role=menu]') && open(null) })
 

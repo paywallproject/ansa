@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlarmClock,
@@ -56,7 +56,16 @@ import { useSheetDrag } from '../lib/sheetDrag'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
 
-export function ConversationView({ id, onBack, onDone }: { id: number; onBack: () => void; onDone: (message: string, undo?: () => void) => void }) {
+export function ConversationView({
+  id,
+  onBack,
+  onDone,
+}: {
+  id: number
+  onBack: () => void
+  /** Back to the list with a message. Undo, given, is offered with it; `reopen` comes back here to write after it. */
+  onDone: (message: string, undo?: () => Promise<unknown> | void, reopen?: boolean) => void
+}) {
   const { user } = useSession()
   const client = useQueryClient()
   const navigate = useNavigate()
@@ -76,11 +85,35 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
     composer.current?.focus(mode)
   }
 
+  // Back from undoing a reply: the reply box opens with its text, once the conversation is here.
+  const location = useLocation()
+  const reopen = useRef((location.state as { compose?: 'reply' } | null)?.compose === 'reply')
+
+  /** Take back a reply just sent. Its text goes back into the reply box. */
+  const undoSend = (threadId: number) => () =>
+    api
+      .post(`/threads/${threadId}/undo`)
+      .then(async () => {
+        void client.invalidateQueries({ queryKey: ['conversations'] })
+        void client.invalidateQueries({ queryKey: ['mailboxes'] })
+        await client.invalidateQueries({ queryKey: ['conversation', id] })
+        return true
+      })
+      .catch((err: Error) => {
+        toast(err.message, { kind: 'error' })
+        return false
+      })
+
   const query = useQuery({
     queryKey: ['conversation', id],
     queryFn: () => api.get<{ conversation: Conversation; viewers: Viewer[] }>(`/conversations/${id}`),
   })
   const conversation = query.data?.conversation
+  useEffect(() => {
+    if (!conversation || !reopen.current) return
+    reopen.current = false
+    openComposer('reply')
+  }, [conversation]) // eslint-disable-line react-hooks/exhaustive-deps
   const livePresence = useQuery<Viewer[]>({ queryKey: ['presence', id], queryFn: () => query.data?.viewers ?? [], enabled: false })
   const viewers = (livePresence.data ?? query.data?.viewers ?? []).filter((v) => v.userId !== user.id)
   useDocumentTitle(conversation?.subject ?? '')
@@ -315,12 +348,17 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           agentName={user.name}
           othersReplying={viewers.filter((v) => v.state === 'replying')}
           onTyping={setTyping}
-          onSent={(status) => {
+          onSent={(status, threadId) => {
             setComposing(false)
             if (!status) return
+            // As in Help Scout: for a few seconds the email has not gone, and Undo brings it back to the reply box.
+            const undo = threadId && conversation.source !== 'chat' ? undoSend(threadId) : undefined
             // The conversation leaves this folder, so go back to the list.
-            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone('Reply sent')
-            else toast('Reply sent')
+            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone('Reply sent', undo, true)
+            else
+              toast('Reply sent', {
+                action: undo && { label: 'Undo', run: () => void undo().then((ok) => ok && openComposer('reply')) },
+              })
           }}
         />
       </div>

@@ -41,7 +41,8 @@ export const Composer = forwardRef<
     open: boolean
     onOpenChange: (open: boolean) => void
     onTyping: (typing: boolean) => void
-    onSent: (status: SendStatus | null) => void
+    /** A reply or note was sent. For a reply sent now: the status it set, and the reply, which can be undone for a moment. */
+    onSent: (status: SendStatus | null, threadId?: number) => void
   }
 >(function Composer({ conversation, agentName, othersReplying, open, onOpenChange, onTyping, onSent }, ref) {
   const client = useQueryClient()
@@ -103,8 +104,9 @@ export const Composer = forwardRef<
       const bodyHtml = lineHtml(editorHtml(editor))
       clearTimeout(draftTimer.current)
       return mode === 'reply'
-        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, ...(chooseAssignee || pickedAssignee !== undefined ? { assigneeId: sendAssignee } : {}) })
-        : api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
+        ? // An email waits a few seconds, so Undo can take it back. A live chat answer goes at once.
+          api.post<{ threadId: number; conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, undoable: !isChat && !sendAt, ...(chooseAssignee || pickedAssignee !== undefined ? { assigneeId: sendAssignee } : {}) })
+        : api.post<{ threadId: number; conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
     },
     onSuccess: (data, { status, sendAt }) => {
       client.setQueryData(['conversation', conversation.id], (old: any) => (old ? { ...old, conversation: data.conversation } : old))
@@ -122,7 +124,7 @@ export const Composer = forwardRef<
       // The conversation says "Reply sent" itself, since it may go back to the list.
       if (mode === 'note' || sendAt) toast(mode === 'note' ? 'Note added' : `Reply scheduled for ${zonedLabel(sendAt!, zone)}`)
       // A scheduled reply changes nothing yet, so the conversation stays open in front of you.
-      onSent(mode === 'reply' && !sendAt ? status : null)
+      onSent(mode === 'reply' && !sendAt ? status : null, data.threadId)
     },
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })
