@@ -451,7 +451,8 @@ function Row({
   /** On a phone, checkboxes show only in select mode; otherwise the customer's avatar takes their place. */
   selecting: boolean
 }) {
-  const waiting = (c.status === 'active' || c.status === 'waiting') && !!c.waitingSince
+  // Bold while the conversation is open (active), whoever wrote last.
+  const waiting = c.status === 'active' || c.status === 'waiting'
   // Waiting on the customer, or closed: regular weight instead of bold, as in Help Scout. Still dark enough to read.
   const settled = c.status === 'pending' || c.status === 'closed'
   const { user: me } = useSession()
