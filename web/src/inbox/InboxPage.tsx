@@ -452,7 +452,7 @@ function Row({
   selecting: boolean
 }) {
   // Bold while the conversation is open (active), whoever wrote last.
-  const waiting = c.status === 'active' || c.status === 'waiting'
+  const waiting = c.status === 'active'
   // Waiting on the customer, or closed: regular weight instead of bold, as in Help Scout. Still dark enough to read.
   const settled = c.status === 'pending' || c.status === 'closed'
   const { user: me } = useSession()
