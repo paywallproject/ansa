@@ -36,6 +36,8 @@ import {
   sendScheduledNow,
   cancelScheduled,
   deleteNote,
+  editNote,
+  toggleReaction,
   saveDraft,
   updateConversation,
   type Actor,
@@ -824,6 +826,23 @@ api.delete('/threads/:id', (c) => {
   assertThread(c.get('user'), id)
   removeFiles(deleteNote(id, actorOf(c), c.get('user').role === 'admin'))
   return c.json({ ok: true })
+})
+
+// Edit a note: its author only.
+api.patch('/threads/:id', async (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  const data = await body(c)
+  editNote(id, String(data.bodyHtml ?? ''), actorOf(c))
+  return c.json({ ok: true })
+})
+
+// React to a note with an emoji, or take the reaction back.
+api.post('/threads/:id/reactions', async (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  const data = await body(c)
+  return c.json({ on: toggleReaction(id, String(data.emoji ?? ''), actorOf(c)) })
 })
 
 api.post('/threads/:id/retry', (c) => {
