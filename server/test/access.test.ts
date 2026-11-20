@@ -447,6 +447,28 @@ test('a note can be deleted by its author or an admin, and only a note', async (
   assert.equal(count(), before - 2)
 })
 
+test('a note can be edited by its author only, in place', async () => {
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'edits@example.com', subject: 'Edits', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const mine = conversations.addNote(conv.id, { bodyHtml: '<p>First take</p>' }, { userId: agentId, via: 'api' })
+  const theirs = conversations.addNote(conv.id, { bodyHtml: '<p>Admin note</p>' }, { userId: adminId, via: 'web' })
+  const customerThread = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'customer'`, conv.id)!.id
+
+  assert.equal((await call(agentToken, 'PATCH', `/threads/${theirs}`, { bodyHtml: '<p>x</p>' })).status, 403)
+  assert.equal((await call(adminToken, 'PATCH', `/threads/${customerThread}`, { bodyHtml: '<p>x</p>' })).status, 400)
+  assert.equal((await call(agentToken, 'PATCH', `/threads/${mine}`, { bodyHtml: '<p> </p>' })).status, 400)
+
+  const res = await call(agentToken, 'PATCH', `/threads/${mine}`, { bodyHtml: '<p>Summary</p><p>Second line</p>' })
+  assert.equal(res.status, 200)
+  const ids = res.data.conversation.threads.map((t: any) => t.id)
+  assert.ok(ids.indexOf(mine) < ids.indexOf(theirs), 'keeps its place')
+  const edited = res.data.conversation.threads.find((t: any) => t.id === mine)
+  assert.match(edited.bodyHtml, /Summary/)
+  assert.doesNotMatch(edited.bodyHtml, /First take/)
+  assert.equal(res.data.conversation.threads.filter((t: any) => t.type === 'note').length, 2)
+  // The inbox keeps showing the newest note, which is the admin's.
+  assert.equal(get<{ note_preview: string }>('SELECT note_preview FROM conversations WHERE id = ?', conv.id)!.note_preview, 'Admin note')
+})
+
 test('the inbox shows the newest note until someone writes again, and the note before it when it is deleted', async () => {
   const { addNote, deleteNote } = await import('../services/conversations.ts')
   const { ingestRaw } = await import('../mail/ingest.ts')
