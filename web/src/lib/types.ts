@@ -189,7 +189,16 @@ export interface Thread {
   openLastAt: number | null
   openLastAgent: string | null
   createdAt: number
+  /** When a note was last edited. Null if it never was. */
+  editedAt: number | null
+  /** Emoji reactions on a note, each with the teammates who chose it. */
+  reactions: Reaction[]
   attachments: Attachment[]
+}
+
+export interface Reaction {
+  emoji: string
+  users: { id: number; name: string }[]
 }
 
 export interface Conversation extends Omit<ConversationSummary, 'customer'> {

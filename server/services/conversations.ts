@@ -214,7 +214,12 @@ export function getSummary(id: number): ConversationSummary {
   return serialize(row(id), tagsFor([id]).get(id))
 }
 
-function serializeThread(t: any, attachments: any[]) {
+export interface Reaction {
+  emoji: string
+  users: { id: number; name: string }[]
+}
+
+function serializeThread(t: any, attachments: any[], reactions: Reaction[] = []) {
   return {
     id: t.id as number,
     type: t.type as 'customer' | 'reply' | 'note' | 'event',
@@ -246,6 +251,10 @@ function serializeThread(t: any, attachments: any[]) {
     openLastAt: (t.open_last_at as number | null) ?? null,
     openLastAgent: (t.open_last_agent as string | null) ?? null,
     createdAt: t.created_at as number,
+    /** When a note was last edited. Null if it never was. */
+    editedAt: (t.edited_at as number | null) ?? null,
+    /** Emoji reactions on a note, in the order each emoji was first used. */
+    reactions,
     attachments: attachments.map((a) => ({
       id: a.id as number,
       filename: a.filename as string,
@@ -269,7 +278,26 @@ export function listThreads(conversationId: number): ThreadView[] {
     'SELECT a.* FROM attachments a JOIN threads t ON t.id = a.thread_id WHERE t.conversation_id = ? ORDER BY a.id',
     conversationId,
   )
-  return threads.map((t) => serializeThread(t, attachments.filter((a) => a.thread_id === t.id)))
+  const reactions = reactionsFor(conversationId)
+  return threads.map((t) => serializeThread(t, attachments.filter((a) => a.thread_id === t.id), reactions.get(t.id)))
+}
+
+/** Reactions on a conversation's notes, by thread. */
+function reactionsFor(conversationId: number): Map<number, Reaction[]> {
+  const rows = all<{ thread_id: number; emoji: string; user_id: number; name: string }>(
+    `SELECT r.thread_id, r.emoji, r.user_id, u.name FROM reactions r JOIN threads t ON t.id = r.thread_id JOIN users u ON u.id = r.user_id
+     WHERE t.conversation_id = ? ORDER BY r.created_at, r.rowid`,
+    conversationId,
+  )
+  const out = new Map<number, Reaction[]>()
+  for (const r of rows) {
+    const list = out.get(r.thread_id) ?? []
+    let entry = list.find((e) => e.emoji === r.emoji)
+    if (!entry) list.push((entry = { emoji: r.emoji, users: [] }))
+    entry.users.push({ id: r.user_id, name: r.name })
+    out.set(r.thread_id, list)
+  }
+  return out
 }
 
 export function getConversation(id: number, opts: { userId?: number; mailboxIds?: number[] | null } = {}) {
@@ -814,6 +842,8 @@ function recordMentions(conversationId: number, threadId: number, text: string, 
     }
   }
   found.delete(authorId ?? -1)
+  // An edited note tells only the teammates it did not mention before.
+  for (const { user_id } of all<{ user_id: number }>('SELECT user_id FROM mentions WHERE thread_id = ?', threadId)) found.delete(user_id)
   for (const userId of found) run('INSERT INTO mentions (thread_id, conversation_id, user_id, created_at) VALUES (?, ?, ?, ?)', threadId, conversationId, userId, now())
   return [...found]
 }
@@ -1084,6 +1114,7 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
   if (!isAdmin && t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note, or an admin, can delete it.', 403)
   const files = all<{ storage_key: string }>('SELECT storage_key FROM attachments WHERE thread_id = ?', threadId).map((f) => f.storage_key)
   const mailboxId = tx(() => {
+    run('DELETE FROM reactions WHERE thread_id = ?', threadId)
     run('DELETE FROM threads WHERE id = ?', threadId) // mentions and attachments go with it
     // The inbox shows the note before it, if nothing has been said since. Events (assigned, closed…) do not count.
     const newest = get<{ type: string; body_text: string }>(`SELECT type, body_text FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply', 'note') ORDER BY created_at DESC, id DESC LIMIT 1`, t.conversation_id)
@@ -1099,6 +1130,57 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
   })
   touch(t.conversation_id, mailboxId, 'updated', actor)
   return files
+}
+
+/**
+ * Change the text of an internal note. Only its author may: the words are theirs.
+ * Teammates newly @mentioned are told; files attached to it stay.
+ */
+export function editNote(threadId: number, bodyHtml: string, actor: Actor) {
+  const t = get<{ conversation_id: number; type: string; user_id: number | null }>('SELECT conversation_id, type, user_id FROM threads WHERE id = ?', threadId)
+  if (!t) throw new AppError('Note not found.', 404)
+  if (t.type !== 'note') throw new AppError('Only notes can be edited. Messages to and from the customer stay as they were sent.')
+  if (!actor.userId || t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note can edit it.', 403)
+  const html = cleanHtml(bodyHtml)
+  const text = htmlToText(html)
+  const files = get<{ n: number }>('SELECT COUNT(*) AS n FROM attachments WHERE thread_id = ? AND inline = 0', threadId)?.n ?? 0
+  if (blank(html, text) && !files) throw new AppError('A note needs some text. To remove it, delete the note.')
+  const mailboxId = tx(() => {
+    run('UPDATE threads SET body_html = ?, body_text = ?, edited_at = ? WHERE id = ?', html, text, now(), threadId)
+    // Images pasted while editing belong to the note now.
+    attach(threadId, t.conversation_id, undefined, html)
+    // The inbox shows the note's new text, if it is still the newest thing said.
+    const newest = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply', 'note') ORDER BY created_at DESC, id DESC LIMIT 1`, t.conversation_id)
+    if (newest?.id === threadId) run('UPDATE conversations SET note_preview = ? WHERE id = ?', previewOf(text) || 'Attached a file', t.conversation_id)
+    reindex(t.conversation_id)
+    return get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)!.mailbox_id
+  })
+  const mentioned = recordMentions(t.conversation_id, threadId, text, actor.userId)
+  touch(t.conversation_id, mailboxId, 'updated', actor)
+  for (const userId of mentioned) notifyMentioned(t.conversation_id, userId, actor.userId)
+}
+
+/** One emoji: a pictograph, perhaps with skin tone, joiners or a flag's letters. Not text. */
+const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\uFE0F|\u200D|\u20E3|[#*0-9])+$/u
+
+/** Add the teammate's reaction to a note, or take it back if it is there. Returns whether it is now on. */
+export function toggleReaction(threadId: number, emoji: string, actor: Actor): boolean {
+  const value = String(emoji ?? '').trim()
+  if (!value || value.length > 16 || !EMOJI.test(value) || !/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value)) throw new AppError('Pick an emoji to react with.')
+  if (!actor.userId) throw new AppError('Only a teammate can react to a note.', 403)
+  const t = get<{ conversation_id: number; type: string }>('SELECT conversation_id, type FROM threads WHERE id = ?', threadId)
+  if (!t) throw new AppError('Note not found.', 404)
+  if (t.type !== 'note') throw new AppError('You can react to notes only.')
+  const removed = run('DELETE FROM reactions WHERE thread_id = ? AND user_id = ? AND emoji = ?', threadId, actor.userId, value).changes > 0
+  if (!removed) {
+    const kinds = get<{ n: number }>('SELECT COUNT(DISTINCT emoji) AS n FROM reactions WHERE thread_id = ?', threadId)?.n ?? 0
+    const known = get('SELECT 1 FROM reactions WHERE thread_id = ? AND emoji = ?', threadId, value)
+    if (!known && kinds >= 20) throw new AppError('This note has as many different reactions as it can take.')
+    run('INSERT INTO reactions (thread_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)', threadId, actor.userId, value, now())
+  }
+  const mailboxId = get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)!.mailbox_id
+  touch(t.conversation_id, mailboxId, 'updated', actor)
+  return !removed
 }
 
 /** Retry a reply that failed to send. */

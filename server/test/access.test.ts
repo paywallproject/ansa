@@ -447,6 +447,48 @@ test('a note can be deleted by its author or an admin, and only a note', async (
   assert.equal(count(), before - 2)
 })
 
+test('a note can be edited by its author only, and reacted to with an emoji', async () => {
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'edits@example.com', subject: 'Edits', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const note = conversations.addNote(conv.id, { bodyHtml: '<p>Frist draft</p>' }, { userId: agentId, via: 'web' })
+  const customerThread = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'customer'`, conv.id)!.id
+  const thread = async () => (await call(agentToken, 'GET', `/conversations/${conv.id}`)).data.conversation.threads.find((t: any) => t.id === note)
+
+  // Only the author, not even an admin; never a customer message; never blank.
+  assert.equal((await call(adminToken, 'PATCH', `/threads/${note}`, { bodyHtml: '<p>Mine now</p>' })).status, 403)
+  assert.equal((await call(adminToken, 'PATCH', `/threads/${customerThread}`, { bodyHtml: '<p>x</p>' })).status, 400)
+  assert.equal((await call(agentToken, 'PATCH', `/threads/${note}`, { bodyHtml: '<p> </p>' })).status, 400)
+  assert.equal((await thread()).editedAt, null)
+
+  assert.equal((await call(agentToken, 'PATCH', `/threads/${note}`, { bodyHtml: '<p>First draft</p>' })).status, 200)
+  const edited = await thread()
+  assert.match(edited.bodyHtml, /First draft/)
+  assert.equal(typeof edited.editedAt, 'number')
+  // The inbox and search follow the new text.
+  assert.equal(get<{ note_preview: string }>('SELECT note_preview FROM conversations WHERE id = ?', conv.id)!.note_preview, 'First draft')
+
+  // Reactions: one of each emoji per teammate, and tapping again takes it back.
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍' })).data.on, true)
+  assert.equal((await call(adminToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍' })).data.on, true)
+  assert.equal((await call(adminToken, 'POST', `/threads/${note}/reactions`, { emoji: '🎉' })).data.on, true)
+  let reactions = (await thread()).reactions
+  assert.deepEqual(reactions.map((r: any) => [r.emoji, r.users.length]), [['👍', 2], ['🎉', 1]])
+  assert.equal((await call(adminToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍' })).data.on, false)
+  reactions = (await thread()).reactions
+  assert.deepEqual(reactions.map((r: any) => [r.emoji, r.users.map((u: any) => u.id)]), [['👍', [agentId]], ['🎉', [adminId]]])
+  // Text is not an emoji, and customer messages take no reactions.
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: 'lol' })).status, 400)
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '<b>' })).status, 400)
+  assert.equal((await call(agentToken, 'POST', `/threads/${customerThread}/reactions`, { emoji: '👍' })).status, 400)
+  // Flags, skin tones and joined emoji are fine.
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍🏽' })).status, 200)
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '🇹🇭' })).status, 200)
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '❤️' })).status, 200)
+
+  // Deleting the note takes its reactions with it.
+  assert.equal((await call(agentToken, 'DELETE', `/threads/${note}`)).status, 200)
+  assert.equal(get('SELECT 1 FROM reactions WHERE thread_id = ?', note), undefined)
+})
+
 test('the inbox shows the newest note until someone writes again, and the note before it when it is deleted', async () => {
   const { addNote, deleteNote } = await import('../services/conversations.ts')
   const { ingestRaw } = await import('../mail/ingest.ts')

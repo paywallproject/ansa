@@ -379,6 +379,17 @@ const migrations: string[] = [
   -- Files attached to a draft (a JSON list of attachment ids), so they wait with it until it is sent.
   ALTER TABLE drafts ADD COLUMN attachment_ids TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  -- Notes can be edited (edited_at says when) and reacted to with an emoji, one of each emoji per teammate.
+  ALTER TABLE threads ADD COLUMN edited_at INTEGER;
+  CREATE TABLE reactions (
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, user_id, emoji)
+  );
+  `,
 ]
 
 export function migrate() {
