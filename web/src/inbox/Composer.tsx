@@ -4,7 +4,7 @@ import { Bookmark, ChevronDown, Clock, KeyboardOff, Send, StickyNote, Trash2, Us
 import { PHONE } from '../lib/phone'
 import { api } from '../lib/api'
 import { canSee } from '../lib/access'
-import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
+import { useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
 import type { Attachment, Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
 import { STATUS_DOT, statusOptions } from '../lib/workspace'
@@ -49,11 +49,13 @@ export const Composer = forwardRef<
   const { toast } = useFeedback()
   const zone = useZone()
   const [mode, setMode] = useState<'reply' | 'note'>(conversation.draft?.kind ?? 'reply')
-  // A live chat goes back and forth, so closing it on every reply would be wrong. Chats keep their own choice.
+  // A reply closes the conversation unless another status is picked for that one reply; the choice is not
+  // remembered, so a one-off "Active" never carries over. A live chat goes back and forth, so it stays active.
   const isChat = conversation.source === 'chat'
-  const [storedStatus, setSendStatus] = useLocalState<SendStatus>(isChat ? 'ansa-chat-send-status' : 'ansa-send-status', isChat ? 'active' : 'closed')
-  // A remembered choice can be one the workspace no longer offers.
-  const sendStatus: SendStatus = (statusOptions() as SendStatus[]).includes(storedStatus) ? storedStatus : 'closed'
+  const defaultStatus: SendStatus = isChat ? 'active' : 'closed'
+  const [pickedStatus, setSendStatus] = useState<SendStatus>(defaultStatus)
+  // The workspace may not offer the default.
+  const sendStatus: SendStatus = (statusOptions() as SendStatus[]).includes(pickedStatus) ? pickedStatus : 'closed'
   const [showCc, setShowCc] = useState(conversation.cc.length > 0)
   const [showBcc, setShowBcc] = useState(false)
   const [cc, setCc] = useState(conversation.cc.join(', '))
@@ -120,6 +122,7 @@ export const Composer = forwardRef<
       firstFiles.current = ''
       uploads.clear()
       setPickedAssignee(undefined)
+      if (mode === 'reply') setSendStatus(defaultStatus)
       onTyping(false)
       // The conversation says "Reply sent" itself, since it may go back to the list.
       if (mode === 'note' || sendAt) toast(mode === 'note' ? 'Note added' : `Reply scheduled for ${zonedLabel(sendAt!, zone)}`)
