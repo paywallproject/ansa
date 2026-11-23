@@ -12,10 +12,37 @@ export const SIGNATURE_CLASS = 'ansa-signature'
  * (moz-signature), Outlook (id="Signature"), Yahoo and others ("signature" in a class or id).
  */
 const SIGNATURE_MARK = /(^|[\s_-])(gmail_signature|helpscout-signature|moz-signature|signature)($|[\s_-])/i
+/**
+ * The classes an app's sidebar HTML may use. Ansa styles them (`.app-html` in index.css) so every
+ * app looks native; any other class, and every style attribute, is removed. Listed in docs/apps.md.
+ */
+export const APP_CLASSES = [
+  'app-list', 'app-item', 'app-body', 'app-title', 'app-meta', 'app-muted', 'app-label',
+  'app-dot', 'app-dot-ok', 'app-dot-warn', 'app-dot-bad', 'app-dot-muted',
+  'app-badges', 'app-badge', 'app-badge-ok', 'app-badge-warn', 'app-badge-bad', 'app-badge-info',
+  'app-actions', 'app-button', 'app-button-primary', 'app-button-block', 'app-divider',
+]
 
 /** Clean untrusted HTML (incoming mail, editor output) down to a small, safe subset. */
 export function cleanHtml(html: string): string {
+  return sanitizeHtml(html, options()).trim()
+}
+
+/**
+ * Clean an app's sidebar HTML: the same subset as mail, plus the `app-*` classes Ansa styles. An app
+ * has no signature to fold, so its classes are not rewritten to the signature marker.
+ */
+export function cleanAppHtml(html: string): string {
+  const mail = options()
   return sanitizeHtml(html, {
+    ...mail,
+    allowedClasses: { '*': APP_CLASSES },
+    transformTags: { a: mail.transformTags!.a! },
+  }).trim()
+}
+
+function options(): sanitizeHtml.IOptions {
+  return {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: {
       a: ['href', 'title', 'target', 'rel'],
@@ -41,7 +68,7 @@ export function cleanHtml(html: string): string {
       }),
     },
     exclusiveFilter: (frame) => frame.tag === 'img' && /^data:(?!image\/(png|jpe?g|gif|webp))/i.test(frame.attribs.src || ''),
-  }).trim()
+  }
 }
 
 function markSignature(tagName: string, attribs: Record<string, string>) {
