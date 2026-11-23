@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlarmClock,
@@ -37,6 +37,8 @@ import {
   Archive,
   MailOpen,
   MessageCircle,
+  Pencil,
+  SmilePlus,
 } from 'lucide-react'
 import { api, qs } from '../lib/api'
 import { fileSize, fullTime, messageTime, STATUS_LABEL } from '../lib/format'
@@ -45,7 +47,7 @@ import { useDebounced, useDocumentTitle, useHotkeys, useMailboxes, useSession, u
 import type { Attachment, Conversation, ConversationSummary, Status, Thread, Viewer } from '../lib/types'
 import { Avatar, Button, EmptyState, Input, MenuDivider, MenuItem, MenuLabel, Modal, Popover, Spinner, StatusBadge, cx, useFeedback } from '../ui'
 import { Composer, type ComposerHandle } from './Composer'
-import { lineHtml } from './Editor'
+import { EditorArea, EditorToolbar, editorHtml, isBodyImage, lineHtml, paragraphHtml, useBodyImages, useRichEditor } from './Editor'
 import { STATUS_DOT, statusOptions, workspace } from '../lib/workspace'
 import { LightboxProvider, isImageType, useLightbox, type LightboxImage } from './Lightbox'
 import { useZone, zonedLabel } from '../lib/timezone'
@@ -54,7 +56,16 @@ import { useSheetDrag } from '../lib/sheetDrag'
 
 type Patch = Partial<{ status: Status; assigneeId: number | null; subject: string; addTags: string[]; removeTags: string[]; snoozedUntil: number | null; mailboxId: number }>
 
-export function ConversationView({ id, onBack, onDone }: { id: number; onBack: () => void; onDone: (message: string, undo?: () => void) => void }) {
+export function ConversationView({
+  id,
+  onBack,
+  onDone,
+}: {
+  id: number
+  onBack: () => void
+  /** Back to the list with a message. Undo, given, is offered with it; `reopen` comes back here to write after it. */
+  onDone: (message: string, undo?: () => Promise<unknown> | void, reopen?: boolean) => void
+}) {
   const { user } = useSession()
   const client = useQueryClient()
   const navigate = useNavigate()
@@ -74,11 +85,35 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
     composer.current?.focus(mode)
   }
 
+  // Back from undoing a reply: the reply box opens with its text, once the conversation is here.
+  const location = useLocation()
+  const reopen = useRef((location.state as { compose?: 'reply' } | null)?.compose === 'reply')
+
+  /** Take back a reply just sent. Its text goes back into the reply box. */
+  const undoSend = (threadId: number) => () =>
+    api
+      .post(`/threads/${threadId}/undo`)
+      .then(async () => {
+        void client.invalidateQueries({ queryKey: ['conversations'] })
+        void client.invalidateQueries({ queryKey: ['mailboxes'] })
+        await client.invalidateQueries({ queryKey: ['conversation', id] })
+        return true
+      })
+      .catch((err: Error) => {
+        toast(err.message, { kind: 'error' })
+        return false
+      })
+
   const query = useQuery({
     queryKey: ['conversation', id],
     queryFn: () => api.get<{ conversation: Conversation; viewers: Viewer[] }>(`/conversations/${id}`),
   })
   const conversation = query.data?.conversation
+  useEffect(() => {
+    if (!conversation || !reopen.current) return
+    reopen.current = false
+    openComposer('reply')
+  }, [conversation]) // eslint-disable-line react-hooks/exhaustive-deps
   const livePresence = useQuery<Viewer[]>({ queryKey: ['presence', id], queryFn: () => query.data?.viewers ?? [], enabled: false })
   const viewers = (livePresence.data ?? query.data?.viewers ?? []).filter((v) => v.userId !== user.id)
   useDocumentTitle(conversation?.subject ?? '')
@@ -313,12 +348,17 @@ export function ConversationView({ id, onBack, onDone }: { id: number; onBack: (
           agentName={user.name}
           othersReplying={viewers.filter((v) => v.state === 'replying')}
           onTyping={setTyping}
-          onSent={(status) => {
+          onSent={(status, threadId) => {
             setComposing(false)
             if (!status) return
+            // As in Help Scout: for a few seconds the email has not gone, and Undo brings it back to the reply box.
+            const undo = threadId && conversation.source !== 'chat' ? undoSend(threadId) : undefined
             // The conversation leaves this folder, so go back to the list.
-            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone('Reply sent')
-            else toast('Reply sent')
+            if (status === 'closed' || (status === 'pending' && workspace().fourStatuses)) onDone('Reply sent', undo, true)
+            else
+              toast('Reply sent', {
+                action: undo && { label: 'Undo', run: () => void undo().then((ok) => ok && openComposer('reply')) },
+              })
           }}
         />
       </div>
@@ -1470,8 +1510,10 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
   const client = useQueryClient()
   const { toast, confirm } = useFeedback()
   const { user: me } = useSession()
-  // A note can be deleted by its author or an admin.
-  const canDelete = thread.type === 'note' && (me.role === 'admin' || (thread.author.kind === 'user' && thread.author.id === me.id))
+  // A note can be edited by its author, and deleted by its author or an admin.
+  const ownNote = thread.type === 'note' && thread.author.kind === 'user' && thread.author.id === me.id
+  const canDelete = thread.type === 'note' && (me.role === 'admin' || ownNote)
+  const [editing, setEditing] = useState(false)
   const deleteNote = async () => {
     const ok = await confirm({ title: 'Delete this note?', body: 'It is removed for the whole team, with its attachments. You cannot undo this.', confirmLabel: 'Delete note', danger: true })
     if (!ok) return
@@ -1577,7 +1619,7 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
         aria-label={`${isNote ? 'Note' : 'Message'} from ${name}`}
         className={cx(
           // Wide side margins inside the card keep lines short and give the text room.
-          'relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-12 md:shadow-none lg:px-20',
+          'group/note relative rounded-[20px] border px-4 shadow-card md:rounded-xl md:px-12 md:shadow-none lg:px-20',
           folded ? 'py-4' : 'pt-4 pb-5 md:pt-5 md:pb-6',
           isNote ? 'border-note-line bg-note' : 'border-line bg-surface',
           scheduled && 'border-dashed border-line-strong',
@@ -1599,6 +1641,11 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
             <time className={cx('shrink-0 text-[13px] tabular-nums', isNote ? 'text-note-fg' : 'text-fg-3')} title={fullTime(thread.createdAt)}>
               {messageDate(thread.createdAt)}
             </time>
+            {thread.editedAt && (
+              <span className={cx('shrink-0 text-[13px]', isNote ? 'text-note-fg' : 'text-fg-3')} title={`Edited ${fullTime(thread.editedAt)}`}>
+                Edited
+              </span>
+            )}
             {((isCustomer && thread.via === 'email') || canDelete) && (
               <Popover
                 align="end"
@@ -1611,16 +1658,30 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
               >
                 {(close) =>
                   canDelete ? (
-                    <MenuItem
-                      icon={<Trash2 />}
-                      danger
-                      onSelect={() => {
-                        close()
-                        void deleteNote()
-                      }}
-                    >
-                      Delete note
-                    </MenuItem>
+                    <>
+                      {ownNote && (
+                        <MenuItem
+                          icon={<Pencil />}
+                          onSelect={() => {
+                            close()
+                            if (folded) onToggle()
+                            setEditing(true)
+                          }}
+                        >
+                          Edit note
+                        </MenuItem>
+                      )}
+                      <MenuItem
+                        icon={<Trash2 />}
+                        danger
+                        onSelect={() => {
+                          close()
+                          void deleteNote()
+                        }}
+                      >
+                        Delete note
+                      </MenuItem>
+                    </>
                   ) : (
                     <MenuItem
                       icon={<FileCode />}
@@ -1713,6 +1774,10 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 </Button>
               </div>
             )}
+            {editing ? (
+              <NoteEditor thread={thread} onDone={() => setEditing(false)} />
+            ) : (
+            <>
             <div
               className={cx('prose-mail [&_img]:cursor-zoom-in', hasSignature && !showSignature && 'hide-signature')}
               dangerouslySetInnerHTML={{ __html: html }}
@@ -1744,6 +1809,8 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 {quoted.isFetching ? 'Loading…' : showQuoted ? 'Hide quoted text' : 'Show quoted text'}
               </button>
             )}
+            </>
+            )}
             {files.length > 0 && (
               <ul className="mt-4 flex flex-wrap gap-2">
                 {files.map((file) => (
@@ -1751,12 +1818,174 @@ function Message({ thread, folded, onToggle }: { thread: Thread; folded: boolean
                 ))}
               </ul>
             )}
+            {isNote && !editing && <Reactions thread={thread} />}
           </div>
         )}
         </div>
         {!folded && viewed}
       </article>
     </li>
+  )
+}
+
+/** A note's text, changed in place. Images can be pasted or dropped in; other files go in a new note. */
+function NoteEditor({ thread, onDone }: { thread: Thread; onDone: () => void }) {
+  const client = useQueryClient()
+  const { toast } = useFeedback()
+  const save = useMutation({
+    mutationFn: (bodyHtml: string) => api.patch(`/threads/${thread.id}`, { bodyHtml }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['conversation'] })
+      void client.invalidateQueries({ queryKey: ['conversations'] })
+      onDone()
+    },
+    onError: (err: Error) => toast(err.message, { kind: 'error' }),
+  })
+  const submit = () => {
+    if (save.isPending || images.busy) return
+    save.mutate(lineHtml(editorHtml(editor)))
+  }
+  const editor = useRichEditor({
+    content: paragraphHtml(thread.bodyHtml),
+    placeholder: 'Write a note for your team',
+    onSubmit: submit,
+    onKeyDown: (event) => {
+      if (event.key !== 'Escape') return false
+      onDone()
+      return true
+    },
+    onFiles: (files, at) => {
+      const pictures = files.filter(isBodyImage)
+      if (pictures.length) images.insert(pictures, at)
+      if (pictures.length < files.length) toast('To attach a file, add a new note.')
+    },
+  })
+  const images = useBodyImages(editor)
+  useEffect(() => {
+    editor?.commands.focus('end')
+  }, [editor])
+  return (
+    <div>
+      <div className="rounded-lg border border-note-line bg-surface px-3 py-2 focus-within:border-note-fg/40">
+        <EditorArea editor={editor} className="max-h-[50vh] min-h-16" />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <EditorToolbar editor={editor} />
+        <span className="flex-1" />
+        <Button variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button variant="primary" loading={save.isPending} disabled={images.busy} onClick={submit}>
+          Save
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮', '🙏', '👀', '✅']
+
+/** "You, Ann and Ben": who chose a reaction, the viewer first. */
+const reactedBy = (users: { id: number; name: string }[], meId: number) => {
+  const names = [...users].sort((a, b) => Number(b.id === meId) - Number(a.id === meId)).map((u) => (u.id === meId ? 'You' : u.name))
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]
+}
+
+/** Emoji reactions under a note. Tapping one adds yours or takes it back. */
+function Reactions({ thread }: { thread: Thread }) {
+  const client = useQueryClient()
+  const { toast } = useFeedback()
+  const { user: me } = useSession()
+  const react = useMutation({
+    mutationFn: (emoji: string) => api.post(`/threads/${thread.id}/reactions`, { emoji }),
+    // Shown at once; the server's answer follows.
+    onMutate: (emoji) => {
+      client.setQueriesData<Conversation>({ queryKey: ['conversation'] }, (old) =>
+        old?.threads
+          ? {
+              ...old,
+              threads: old.threads.map((t) => {
+                if (t.id !== thread.id) return t
+                const has = t.reactions.find((r) => r.emoji === emoji)
+                const mine = has?.users.some((u) => u.id === me.id)
+                const reactions = has
+                  ? t.reactions
+                      .map((r) => (r.emoji !== emoji ? r : { ...r, users: mine ? r.users.filter((u) => u.id !== me.id) : [...r.users, { id: me.id, name: me.name }] }))
+                      .filter((r) => r.users.length > 0)
+                  : [...t.reactions, { emoji, users: [{ id: me.id, name: me.name }] }]
+                return { ...t, reactions }
+              }),
+            }
+          : old,
+      )
+    },
+    onError: (err: Error) => toast(err.message, { kind: 'error' }),
+    onSettled: () => void client.invalidateQueries({ queryKey: ['conversation'] }),
+  })
+  const picker = (
+    <Popover
+      role="dialog"
+      side="top"
+      trigger={({ ref, ...props }) => (
+        <button
+          ref={ref}
+          type="button"
+          {...props}
+          aria-label="Add a reaction"
+          title="Add a reaction"
+          className={cx(
+            'flex h-7 items-center justify-center rounded-full text-note-fg transition-colors hover:bg-black/5 hover:text-fg dark:hover:bg-white/10',
+            // With no reactions yet, it waits for the pointer on a computer, so each note does not carry an extra icon.
+            thread.reactions.length ? 'w-7' : '-ml-1.5 w-7 md:opacity-0 md:group-hover/note:opacity-100 md:focus-visible:opacity-100 md:aria-expanded:opacity-100',
+          )}
+        >
+          <SmilePlus className="size-4" aria-hidden />
+        </button>
+      )}
+    >
+      {(close) => (
+        <div className="grid grid-cols-8 gap-0.5 p-1">
+          {QUICK_REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              aria-label={`React with ${emoji}`}
+              onClick={() => {
+                close()
+                react.mutate(emoji)
+              }}
+              className="flex size-9 items-center justify-center rounded-md text-xl transition-transform hover:scale-110 hover:bg-hover"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
+    </Popover>
+  )
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-1.5" aria-label="Reactions">
+      {thread.reactions.map((r) => {
+        const mine = r.users.some((u) => u.id === me.id)
+        return (
+          <button
+            key={r.emoji}
+            type="button"
+            aria-pressed={mine}
+            title={`${reactedBy(r.users, me.id)} reacted with ${r.emoji}`}
+            onClick={() => react.mutate(r.emoji)}
+            className={cx(
+              'flex h-7 items-center gap-1 rounded-full border px-2 text-[13px] font-medium tabular-nums transition-colors',
+              mine ? 'border-accent/50 bg-accent-soft text-accent-fg' : 'border-note-line bg-surface/70 text-fg-2 hover:border-note-fg/40',
+            )}
+          >
+            <span className="text-[15px] leading-none">{r.emoji}</span>
+            {r.users.length}
+          </button>
+        )
+      })}
+      {picker}
+    </div>
   )
 }
 

@@ -4,7 +4,7 @@ import { Bookmark, ChevronDown, Clock, KeyboardOff, Send, StickyNote, Trash2, Us
 import { PHONE } from '../lib/phone'
 import { api } from '../lib/api'
 import { canSee } from '../lib/access'
-import { useLocalState, useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
+import { useMailboxes, useSavedReplies, useSession, useUsers } from '../lib/hooks'
 import type { Attachment, Conversation, Status, User, Viewer } from '../lib/types'
 import { STATUS_LABEL } from '../lib/format'
 import { STATUS_DOT, statusOptions } from '../lib/workspace'
@@ -41,18 +41,21 @@ export const Composer = forwardRef<
     open: boolean
     onOpenChange: (open: boolean) => void
     onTyping: (typing: boolean) => void
-    onSent: (status: SendStatus | null) => void
+    /** A reply or note was sent. For a reply sent now: the status it set, and the reply, which can be undone for a moment. */
+    onSent: (status: SendStatus | null, threadId?: number) => void
   }
 >(function Composer({ conversation, agentName, othersReplying, open, onOpenChange, onTyping, onSent }, ref) {
   const client = useQueryClient()
   const { toast } = useFeedback()
   const zone = useZone()
   const [mode, setMode] = useState<'reply' | 'note'>(conversation.draft?.kind ?? 'reply')
-  // A live chat goes back and forth, so closing it on every reply would be wrong. Chats keep their own choice.
+  // A reply closes the conversation unless another status is picked for that one reply; the choice is not
+  // remembered, so a one-off "Active" never carries over. A live chat goes back and forth, so it stays active.
   const isChat = conversation.source === 'chat'
-  const [storedStatus, setSendStatus] = useLocalState<SendStatus>(isChat ? 'ansa-chat-send-status' : 'ansa-send-status', isChat ? 'active' : 'closed')
-  // A remembered choice can be one the workspace no longer offers.
-  const sendStatus: SendStatus = (statusOptions() as SendStatus[]).includes(storedStatus) ? storedStatus : 'closed'
+  const defaultStatus: SendStatus = isChat ? 'active' : 'closed'
+  const [pickedStatus, setSendStatus] = useState<SendStatus>(defaultStatus)
+  // The workspace may not offer the default.
+  const sendStatus: SendStatus = (statusOptions() as SendStatus[]).includes(pickedStatus) ? pickedStatus : 'closed'
   const [showCc, setShowCc] = useState(conversation.cc.length > 0)
   const [showBcc, setShowBcc] = useState(false)
   const [cc, setCc] = useState(conversation.cc.join(', '))
@@ -103,8 +106,9 @@ export const Composer = forwardRef<
       const bodyHtml = lineHtml(editorHtml(editor))
       clearTimeout(draftTimer.current)
       return mode === 'reply'
-        ? api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, ...(chooseAssignee || pickedAssignee !== undefined ? { assigneeId: sendAssignee } : {}) })
-        : api.post<{ conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
+        ? // An email waits a few seconds, so Undo can take it back. A live chat answer goes at once.
+          api.post<{ threadId: number; conversation: Conversation }>(`/conversations/${conversation.id}/reply`, { bodyHtml, status, cc: showCc ? splitEmails(cc) : [], bcc: showBcc ? splitEmails(bcc) : [], attachmentIds: uploads.ids, sendAt, ifNoReply, undoable: !isChat && !sendAt, ...(chooseAssignee || pickedAssignee !== undefined ? { assigneeId: sendAssignee } : {}) })
+        : api.post<{ threadId: number; conversation: Conversation }>(`/conversations/${conversation.id}/note`, { bodyHtml, attachmentIds: uploads.ids })
     },
     onSuccess: (data, { status, sendAt }) => {
       client.setQueryData(['conversation', conversation.id], (old: any) => (old ? { ...old, conversation: data.conversation } : old))
@@ -118,11 +122,12 @@ export const Composer = forwardRef<
       firstFiles.current = ''
       uploads.clear()
       setPickedAssignee(undefined)
+      if (mode === 'reply') setSendStatus(defaultStatus)
       onTyping(false)
       // The conversation says "Reply sent" itself, since it may go back to the list.
       if (mode === 'note' || sendAt) toast(mode === 'note' ? 'Note added' : `Reply scheduled for ${zonedLabel(sendAt!, zone)}`)
       // A scheduled reply changes nothing yet, so the conversation stays open in front of you.
-      onSent(mode === 'reply' && !sendAt ? status : null)
+      onSent(mode === 'reply' && !sendAt ? status : null, data.threadId)
     },
     onError: (err: Error) => toast(err.message, { kind: 'error' }),
   })

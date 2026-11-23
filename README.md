@@ -54,8 +54,9 @@ reports and AI assistant.
 
 ### Conversations that read like a conversation
 
-Reply in rich text with attachments, Cc and Bcc. Drafts save as you type. Add a note that only your
-team sees, and type `@` to mention a teammate. Each message shows the status it was sent with, and a
+Reply in rich text with attachments, Cc and Bcc. Drafts save as you type, and Undo takes a reply back
+for a few seconds after you send it. Add a note that only your
+team sees, type `@` to mention a teammate, then edit it later or react to it with an emoji. Each message shows the status it was sent with, and a
 warning appears when a teammate views or answers the same conversation.
 
 The customer's profile sits beside the thread, with your team's notes and every conversation that

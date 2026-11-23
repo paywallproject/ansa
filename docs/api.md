@@ -65,7 +65,8 @@ curl https://your-domain/api/conversations?folder=open \
 | `PATCH /api/conversations/:id` | `status`, `assigneeId`, `subject`, `addTags`, `removeTags`, `snoozedUntil`, `mailboxId` |
 | `POST /api/conversations/:id/reply` | `bodyHtml`, `status`, `cc`, `bcc`, `attachmentIds`, `assigneeId` (a user id, or `null` for unassigned; left out, the mailbox's "after sending" setting decides) |
 | `POST /api/conversations/:id/note` | `bodyHtml`, `attachmentIds` |
-| `PATCH /api/threads/:id` | Edit a note you wrote: `bodyHtml`. It keeps its place and files. Other people's notes and customer messages are refused |
+| `PATCH /api/threads/:id` | Edit a note you wrote: `bodyHtml`. It keeps its place and files, and shows as edited. Other people's notes and customer messages are refused |
+| `POST /api/threads/:id/reactions` | React to a note: `emoji`. Sending the same emoji again takes it back. Answers `{ "on": true }` or `false` |
 | `PUT /api/conversations/:id/draft` | Your draft: `kind` (`reply` or `note`), `bodyHtml`, `attachmentIds` (left out, the draft's files stay) |
 | `POST /api/conversations/:id/merge` | `intoId` |
 | `GET /api/customers`, `GET/PATCH /api/customers/:id` | Customers |

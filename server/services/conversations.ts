@@ -1,4 +1,4 @@
-import { all, allNamed, get, run, tx, now, parseJson, getSetting, setSetting } from '../db.ts'
+import { all, allNamed, get, run, tx, now, parseJson, getSetting, setSetting, type SqlValue } from '../db.ts'
 import { publish, visitorOnline } from '../events.ts'
 import { avatarUrl } from '../auth.ts'
 import { mailboxFilterSql, memberOf } from './access.ts'
@@ -214,7 +214,12 @@ export function getSummary(id: number): ConversationSummary {
   return serialize(row(id), tagsFor([id]).get(id))
 }
 
-function serializeThread(t: any, attachments: any[]) {
+export interface Reaction {
+  emoji: string
+  users: { id: number; name: string }[]
+}
+
+function serializeThread(t: any, attachments: any[], reactions: Reaction[] = []) {
   return {
     id: t.id as number,
     type: t.type as 'customer' | 'reply' | 'note' | 'event',
@@ -230,9 +235,12 @@ function serializeThread(t: any, attachments: any[]) {
     to: parseJson<string[]>(t.to_addrs, []),
     cc: parseJson<string[]>(t.cc, []),
     bcc: parseJson<string[]>(t.bcc, []),
-    state: t.state as 'sent' | 'sending' | 'failed' | 'scheduled',
+    // A reply in its undo window is on its way, as far as anyone looking can tell.
+    state: (t.state === 'scheduled' && undoOf(t.event) ? 'sending' : t.state) as 'sent' | 'sending' | 'failed' | 'scheduled',
+    /** Until when its writer can still take a reply back (Undo, right after sending). Null otherwise. */
+    undoUntil: t.state === 'scheduled' ? (undoOf(t.event)?.until ?? null) : null,
     /** When a scheduled reply goes out. Null once it is sent, or while it is held back. */
-    sendAt: (t.send_at as number | null) ?? null,
+    sendAt: t.state === 'scheduled' && undoOf(t.event) ? null : ((t.send_at as number | null) ?? null),
     error: t.error as string | null,
     event: parseJson<Record<string, any> | null>(t.event, null),
     via: t.via as string,
@@ -246,6 +254,10 @@ function serializeThread(t: any, attachments: any[]) {
     openLastAt: (t.open_last_at as number | null) ?? null,
     openLastAgent: (t.open_last_agent as string | null) ?? null,
     createdAt: t.created_at as number,
+    /** When a note was last edited. Null if it never was. */
+    editedAt: (t.edited_at as number | null) ?? null,
+    /** Emoji reactions on a note, in the order each emoji was first used. */
+    reactions,
     attachments: attachments.map((a) => ({
       id: a.id as number,
       filename: a.filename as string,
@@ -269,7 +281,26 @@ export function listThreads(conversationId: number): ThreadView[] {
     'SELECT a.* FROM attachments a JOIN threads t ON t.id = a.thread_id WHERE t.conversation_id = ? ORDER BY a.id',
     conversationId,
   )
-  return threads.map((t) => serializeThread(t, attachments.filter((a) => a.thread_id === t.id)))
+  const reactions = reactionsFor(conversationId)
+  return threads.map((t) => serializeThread(t, attachments.filter((a) => a.thread_id === t.id), reactions.get(t.id)))
+}
+
+/** Reactions on a conversation's notes, by thread. */
+function reactionsFor(conversationId: number): Map<number, Reaction[]> {
+  const rows = all<{ thread_id: number; emoji: string; user_id: number; name: string }>(
+    `SELECT r.thread_id, r.emoji, r.user_id, u.name FROM reactions r JOIN threads t ON t.id = r.thread_id JOIN users u ON u.id = r.user_id
+     WHERE t.conversation_id = ? ORDER BY r.created_at, r.rowid`,
+    conversationId,
+  )
+  const out = new Map<number, Reaction[]>()
+  for (const r of rows) {
+    const list = out.get(r.thread_id) ?? []
+    let entry = list.find((e) => e.emoji === r.emoji)
+    if (!entry) list.push((entry = { emoji: r.emoji, users: [] }))
+    entry.users.push({ id: r.user_id, name: r.name })
+    out.set(r.thread_id, list)
+  }
+  return out
 }
 
 export function getConversation(id: number, opts: { userId?: number; mailboxIds?: number[] | null } = {}) {
@@ -324,15 +355,15 @@ function announceAgentThread(event: 'conversation.agent_replied' | 'conversation
   emitAppEvent(event, conversationId, { threadId, historical })
 }
 
-function addEvent(conversationId: number, actor: Actor, event: Record<string, unknown>, at = now()) {
-  run(
+function addEvent(conversationId: number, actor: Actor, event: Record<string, unknown>, at = now()): number {
+  return run(
     `INSERT INTO threads (conversation_id, type, user_id, event, via, created_at) VALUES (?, 'event', ?, ?, ?, ?)`,
     conversationId,
     actor.userId,
     JSON.stringify(event),
     actor.via,
     at,
-  )
+  ).id
 }
 
 /**
@@ -484,7 +515,23 @@ export interface ReplyInput {
   ifNoReply?: boolean
   /** Who the conversation goes to once this is sent (null: nobody). Left out, the mailbox's setting decides. */
   assigneeId?: number | null
+  /** Hold the email for a few seconds, so its writer can take it back (Undo, as in Help Scout). */
+  undoable?: boolean
 }
+
+/** How long a reply waits before it goes out, so it can be taken back. The app's Undo shows for less than this. */
+export const UNDO_MS = 10_000
+
+/** What a reply in its undo window remembers, to put the conversation back as it was. */
+interface UndoState {
+  until: number
+  /** The conversation's fields before the reply changed them. */
+  prev: Record<string, SqlValue>
+  /** Timeline events the reply added (an assignment). */
+  events: number[]
+}
+const UNDO_FIELDS = ['status', 'assignee_id', 'snoozed_until', 'cc', 'preview', 'note_preview', 'last_agent_at', 'first_reply_at', 'waiting_since', 'closed_at', 'closed_by', 'updated_at'] as const
+const undoOf = (event: unknown): UndoState | null => parseJson<{ undo?: UndoState } | null>(event as string, null)?.undo ?? null
 
 /** A conversation can only be assigned to someone who can see its mailbox. */
 function assertMember(userId: number, mailboxId: number) {
@@ -542,6 +589,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
   if (sendAt && sendAt > now() + 366 * 86_400_000) throw new AppError('Choose a time within the next year.')
   let mailboxId = 0
   let inChat = false
+  let held = false
   const after: { assigned?: { from: number | null; to: number | null; toName: string | null } } = {}
   const threadId = tx(() => {
     const conv = get<any>('SELECT c.*, cu.email AS customer_email FROM conversations c JOIN customers cu ON cu.id = c.customer_id WHERE c.id = ?', conversationId)
@@ -558,6 +606,9 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     // A live chat reply reaches the visitor in the widget while they are there. Once they have left, it goes by email.
     const channel = conv.source === 'chat' && !sendAt ? (visitorOnline(conversationId) ? 'chat' : 'email') : null
     if (channel === 'chat') inChat = true
+    // A live chat answer goes at once; an email can wait a moment to be taken back.
+    held = !!input.undoable && !sendAt && !inChat && !input.skipDelivery && actor.via !== 'auto' && !!actor.userId
+    const undo: UndoState | null = held ? { until: at + UNDO_MS, prev: Object.fromEntries(UNDO_FIELDS.map((f) => [f, conv[f] ?? null])), events: [] } : null
     const { id } = run(
       `INSERT INTO threads (conversation_id, type, user_id, body_html, body_text, from_addr, to_addrs, cc, bcc, message_id, in_reply_to, refs, state, event, via, created_at, send_at)
        VALUES (?, 'reply', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -572,18 +623,21 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       newMessageId(mailbox.email),
       last?.message_id ?? null,
       refs,
-      sendAt ? 'scheduled' : input.skipDelivery || config.mailDisabled || channel === 'chat' ? 'sent' : 'sending',
+      sendAt || undo ? 'scheduled' : input.skipDelivery || config.mailDisabled || channel === 'chat' ? 'sent' : 'sending',
       JSON.stringify(sendAt ? { status, ifNoReply: !!input.ifNoReply } : channel ? { status, channel } : { status }),
       actor.via,
       at,
-      sendAt,
+      sendAt ?? (undo ? undo.until : null),
     )
     attach(id, conversationId, input.attachmentIds, bodyHtml)
     if (assignee !== conv.assignee_id && actor.via !== 'auto') {
       // Taking an unassigned conversation by answering it is routine; any other change is shown in the timeline.
       const quiet = conv.assignee_id === null && assignee === actor.userId
       const name = assignee === null ? null : (get<{ name: string }>('SELECT name FROM users WHERE id = ?', assignee)?.name ?? null)
-      if (!quiet) addEvent(conversationId, actor, { kind: 'assigned', to: assignee, toName: name }, at)
+      if (!quiet) {
+        const eventId = addEvent(conversationId, actor, { kind: 'assigned', to: assignee, toName: name }, at)
+        undo?.events.push(eventId)
+      }
       after.assigned = { from: conv.assignee_id, to: assignee, toName: name }
     }
     if (sendAt) {
@@ -599,6 +653,7 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
       return id
     }
     markReplied(conversationId, { status, assignee, cc, text, at, closedBy: actor.userId })
+    if (undo) run('UPDATE threads SET event = ? WHERE id = ?', JSON.stringify({ status, undo }), id)
     if (actor.userId) run('DELETE FROM drafts WHERE conversation_id = ? AND user_id = ?', conversationId, actor.userId)
     reindex(conversationId)
     return id
@@ -613,6 +668,13 @@ export function addReply(conversationId: number, input: ReplyInput, actor: Actor
     return threadId
   }
   touch(conversationId, mailboxId, 'reply', actor)
+  if (held) {
+    // Apps hear of it, and the email goes, once the undo window has passed. The timer is the quick way;
+    // the regular check (or the alarm, on Cloudflare) sends it if this process is gone by then.
+    const timer = setTimeout(() => void dispatchScheduled().catch((err) => console.error('[undo send]', err)), UNDO_MS + 100) as { unref?: () => void }
+    timer.unref?.()
+    return threadId
+  }
   announceAgentThread('conversation.agent_replied', conversationId, threadId, input.createdAt !== undefined)
   if (!input.skipDelivery && !config.mailDisabled && !inChat) queueDelivery(threadId)
   return threadId
@@ -639,6 +701,11 @@ function releaseScheduled(threadId: number, actor: Actor): boolean {
     const at = now()
     const event = parseJson<{ status?: Status }>(t.event, {})
     const status: Status = event.status && STATUSES.includes(event.status) ? event.status : 'closed'
+    if (undoOf(t.event)) {
+      // The undo window passed: the conversation already shows the reply, so only the email is left to send.
+      run(`UPDATE threads SET state = ?, send_at = NULL, event = ? WHERE id = ?`, config.mailDisabled ? 'sent' : 'sending', JSON.stringify({ status }), threadId)
+      return
+    }
     // Answer the newest message, which may have arrived after this reply was written.
     const last = lastMailOf(conv.id)
     run(
@@ -672,6 +739,31 @@ export function sendScheduledNow(threadId: number, actor: Actor) {
  */
 export function cancelScheduled(threadId: number, actor: Actor): string[] {
   const t = scheduledThread(threadId)
+  if (undoOf(t.event)) return undoReply(threadId, actor)
+  return takeBack(t, actor)
+}
+
+/**
+ * Undo a reply just sent, before its email goes: the conversation is put back as it was (status, assignee,
+ * timers), and the text returns to the reply box. Only its writer can, and only for a few seconds.
+ * Returns the storage keys of removed files, for the caller to delete.
+ */
+export function undoReply(threadId: number, actor: Actor): string[] {
+  const t = get<any>(`SELECT * FROM threads WHERE id = ? AND type = 'reply'`, threadId)
+  if (!t) throw new AppError('Reply not found.', 404)
+  const undo = t.state === 'scheduled' ? undoOf(t.event) : null
+  if (!undo) throw new AppError('Too late to undo: the reply has been sent.')
+  if (t.user_id !== actor.userId) throw new AppError('Only the person who sent this reply can undo it.', 403)
+  return takeBack(t, actor, () => {
+    const fields = UNDO_FIELDS.filter((f) => f in undo.prev)
+    run(`UPDATE conversations SET ${fields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, ...fields.map((f) => undo.prev[f]), t.conversation_id)
+    for (const id of undo.events) run(`DELETE FROM threads WHERE id = ? AND type = 'event'`, id)
+  })
+}
+
+/** Remove a reply that has not gone out, and give its text and files back to its writer as a draft. */
+function takeBack(t: any, actor: Actor, restore?: () => void): string[] {
+  const threadId = t.id as number
   const conv = get<any>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)
   const removed = tx(() => {
     const files = all<{ id: number; inline: number; storage_key: string }>('SELECT id, inline, storage_key FROM attachments WHERE thread_id = ?', threadId)
@@ -689,6 +781,7 @@ export function cancelScheduled(threadId: number, actor: Actor): string[] {
     if (drafted) run('UPDATE attachments SET thread_id = NULL, inline = 0, uploaded_by = ? WHERE thread_id = ?', t.user_id, threadId)
     run('DELETE FROM threads WHERE id = ?', threadId)
     run('UPDATE conversations SET thread_count = MAX(0, thread_count - 1), updated_at = ? WHERE id = ?', now(), t.conversation_id)
+    restore?.()
     reindex(t.conversation_id)
     return drafted ? [] : files.map((f) => f.storage_key)
   })
@@ -814,6 +907,8 @@ function recordMentions(conversationId: number, threadId: number, text: string, 
     }
   }
   found.delete(authorId ?? -1)
+  // An edited note tells only the teammates it did not mention before.
+  for (const { user_id } of all<{ user_id: number }>('SELECT user_id FROM mentions WHERE thread_id = ?', threadId)) found.delete(user_id)
   for (const userId of found) run('INSERT INTO mentions (thread_id, conversation_id, user_id, created_at) VALUES (?, ?, ?, ?)', threadId, conversationId, userId, now())
   return [...found]
 }
@@ -1084,6 +1179,7 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
   if (!isAdmin && t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note, or an admin, can delete it.', 403)
   const files = all<{ storage_key: string }>('SELECT storage_key FROM attachments WHERE thread_id = ?', threadId).map((f) => f.storage_key)
   const mailboxId = tx(() => {
+    run('DELETE FROM reactions WHERE thread_id = ?', threadId)
     run('DELETE FROM threads WHERE id = ?', threadId) // mentions and attachments go with it
     // The inbox shows the note before it, if nothing has been said since. Events (assigned, closed…) do not count.
     const newest = get<{ type: string; body_text: string }>(`SELECT type, body_text FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply', 'note') ORDER BY created_at DESC, id DESC LIMIT 1`, t.conversation_id)
@@ -1102,29 +1198,54 @@ export function deleteNote(threadId: number, actor: Actor, isAdmin: boolean): st
 }
 
 /**
- * Rewrite an internal note. Only its author may, so an integration can keep one running summary up to date.
- * Only the text changes: the note keeps its place and its files.
+ * Change the text of an internal note. Only its author may: the words are theirs.
+ * Teammates newly @mentioned are told; files attached to it stay.
  */
-export function editNote(threadId: number, input: { bodyHtml: string }, actor: Actor): number {
-  const bodyHtml = cleanHtml(input.bodyHtml)
-  const text = htmlToText(bodyHtml)
+export function editNote(threadId: number, bodyHtml: string, actor: Actor) {
   const t = get<{ conversation_id: number; type: string; user_id: number | null }>('SELECT conversation_id, type, user_id FROM threads WHERE id = ?', threadId)
   if (!t) throw new AppError('Note not found.', 404)
   if (t.type !== 'note') throw new AppError('Only notes can be edited. Messages to and from the customer stay as they were sent.')
-  if (actor.userId === null || t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note can edit it.', 403)
-  const hasFiles = !!get('SELECT 1 FROM attachments WHERE thread_id = ?', threadId)
-  if (blank(bodyHtml, text) && !hasFiles) throw new AppError('Write a note before saving.')
+  if (!actor.userId || t.user_id !== actor.userId) throw new AppError('Only the person who wrote this note can edit it.', 403)
+  const html = cleanHtml(bodyHtml)
+  const text = htmlToText(html)
+  const files = get<{ n: number }>('SELECT COUNT(*) AS n FROM attachments WHERE thread_id = ? AND inline = 0', threadId)?.n ?? 0
+  if (blank(html, text) && !files) throw new AppError('A note needs some text. To remove it, delete the note.')
   const mailboxId = tx(() => {
-    run('UPDATE threads SET body_html = ?, body_text = ? WHERE id = ?', bodyHtml, text, threadId)
-    // The inbox shows the newest note, if nothing has been said since.
+    run('UPDATE threads SET body_html = ?, body_text = ?, edited_at = ? WHERE id = ?', html, text, now(), threadId)
+    // Images pasted while editing belong to the note now.
+    attach(threadId, t.conversation_id, undefined, html)
+    // The inbox shows the note's new text, if it is still the newest thing said.
     const newest = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type IN ('customer', 'reply', 'note') ORDER BY created_at DESC, id DESC LIMIT 1`, t.conversation_id)
     if (newest?.id === threadId) run('UPDATE conversations SET note_preview = ? WHERE id = ?', previewOf(text) || 'Attached a file', t.conversation_id)
-    run('UPDATE conversations SET updated_at = ? WHERE id = ?', now(), t.conversation_id)
     reindex(t.conversation_id)
     return get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)!.mailbox_id
   })
+  const mentioned = recordMentions(t.conversation_id, threadId, text, actor.userId)
   touch(t.conversation_id, mailboxId, 'updated', actor)
-  return t.conversation_id
+  for (const userId of mentioned) notifyMentioned(t.conversation_id, userId, actor.userId)
+}
+
+/** One emoji: a pictograph, perhaps with skin tone, joiners or a flag's letters. Not text. */
+const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\uFE0F|\u200D|\u20E3|[#*0-9])+$/u
+
+/** Add the teammate's reaction to a note, or take it back if it is there. Returns whether it is now on. */
+export function toggleReaction(threadId: number, emoji: string, actor: Actor): boolean {
+  const value = String(emoji ?? '').trim()
+  if (!value || value.length > 16 || !EMOJI.test(value) || !/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value)) throw new AppError('Pick an emoji to react with.')
+  if (!actor.userId) throw new AppError('Only a teammate can react to a note.', 403)
+  const t = get<{ conversation_id: number; type: string }>('SELECT conversation_id, type FROM threads WHERE id = ?', threadId)
+  if (!t) throw new AppError('Note not found.', 404)
+  if (t.type !== 'note') throw new AppError('You can react to notes only.')
+  const removed = run('DELETE FROM reactions WHERE thread_id = ? AND user_id = ? AND emoji = ?', threadId, actor.userId, value).changes > 0
+  if (!removed) {
+    const kinds = get<{ n: number }>('SELECT COUNT(DISTINCT emoji) AS n FROM reactions WHERE thread_id = ?', threadId)?.n ?? 0
+    const known = get('SELECT 1 FROM reactions WHERE thread_id = ? AND emoji = ?', threadId, value)
+    if (!known && kinds >= 20) throw new AppError('This note has as many different reactions as it can take.')
+    run('INSERT INTO reactions (thread_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)', threadId, actor.userId, value, now())
+  }
+  const mailboxId = get<{ mailbox_id: number }>('SELECT mailbox_id FROM conversations WHERE id = ?', t.conversation_id)!.mailbox_id
+  touch(t.conversation_id, mailboxId, 'updated', actor)
+  return !removed
 }
 
 /** Retry a reply that failed to send. */

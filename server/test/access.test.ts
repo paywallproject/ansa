@@ -447,26 +447,82 @@ test('a note can be deleted by its author or an admin, and only a note', async (
   assert.equal(count(), before - 2)
 })
 
-test('a note can be edited by its author only, in place', async () => {
+test('a reply can be undone for a few seconds, which puts the conversation back as it was', async () => {
+  const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'undo@example.com', subject: 'Undo', bodyHtml: '<p>Help?</p>', kind: 'customer' }, { userId: null, via: 'email' })
+  const state = () => get<any>('SELECT status, assignee_id, thread_count, preview, waiting_since, first_reply_at FROM conversations WHERE id = ?', conv.id)
+  const before = state()
+  const sent = await call(agentToken, 'POST', `/conversations/${conv.id}/reply`, { bodyHtml: '<p>Oops, wrong customer</p>', status: 'closed', undoable: true, assigneeId: adminId })
+  assert.equal(sent.status, 201)
+  const threadId = sent.data.threadId
+  // The conversation shows it at once; the email waits.
+  assert.equal(state().status, 'closed')
+  assert.equal(state().assignee_id, adminId)
+  const shown = sent.data.conversation.threads.find((t: any) => t.id === threadId)
+  assert.equal(shown.state, 'sending')
+  assert.equal(typeof shown.undoUntil, 'number')
+  assert.equal(get<any>('SELECT state FROM threads WHERE id = ?', threadId).state, 'scheduled')
+
+  // Only its writer can undo it.
+  assert.equal((await call(adminToken, 'POST', `/threads/${threadId}/undo`)).status, 403)
+  assert.equal((await call(agentToken, 'POST', `/threads/${threadId}/undo`)).status, 200)
+  assert.deepEqual(state(), before)
+  assert.equal(get('SELECT 1 FROM threads WHERE id = ?', threadId), undefined)
+  // The assignment it made is gone from the timeline, and the text is back in the writer's draft.
+  assert.equal(get(`SELECT 1 FROM threads WHERE conversation_id = ? AND type = 'event'`, conv.id), undefined)
+  assert.match(get<any>('SELECT body_html FROM drafts WHERE conversation_id = ? AND user_id = ?', conv.id, agentId).body_html, /wrong customer/)
+
+  // Once the window has passed, it goes out like any reply, and can no longer be undone.
+  const again = (await call(agentToken, 'POST', `/conversations/${conv.id}/reply`, { bodyHtml: '<p>The right answer</p>', status: 'closed', undoable: true })).data.threadId
+  run('UPDATE threads SET send_at = ? WHERE id = ?', Date.now() - 1, again)
+  await conversations.dispatchScheduled()
+  const out = get<any>('SELECT state, event FROM threads WHERE id = ?', again)
+  assert.notEqual(out.state, 'scheduled')
+  assert.equal(JSON.parse(out.event).undo, undefined)
+  assert.equal(state().status, 'closed')
+  assert.equal(state().thread_count, before.thread_count + 1)
+  assert.equal((await call(agentToken, 'POST', `/threads/${again}/undo`)).status, 400)
+})
+
+test('a note can be edited by its author only, and reacted to with an emoji', async () => {
   const conv = conversations.createConversation({ mailboxId: sales, customerEmail: 'edits@example.com', subject: 'Edits', bodyHtml: '<p>Hi</p>', kind: 'customer' }, { userId: null, via: 'email' })
-  const mine = conversations.addNote(conv.id, { bodyHtml: '<p>First take</p>' }, { userId: agentId, via: 'api' })
-  const theirs = conversations.addNote(conv.id, { bodyHtml: '<p>Admin note</p>' }, { userId: adminId, via: 'web' })
+  const note = conversations.addNote(conv.id, { bodyHtml: '<p>Frist draft</p>' }, { userId: agentId, via: 'web' })
   const customerThread = get<{ id: number }>(`SELECT id FROM threads WHERE conversation_id = ? AND type = 'customer'`, conv.id)!.id
+  const thread = async () => (await call(agentToken, 'GET', `/conversations/${conv.id}`)).data.conversation.threads.find((t: any) => t.id === note)
 
-  assert.equal((await call(agentToken, 'PATCH', `/threads/${theirs}`, { bodyHtml: '<p>x</p>' })).status, 403)
+  // Only the author, not even an admin; never a customer message; never blank.
+  assert.equal((await call(adminToken, 'PATCH', `/threads/${note}`, { bodyHtml: '<p>Mine now</p>' })).status, 403)
   assert.equal((await call(adminToken, 'PATCH', `/threads/${customerThread}`, { bodyHtml: '<p>x</p>' })).status, 400)
-  assert.equal((await call(agentToken, 'PATCH', `/threads/${mine}`, { bodyHtml: '<p> </p>' })).status, 400)
+  assert.equal((await call(agentToken, 'PATCH', `/threads/${note}`, { bodyHtml: '<p> </p>' })).status, 400)
+  assert.equal((await thread()).editedAt, null)
 
-  const res = await call(agentToken, 'PATCH', `/threads/${mine}`, { bodyHtml: '<p>Summary</p><p>Second line</p>' })
-  assert.equal(res.status, 200)
-  const ids = res.data.conversation.threads.map((t: any) => t.id)
-  assert.ok(ids.indexOf(mine) < ids.indexOf(theirs), 'keeps its place')
-  const edited = res.data.conversation.threads.find((t: any) => t.id === mine)
-  assert.match(edited.bodyHtml, /Summary/)
-  assert.doesNotMatch(edited.bodyHtml, /First take/)
-  assert.equal(res.data.conversation.threads.filter((t: any) => t.type === 'note').length, 2)
-  // The inbox keeps showing the newest note, which is the admin's.
-  assert.equal(get<{ note_preview: string }>('SELECT note_preview FROM conversations WHERE id = ?', conv.id)!.note_preview, 'Admin note')
+  assert.equal((await call(agentToken, 'PATCH', `/threads/${note}`, { bodyHtml: '<p>First draft</p>' })).status, 200)
+  const edited = await thread()
+  assert.match(edited.bodyHtml, /First draft/)
+  assert.equal(typeof edited.editedAt, 'number')
+  // The inbox and search follow the new text.
+  assert.equal(get<{ note_preview: string }>('SELECT note_preview FROM conversations WHERE id = ?', conv.id)!.note_preview, 'First draft')
+
+  // Reactions: one of each emoji per teammate, and tapping again takes it back.
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍' })).data.on, true)
+  assert.equal((await call(adminToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍' })).data.on, true)
+  assert.equal((await call(adminToken, 'POST', `/threads/${note}/reactions`, { emoji: '🎉' })).data.on, true)
+  let reactions = (await thread()).reactions
+  assert.deepEqual(reactions.map((r: any) => [r.emoji, r.users.length]), [['👍', 2], ['🎉', 1]])
+  assert.equal((await call(adminToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍' })).data.on, false)
+  reactions = (await thread()).reactions
+  assert.deepEqual(reactions.map((r: any) => [r.emoji, r.users.map((u: any) => u.id)]), [['👍', [agentId]], ['🎉', [adminId]]])
+  // Text is not an emoji, and customer messages take no reactions.
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: 'lol' })).status, 400)
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '<b>' })).status, 400)
+  assert.equal((await call(agentToken, 'POST', `/threads/${customerThread}/reactions`, { emoji: '👍' })).status, 400)
+  // Flags, skin tones and joined emoji are fine.
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '👍🏽' })).status, 200)
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '🇹🇭' })).status, 200)
+  assert.equal((await call(agentToken, 'POST', `/threads/${note}/reactions`, { emoji: '❤️' })).status, 200)
+
+  // Deleting the note takes its reactions with it.
+  assert.equal((await call(agentToken, 'DELETE', `/threads/${note}`)).status, 200)
+  assert.equal(get('SELECT 1 FROM reactions WHERE thread_id = ?', note), undefined)
 })
 
 test('the inbox shows the newest note until someone writes again, and the note before it when it is deleted', async () => {

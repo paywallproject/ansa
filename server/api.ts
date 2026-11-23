@@ -37,6 +37,8 @@ import {
   cancelScheduled,
   deleteNote,
   editNote,
+  toggleReaction,
+  undoReply,
   saveDraft,
   updateConversation,
   type Actor,
@@ -723,6 +725,7 @@ api.post('/conversations/:id/reply', async (c) => {
       sendAt: Number.isFinite(Number(data.sendAt)) && Number(data.sendAt) > 0 ? Number(data.sendAt) : undefined,
       ifNoReply: data.ifNoReply === true,
       assigneeId: data.assigneeId === undefined ? undefined : data.assigneeId === null ? null : int(data.assigneeId),
+      undoable: data.undoable === true,
     },
     actorOf(c),
   )
@@ -819,20 +822,37 @@ api.get('/threads/:id/original.eml', (c) => {
   })
 })
 
-// Edit a note: only its author.
-api.patch('/threads/:id', async (c) => {
-  const id = idParam(c.req.param('id'))
-  assertThread(c.get('user'), id)
-  const conversationId = editNote(id, { bodyHtml: String((await body(c)).bodyHtml ?? '') }, actorOf(c))
-  return c.json({ conversation: conversationFor(c, conversationId) })
-})
-
 // Delete a note: its author or an admin.
 api.delete('/threads/:id', (c) => {
   const id = idParam(c.req.param('id'))
   assertThread(c.get('user'), id)
   removeFiles(deleteNote(id, actorOf(c), c.get('user').role === 'admin'))
   return c.json({ ok: true })
+})
+
+// Undo a reply in the seconds before its email goes. The text returns to the writer's draft.
+api.post('/threads/:id/undo', (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  removeFiles(undoReply(id, actorOf(c)))
+  return c.json({ ok: true })
+})
+
+// Edit a note: its author only.
+api.patch('/threads/:id', async (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  const data = await body(c)
+  editNote(id, String(data.bodyHtml ?? ''), actorOf(c))
+  return c.json({ ok: true })
+})
+
+// React to a note with an emoji, or take the reaction back.
+api.post('/threads/:id/reactions', async (c) => {
+  const id = idParam(c.req.param('id'))
+  assertThread(c.get('user'), id)
+  const data = await body(c)
+  return c.json({ on: toggleReaction(id, String(data.emoji ?? ''), actorOf(c)) })
 })
 
 api.post('/threads/:id/retry', (c) => {

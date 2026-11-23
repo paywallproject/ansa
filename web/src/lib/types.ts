@@ -177,6 +177,8 @@ export interface Thread {
   bcc: string[]
   state: 'sent' | 'sending' | 'failed' | 'scheduled'
   sendAt: number | null
+  /** Until when its writer can still take a reply back with Undo. */
+  undoUntil: number | null
   error: string | null
   event: Record<string, any> | null
   via: string
@@ -189,7 +191,16 @@ export interface Thread {
   openLastAt: number | null
   openLastAgent: string | null
   createdAt: number
+  /** When a note was last edited. Null if it never was. */
+  editedAt: number | null
+  /** Emoji reactions on a note, each with the teammates who chose it. */
+  reactions: Reaction[]
   attachments: Attachment[]
+}
+
+export interface Reaction {
+  emoji: string
+  users: { id: number; name: string }[]
 }
 
 export interface Conversation extends Omit<ConversationSummary, 'customer'> {
