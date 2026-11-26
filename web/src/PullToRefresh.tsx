@@ -8,6 +8,8 @@ const MAX = 120
 /** The gap held open under the header while it refreshes. */
 const HOLD = 56
 const SPINNER = 28
+/** The longest a refresh holds the list down, in milliseconds. */
+const REFRESH_LIMIT = 8000
 const EASE = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'
 
 /** The nearest element that scrolls vertically and is scrolled away from its top, if any. */
@@ -132,7 +134,9 @@ export function PullToRefresh() {
       set(HOLD, true)
       const started = Date.now()
       try {
-        await client.invalidateQueries({ refetchType: 'active' })
+        // A request that never answers (a phone waking with no network) must not hold the list down for good,
+        // with every later pull ignored.
+        await Promise.race([client.invalidateQueries({ refetchType: 'active' }), new Promise((resolve) => setTimeout(resolve, REFRESH_LIMIT))])
       } finally {
         // Long enough to see that something happened.
         await new Promise((resolve) => setTimeout(resolve, Math.max(0, 600 - (Date.now() - started))))
