@@ -490,7 +490,7 @@ export function Shell() {
           {current && drawer && (
             // The backdrop and the drawer reach every edge of the screen, the home bar included; the drawer's
             // own padding keeps its contents clear of the clock and the home bar.
-            <div className="animate-fade fixed inset-x-0 top-0 z-30 h-[100lvh] bg-black/40 md:hidden" onClick={() => setDrawer(false)}>
+            <div className="animate-fade fixed inset-x-0 top-0 z-30 h-[100lvh] bg-black/40 md:hidden" role="dialog" aria-modal="true" aria-label="Menu" onClick={() => setDrawer(false)}>
               <aside className="safe-pad-y flex h-full w-[84vw] max-w-[320px] flex-col bg-canvas shadow-pop" onClick={(e) => e.stopPropagation()}>
                 <MobileDrawer current={current} mailboxes={list} onNavigate={() => setDrawer(false)} />
               </aside>
